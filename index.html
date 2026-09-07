@@ -1,0 +1,1225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Brisbane Roar — Performance Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg:#f2f3f5; --surface:#fff; --surface-alt:#f8f9fa;
+    --border:#e4e6ea; --text-primary:#0d1117; --text-secondary:#444c56; --text-muted:#7a8290;
+    --accent:#f26522; --accent-light:#fdecdf;
+    --c-exceeds-bg:#f0fdf4; --c-exceeds-text:#14532d;
+    --c-meets-bg:#eff6ff;   --c-meets-text:#1e3a5f;
+    --c-near-bg:#fefce8;    --c-near-text:#854d0e;
+    --c-below-bg:#fff7ed;   --c-below-text:#9a3412;
+    --c-priority-bg:#fef2f2;--c-priority-text:#7f1d1d;
+    --radius:8px; --radius-lg:12px;
+  }
+  body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif; background:var(--bg); color:var(--text-primary); font-size:13px; line-height:1.5; min-height:100vh; }
+  .app { display:grid; grid-template-columns:250px 1fr; min-height:100vh; }
+  .sidebar { background:var(--surface); border-right:1px solid var(--border); display:flex; flex-direction:column; position:sticky; top:0; height:100vh; overflow:hidden; }
+  .sb-brand { padding:16px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:10px; }
+  .sb-brand svg { width:34px; height:auto; flex-shrink:0; }
+  .sb-brand h1 { font-size:14px; font-weight:800; letter-spacing:.01em; }
+  .sb-brand p  { font-size:9.5px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.08em; margin-top:1px; }
+  .mode-toggle { display:flex; gap:4px; padding:10px 12px; border-bottom:1px solid var(--border); }
+  .mode-toggle button { flex:1; border:1px solid var(--border); background:var(--surface-alt); padding:7px 0; border-radius:6px; font-size:12px; font-weight:700; color:var(--text-muted); cursor:pointer; }
+  .mode-toggle button.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .sb-search { padding:10px 12px; border-bottom:1px solid var(--border); }
+  .sb-search input { width:100%; padding:6px 10px; font-size:12px; background:var(--surface-alt); border:1px solid var(--border); border-radius:6px; color:var(--text-primary); outline:none; }
+  .sb-search input:focus { border-color:var(--accent); }
+  .gender-filter { display:flex; gap:4px; padding:8px 12px; border-bottom:1px solid var(--border); }
+  .gender-filter button { flex:1; border:1px solid var(--border); background:var(--surface-alt); padding:5px 0; border-radius:6px; font-size:11px; font-weight:600; color:var(--text-muted); cursor:pointer; }
+  .gender-filter button.active { background:var(--accent-light); color:var(--accent); border-color:var(--accent); }
+  .alist { flex:1; overflow-y:auto; padding:6px 0; }
+  .aitem { display:flex; align-items:center; gap:10px; padding:8px 14px; cursor:pointer; border-left:2px solid transparent; }
+  .aitem:hover { background:var(--surface-alt); }
+  .aitem.active { background:var(--accent-light); border-left-color:var(--accent); }
+  .av { width:32px; height:32px; border-radius:50%; background:var(--accent-light); color:var(--accent); display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; flex-shrink:0; }
+  .aitem.active .av { background:var(--accent); color:#fff; }
+  .ameta { flex:1; min-width:0; }
+  .aname { font-size:13px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .apos  { font-size:11px; color:var(--text-muted); }
+  .sdot  { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+  .settings-bar { display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-top:1px solid var(--border); background:var(--surface-alt); gap:6px; }
+  .settings-bar span { font-size:11px; color:var(--text-muted); }
+  .btn { display:inline-flex; align-items:center; gap:6px; padding:8px 16px; background:var(--accent); color:#fff; border:none; border-radius:var(--radius); font-size:13px; font-weight:600; cursor:pointer; margin-top:12px; }
+  .btn:hover { background:#d1550f; }
+  .btn-sm { padding:5px 12px; font-size:12px; background:var(--surface-alt); color:var(--text-secondary); border:1px solid var(--border); border-radius:var(--radius); cursor:pointer; font-weight:500; }
+  .btn-sm:hover { background:var(--border); }
+  .main { padding:24px 28px; display:flex; flex-direction:column; gap:18px; }
+  .state-screen { display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:60vh; gap:12px; text-align:center; }
+  .state-screen h2 { font-size:16px; font-weight:600; color:var(--text-secondary); }
+  .state-screen p  { font-size:13px; color:var(--text-muted); max-width:480px; line-height:1.6; }
+  .config-box { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg); padding:24px 28px; max-width:580px; width:100%; text-align:left; }
+  .config-box h3 { font-size:15px; font-weight:700; margin-bottom:6px; }
+  .config-box p  { font-size:12px; color:var(--text-secondary); margin-bottom:16px; line-height:1.6; }
+  .config-box label { font-size:12px; font-weight:600; display:block; margin-bottom:4px; margin-top:12px; }
+  .config-box input { width:100%; padding:8px 12px; font-size:13px; border:1px solid var(--border); border-radius:var(--radius); outline:none; color:var(--text-primary); }
+  .hint { font-size:11px; color:var(--text-muted); margin-top:8px; line-height:1.6; }
+  .profile-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg); padding:18px 20px; display:flex; gap:16px; align-items:flex-start; }
+  .pav { width:52px; height:52px; border-radius:50%; background:var(--accent-light); color:var(--accent); display:flex; align-items:center; justify-content:center; font-size:17px; font-weight:700; flex-shrink:0; }
+  .pinfo h2    { font-size:20px; font-weight:700; letter-spacing:-.02em; }
+  .pinfo .pmeta { font-size:12px; color:var(--text-secondary); margin-top:3px; }
+  .ptags { display:flex; gap:6px; margin-top:10px; flex-wrap:wrap; }
+  .ptag  { font-size:11px; padding:3px 9px; border-radius:20px; background:var(--surface-alt); border:1px solid var(--border); color:var(--text-secondary); }
+  .ptag.inj { background:#fffbeb; border-color:#fbbf24; color:#92400e; }
+  .cat-status-heading { font-size:10.5px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.08em; font-weight:700; padding-left:2px; }
+  .cat-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; }
+  .cat-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:12px 14px; }
+  .cat-name   { font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.07em; font-weight:600; margin-bottom:5px; }
+  .cat-status { font-size:13px; font-weight:600; }
+  .tab-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg); overflow:hidden; }
+  .tabs { display:flex; border-bottom:1px solid var(--border); background:var(--surface-alt); }
+  .tab { padding:10px 18px; font-size:13px; font-weight:500; color:var(--text-muted); cursor:pointer; border-bottom:2px solid transparent; }
+  .tab:hover { color:var(--text-primary); }
+  .tab.active { color:var(--accent); border-bottom-color:var(--accent); background:var(--surface); }
+  .tc { display:none; }
+  .tc.active { display:block; }
+  .results-body { padding:6px 0 18px; display:flex; flex-direction:column; }
+  .grp-heading { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.07em; color:var(--text-muted); background:var(--surface-alt); padding:8px 20px; border-top:1px solid var(--border); border-bottom:1px solid var(--border); }
+  table { width:100%; border-collapse:collapse; font-size:12px; }
+  thead th { padding:7px 14px; text-align:left; font-size:10px; font-weight:600; color:var(--text-muted); letter-spacing:.06em; text-transform:uppercase; background:var(--surface-alt); border-bottom:1px solid var(--border); cursor:pointer; }
+  tbody td { padding:10px 14px; border-bottom:1px solid #f3f4f6; vertical-align:middle; }
+  tbody tr:last-child td { border-bottom:none; }
+  tbody tr:hover { background:#fafbfc; }
+  tbody tr.avg-row { background:#f7f4f1; font-weight:700; }
+  td.lbl { color:var(--text-secondary); }
+  .miss  { color:var(--text-muted); font-style:italic; font-size:11px; }
+  .rval  { font-size:14px; font-weight:600; }
+  .runit { font-size:11px; color:var(--text-muted); margin-left:3px; }
+  .rsub  { font-size:11px; color:var(--text-muted); margin-left:6px; }
+  .delta { font-size:12px; font-weight:600; }
+  .pill  { display:inline-flex; align-items:center; gap:5px; padding:3px 10px; border-radius:20px; font-size:11px; font-weight:600; white-space:nowrap; }
+  .pill-dot { width:6px; height:6px; border-radius:50%; display:inline-block; }
+  .p4{background:var(--c-exceeds-bg);color:var(--c-exceeds-text)}
+  .p3{background:var(--c-meets-bg);color:var(--c-meets-text)}
+  .p2{background:var(--c-near-bg);color:var(--c-near-text)}
+  .p1{background:var(--c-below-bg);color:var(--c-below-text)}
+  .p0{background:var(--c-priority-bg);color:var(--c-priority-text)}
+  .pb-badge { display:inline-flex;align-items:center;font-size:9px;font-weight:700;background:#fef3c7;color:#92400e;border:1px solid #fcd34d;border-radius:4px;padding:1px 5px;margin-left:5px;vertical-align:middle; }
+  .norm-source { display:block; font-size:9.5px; color:#bbb; margin-top:2px; font-style:italic; }
+  .status-key { display:flex; flex-wrap:wrap; gap:6px; padding:14px 20px; border-top:1px solid var(--border); background:var(--surface-alt); align-items:center; }
+  .key-label  { font-size:10px; color:var(--text-muted); font-weight:600; text-transform:uppercase; letter-spacing:.06em; margin-right:4px; }
+  .charts-body { padding:18px 20px; display:flex; flex-direction:column; gap:14px; }
+  .chart-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .chart-wrap { background:var(--surface-alt); border:1px solid var(--border); border-radius:var(--radius); padding:12px 14px; }
+  .chart-title { font-size:11px; font-weight:600; color:var(--text-secondary); text-transform:uppercase; letter-spacing:.06em; margin-bottom:8px; }
+  .chart-note { font-size:11px; color:var(--text-muted); display:flex; gap:16px; flex-wrap:wrap; }
+  .quad-body { padding:18px 20px; }
+  .quad-ctrl-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:6px; }
+  .control-label { font-size:11px; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:.06em; margin-right:2px; }
+  .axis-select { border:1px solid var(--border); border-radius:6px; padding:6px 10px; font-size:12px; }
+  .quad-legend { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:8px; font-size:11px; color:var(--text-muted); }
+  .ql-dot { display:inline-block; width:9px; height:9px; border-radius:50%; }
+  .hist-card { border:1px solid var(--border); border-radius:var(--radius); padding:12px 16px; margin-bottom:10px; }
+  .hist-date { font-weight:700; font-size:13px; margin-bottom:6px; }
+  .hist-metrics { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:4px 16px; }
+  .hist-metric { font-size:11.5px; color:var(--text-secondary); display:flex; justify-content:space-between; gap:8px; }
+  .hist-metric b { color:var(--text-primary); font-weight:600; }
+  .hist-notes { margin-top:8px; font-size:11.5px; color:var(--text-muted); font-style:italic; }
+  .overlay{ position:fixed;inset:0;background:rgba(15,17,21,0.55);display:none;align-items:flex-start;justify-content:center;padding:40px 16px;overflow:auto;z-index:50; }
+  .overlay.show{display:flex;}
+  .modal{background:#fff;border-radius:12px;width:100%;max-width:700px;padding:22px 24px 24px;}
+  .modal h3{margin:0 0 4px;}
+  .modal .modal-sub{color:var(--text-muted);font-size:12.5px;margin-bottom:16px;}
+  .modal .close{float:right;border:none;background:none;font-size:20px;cursor:pointer;color:var(--text-muted);}
+  .norms-table{width:100%;border-collapse:collapse;margin-top:6px;}
+  .norms-table th, .norms-table td{padding:6px 8px;border-bottom:1px solid var(--border);text-align:left;font-size:11.5px;vertical-align:top;}
+  .norms-table input{width:74px;border:1px solid var(--border);border-radius:4px;padding:5px 6px;}
+  .settings-tabs{display:flex;gap:6px;margin-bottom:14px;}
+  .settings-tabs button{border:1px solid var(--border);background:var(--surface-alt);padding:6px 14px;border-radius:999px;font-size:12px;font-weight:600;color:var(--text-muted);cursor:pointer;}
+  .settings-tabs button.active{background:var(--accent-light);color:var(--accent);border-color:var(--accent);}
+  .settings-pane{display:none; max-height:65vh; overflow:auto;} .settings-pane.active{display:block;}
+  .field{display:flex;flex-direction:column;gap:5px;margin-bottom:12px;}
+  .field label{font-size:12px;font-weight:600;color:var(--text-muted);}
+  .field input, .field select{border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:13px;width:100%;}
+  .field-2col{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:6px;}
+  .add-row{display:flex;gap:6px;padding:10px 12px;border-bottom:1px solid var(--border);}
+  .add-btn{flex:1;text-align:center;}
+  .side-pair{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+  .subhead{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin:12px 0 6px;}
+  .row-item{display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:8px;padding:8px 12px;margin-bottom:8px;}
+  .row-item .ri-name{flex:1;font-weight:600;}
+  .row-item .ri-meta{font-size:11px;color:var(--text-muted);}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="sb-brand">
+      <svg viewBox="0 0 184.1 250" xmlns="http://www.w3.org/2000/svg">
+        <path style="fill:#F26522;" d="M91.62,248.3C88.25,247,8.94,214.61,1.43,42.44l-0.03-0.55l0.39-0.36 C6.08,37.42,44.93,1.45,92.05,1.45c47.12,0,85.97,35.96,90.25,40.07l0.39,0.36l-0.02,0.55C175.16,214.61,95.85,247,92.48,248.3 l-0.43,0.16L91.62,248.3z"/>
+        <polygon style="fill:#FFFFFF;" points="65.61,198.1 92.27,230.52 118.48,198.64 91.38,187.52"/>
+      </svg>
+      <div><h1>BRISBANE ROAR</h1><p>Performance Dashboard</p></div>
+    </div>
+    <div class="mode-toggle" id="modeToggle">
+      <button data-m="individual" class="active">Individual</button>
+      <button data-m="team">Team</button>
+    </div>
+    <div class="add-row">
+      <button class="btn-sm add-btn" onclick="openAddPlayer()">+ Player</button>
+      <button class="btn-sm add-btn" onclick="openAddSession()">+ Session</button>
+      <button class="btn-sm add-btn" onclick="openManagePlayers()" title="Manage players">⋯</button>
+    </div>
+    <div class="sb-search"><input id="sq" type="text" placeholder="Search player…" oninput="filterAthletes(this.value)"></div>
+    <div class="gender-filter" id="genderFilter">
+      <button data-g="all" class="active">All</button>
+      <button data-g="W">Women</button>
+      <button data-g="M">Men</button>
+    </div>
+    <div class="alist" id="alist"><div style="padding:16px;font-size:12px;color:#7a8290;text-align:center">No players yet — add one, or import from a Google Sheet in Settings.</div></div>
+    <div class="settings-bar"><span id="sheetStatus">No sheet imported</span><button class="btn-sm" onclick="showConfig()">⚙ Settings</button></div>
+  </aside>
+  <main class="main" id="main"></main>
+
+  <div class="overlay" id="overlayPlayer">
+    <div class="modal">
+      <button class="close" data-close>&times;</button>
+      <h3 id="playerModalTitle">Add player</h3>
+      <div class="modal-sub">Stored to the dashboard immediately — no Google Sheet needed.</div>
+      <input type="hidden" id="pEditId">
+      <div class="field"><label>Name</label><input type="text" id="pName" placeholder="e.g. Nooa Laine"></div>
+      <div class="field-2col">
+        <div class="field"><label>Position</label><input type="text" id="pPosition" placeholder="e.g. CM"></div>
+        <div class="field"><label>Gender (for norms)</label><select id="pGender"><option value="W">Women</option><option value="M">Men</option></select></div>
+      </div>
+      <div class="field-2col">
+        <div class="field"><label>Birthdate</label><input type="date" id="pBirthdate"></div>
+        <div class="field"><label>Age (if no birthdate)</label><input type="number" id="pAge"></div>
+      </div>
+      <div class="field-2col">
+        <div class="field"><label>Height (cm)</label><input type="number" step="any" id="pHeight"></div>
+        <div class="field"><label>Leg length (cm)</label><input type="number" step="any" id="pLegLength"></div>
+      </div>
+      <div class="field"><label>Weight (kg)</label><input type="number" step="any" id="pWeight"></div>
+      <div class="field"><label>Injury history (optional)</label><input type="text" id="pInjury" placeholder="e.g. R ACL 2024"></div>
+      <div class="modal-actions">
+        <button class="btn-sm" data-close>Cancel</button>
+        <button class="btn" onclick="saveAddPlayer()">Save player</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay" id="overlaySession">
+    <div class="modal">
+      <button class="close" data-close>&times;</button>
+      <h3>Add test results</h3>
+      <div class="modal-sub">Results for the same player and date are merged into one session — enter one test now, add more later.</div>
+      <div class="field-2col">
+        <div class="field"><label>Player</label><select id="sPlayer"></select></div>
+        <div class="field"><label>Date</label><input type="date" id="sDate"></div>
+      </div>
+      <div class="field"><label>Test</label><select id="sTest"></select></div>
+      <div id="sFields"></div>
+      <div class="field"><label>Notes (optional)</label><input type="text" id="sNotes"></div>
+      <div class="modal-actions">
+        <button class="btn-sm" data-close>Cancel</button>
+        <button class="btn" onclick="saveAddSession()">Save results</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay" id="overlayPlayers">
+    <div class="modal">
+      <button class="close" data-close>&times;</button>
+      <h3>Manage players</h3>
+      <div class="modal-sub">Remove a player or reopen them to edit details.</div>
+      <div id="playersListBody"></div>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="overlaySettings">
+  <div class="modal">
+    <button class="close" data-close>&times;</button>
+    <h3>Settings</h3>
+    <div class="settings-tabs">
+      <button data-p="Sheet" class="active">Sheet</button>
+      <button data-p="Norms">Norms</button>
+      <button data-p="Thresholds">Thresholds</button>
+    </div>
+    <div class="settings-pane active" id="paneSheet"></div>
+    <div class="settings-pane" id="paneNorms"></div>
+    <div class="settings-pane" id="paneThresholds"></div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// METRIC REGISTRY
+// ============================================================
+const METRICS = [
+  {key:'cmj_jumpHeight', label:'CMJ — Jump Height', unit:'cm', lb:false, group:'Jump', paired:false},
+  {key:'cmj_peakPowerBW', label:'CMJ — Peak Power/BW', unit:'W/kg', lb:false, group:'Jump', paired:false},
+  {key:'cmj_contractionTime', label:'CMJ — Contraction Time', unit:'ms', lb:true, group:'Jump', paired:false},
+  {key:'cmj_conForce', label:'CMJ — Concentric Force', unit:'N/kg', lb:false, group:'Jump', paired:false},
+  {key:'slcmj_jumpHeight', label:'Single Leg CMJ — Jump Height', unit:'cm', lb:false, group:'Jump', paired:true},
+  {key:'slcmj_peakPowerBW', label:'Single Leg CMJ — Peak Power/BW', unit:'W/kg', lb:false, group:'Jump', paired:true},
+  {key:'slcmj_eccBrakingImpulse', label:'Single Leg CMJ — Ecc Braking Impulse', unit:'N·s', lb:false, group:'Jump', paired:true},
+  {key:'hop_meanJumpHeight', label:'Hop Test (10/5) — Mean Jump Height', unit:'cm', lb:false, group:'Jump', paired:false},
+  {key:'hop_meanPeakPowerBW', label:'Hop Test (10/5) — Mean Peak Power/BW', unit:'W/kg', lb:false, group:'Jump', paired:false, noNorm:true},
+  {key:'hop_rsi', label:'Hop Test (10/5) — RSI', unit:'', lb:false, group:'Jump', paired:false},
+  {key:'hop_activeStiffness', label:'Hop Test (10/5) — Active Stiffness', unit:'N/m', noNorm:true, group:'Jump', paired:false},
+  {key:'slhop_meanJumpHeight', label:'SL Hop Test (10/5) — Mean Jump Height', unit:'cm', lb:false, group:'Jump', paired:true},
+  {key:'slhop_meanPeakPowerBW', label:'SL Hop Test (10/5) — Mean Peak Power/BW', unit:'W/kg', lb:false, group:'Jump', paired:true},
+  {key:'slhop_rsi', label:'SL Hop Test (10/5) — RSI', unit:'', lb:false, group:'Jump', paired:true},
+  {key:'slhop_activeStiffness', label:'SL Hop Test (10/5) — Active Stiffness', unit:'N/m', noNorm:true, group:'Jump', paired:true},
+  {key:'zigzag_distance', label:'Zig Zag 5-Hop — Distance', unit:'m', lb:false, noNorm:true, group:'Jump', paired:true},
+  {key:'hipAnkle_addPeak', label:'Hip Add (ankle) — Peak Force', unit:'N', lb:false, group:'Hip Strength', paired:true},
+  {key:'hipAnkle_addMean', label:'Hip Add (ankle) — Mean Force', unit:'N', noNorm:true, group:'Hip Strength', paired:true},
+  {key:'hipAnkle_abdPeak', label:'Hip Abd (ankle) — Peak Force', unit:'N', lb:false, group:'Hip Strength', paired:true},
+  {key:'hipAnkle_abdMean', label:'Hip Abd (ankle) — Mean Force', unit:'N', noNorm:true, group:'Hip Strength', paired:true},
+  {key:'hipAnkle_ratio', label:'Hip ADD/ABD Ratio (ankle)', unit:'', lb:false, group:'Hip Strength', paired:true, derived:true},
+  {key:'hipKnee_addPeak', label:'Hip Add (knee) — Peak Force', unit:'N', lb:false, group:'Hip Strength', paired:true},
+  {key:'hipKnee_addMean', label:'Hip Add (knee) — Mean Force', unit:'N', noNorm:true, group:'Hip Strength', paired:true},
+  {key:'hipKnee_abdPeak', label:'Hip Abd (knee) — Peak Force', unit:'N', lb:false, group:'Hip Strength', paired:true},
+  {key:'hipKnee_abdMean', label:'Hip Abd (knee) — Mean Force', unit:'N', noNorm:true, group:'Hip Strength', paired:true},
+  {key:'hipKnee_ratio', label:'Hip ADD/ABD Ratio (knee)', unit:'', lb:false, group:'Hip Strength', paired:true, derived:true},
+  {key:'speed_5m', label:'Sprint — 5 m', unit:'s', lb:true, noNorm:true, group:'Speed & Aerobic', paired:false},
+  {key:'speed_10m', label:'Sprint — 10 m', unit:'s', lb:true, noNorm:true, group:'Speed & Aerobic', paired:false},
+  {key:'speed_20m', label:'Sprint — 20 m', unit:'s', lb:true, noNorm:true, group:'Speed & Aerobic', paired:false},
+  {key:'speed_30m', label:'Sprint — 30 m', unit:'s', lb:true, noNorm:true, group:'Speed & Aerobic', paired:false},
+  {key:'speed_40m', label:'Sprint — 40 m', unit:'s', lb:true, noNorm:true, group:'Speed & Aerobic', paired:false},
+  {key:'aerobic_result', label:'Aerobic Capacity', unit:'km/h', lb:false, noNorm:true, group:'Speed & Aerobic', paired:false, derived:true},
+  {key:'sts_reps', label:'Single Leg Sit-to-Stand', unit:'reps', lb:false, noNorm:true, group:'Capacity', paired:true, stsThreshold:true},
+  {key:'hamstringBridge_reps', label:'Single Leg Hamstring Bridge (to failure)', unit:'reps', lb:false, noNorm:true, group:'Capacity', paired:true},
+  {key:'heelRaise_reps', label:'Single Leg Heel Raise', unit:'reps', lb:false, noNorm:true, group:'Capacity', paired:true},
+  {key:'copenhagen_time', label:'Copenhagen Plank', unit:'s', lb:false, noNorm:true, group:'Capacity', paired:true},
+  {key:'sidePlank_time', label:'Side Plank', unit:'s', lb:false, noNorm:true, group:'Capacity', paired:true},
+];
+const GROUPS = ['Jump','Hip Strength','Speed & Aerobic','Capacity'];
+function metricByKey(k){ return METRICS.find(m=>m.key===k); }
+const SL = ['Primary Focus','Building','Approaching Standard','At Standard','Above Standard'];
+const SC = ['p0','p1','p2','p3','p4'];
+const SCORE_COLS = ['#dc2626','#ea580c','#ca8a04','#1a56db','#16a34a'];
+
+// ============================================================
+// NORMS — pre-filled from VALD 2025/26 normative reports (25th–75th
+// senior percentile band). W = Women's Super League report. M = Premier
+// League report (men), used as the closest available professional
+// reference. Sources shown in Settings → Norms; edit any of these to
+// match your own club's data.
+// ============================================================
+let NORMS = {
+  cmj_jumpHeight:        { W:{min:26.4, max:31.7}, M:{min:35.3, max:42.4} },
+  cmj_peakPowerBW:       { W:{min:41.6, max:48.0}, M:{min:51.7, max:60.4} },
+  cmj_contractionTime:   { W:{min:230, max:280},   M:{min:220, max:280} },
+  cmj_conForce:          { W:{min:21.8, max:25.5}, M:{min:22.5, max:27.0} },
+  slcmj_jumpHeight:      { W:{min:13.0, max:16.9}, M:{min:18.4, max:23.2} },
+  slcmj_peakPowerBW:     { W:{min:26.1, max:31.3}, M:{min:32.6, max:38.4} },
+  slcmj_eccBrakingImpulse:{ W:{min:39.6, max:61.6}, M:{min:62, max:90} },
+  hop_meanJumpHeight:    { W:{min:19.1, max:26.8}, M:{min:20.7, max:30.1} },
+  hop_rsi:               { W:{min:2.30, max:2.90}, M:{min:2.37, max:2.96} },
+  slhop_meanJumpHeight:  { W:{min:14.8, max:18.8}, M:{min:18.5, max:24.6} },
+  slhop_meanPeakPowerBW: { W:{min:64.7, max:79.7}, M:{min:79, max:97} },
+  slhop_rsi:             { W:{min:1.22, max:1.52}, M:{min:1.41, max:1.76} },
+  hipAnkle_addPeak:      { W:{min:138, max:185},   M:{min:176, max:257} },
+  hipAnkle_abdPeak:      { W:{min:146, max:180},   M:{min:189, max:252} },
+  hipAnkle_ratio:        { W:{min:0.94, max:1.15}, M:{min:0.89, max:1.16} },
+  hipKnee_addPeak:       { W:{min:359, max:432} },
+  hipKnee_abdPeak:       { W:{min:339, max:404} },
+  hipKnee_ratio:         { W:{min:0.99, max:1.18} },
+};
+// Short source strings shown under each norm range in the UI.
+const NORM_SOURCES = {
+  cmj_jumpHeight:  'VALD WSL / Premier League 2025/26, senior 25th–75th percentile (Impulse-Momentum)',
+  cmj_peakPowerBW: 'VALD WSL / Premier League 2025/26, senior 25th–75th percentile',
+  cmj_contractionTime: 'VALD WSL / Premier League 2025/26 — concentric duration, senior 25th–75th',
+  cmj_conForce:    'VALD WSL / Premier League 2025/26 — force at zero velocity/BM, senior 25th–75th',
+  slcmj_jumpHeight: 'VALD Single Leg Jump (SLJ), senior 25th–75th — closest available proxy for SLCMJ',
+  slcmj_peakPowerBW:'VALD SLJ, senior 25th–75th — proxy for SLCMJ',
+  slcmj_eccBrakingImpulse:'VALD SLJ eccentric deceleration impulse, senior 25th–75th — proxy for SLCMJ',
+  hop_meanJumpHeight:'VALD Hop Test, senior 25th–75th (flight time)',
+  hop_rsi:         'VALD Hop Test, senior 25th–75th (flight time)',
+  slhop_meanJumpHeight:'VALD Single Leg Drop Jump (SLDJ), senior 25th–75th — proxy for SL Hop Test',
+  slhop_meanPeakPowerBW:'VALD SLDJ, senior 25th–75th — proxy for SL Hop Test',
+  slhop_rsi:       'VALD SLDJ, senior 25th–75th — proxy for SL Hop Test',
+  hipAnkle_addPeak:'VALD ForceFrame Hip ADD/ABD Supine (Ankle), senior 25th–75th',
+  hipAnkle_abdPeak:'VALD ForceFrame Hip ADD/ABD Supine (Ankle), senior 25th–75th',
+  hipAnkle_ratio:  'VALD ForceFrame Hip ADD:ABD ratio (ankle), senior 25th–75th',
+  hipKnee_addPeak: 'VALD ForceFrame Hip ADD/ABD Supine (Knee) — WSL report only, no PL equivalent found',
+  hipKnee_abdPeak: 'VALD ForceFrame Hip ADD/ABD Supine (Knee) — WSL report only, no PL equivalent found',
+  hipKnee_ratio:   'VALD ForceFrame Hip ADD:ABD ratio (knee) — WSL report only, no PL equivalent found',
+};
+
+// ============================================================
+// CALCS
+// ============================================================
+function pf(v){ if(v==null || v==='') return null; const n=parseFloat(v); return isNaN(n)?null:n; }
+function asymmetry(l,r){ l=pf(l); r=pf(r); if(l==null||r==null) return null; const mx=Math.max(Math.abs(l),Math.abs(r)); if(mx===0) return 0; return Math.abs(l-r)/mx*100; }
+function ratioOf(add,abd){ add=pf(add); abd=pf(abd); if(add==null||abd==null||abd===0) return null; return add/abd; }
+function aerobicResult(testType, vift, trialDist, trialTime){
+  if (testType==='Time Trial'){ const d=pf(trialDist), t=pf(trialTime); if(d==null||t==null||t===0) return null; return (d/1000)/(t/3600); }
+  if (testType==='30-15 IFT'){ return pf(vift); }
+  return null;
+}
+function computeAge(birthdate, fallbackAge){
+  if (birthdate && /^\d{4}-\d{2}-\d{2}/.test(birthdate)){
+    const diff = Date.now() - new Date(birthdate).getTime();
+    return Math.floor(diff / (365.25*24*60*60*1000));
+  }
+  return pf(fallbackAge);
+}
+function normalizeName(n){ return (n||'').trim().toLowerCase().replace(/\s+/g,' '); }
+function recomputeDerived(d){
+  d.hipAnkle_ratio_L = ratioOf(d.hipAnkle_addPeak_L, d.hipAnkle_abdPeak_L);
+  d.hipAnkle_ratio_R = ratioOf(d.hipAnkle_addPeak_R, d.hipAnkle_abdPeak_R);
+  d.hipKnee_ratio_L  = ratioOf(d.hipKnee_addPeak_L, d.hipKnee_abdPeak_L);
+  d.hipKnee_ratio_R  = ratioOf(d.hipKnee_addPeak_R, d.hipKnee_abdPeak_R);
+  d.aerobic_result = aerobicResult(d.aerobic_testType, d.aerobic_vift, d.aerobic_trialDistance_m, d.aerobic_trialTime_s);
+  return d;
+}
+function deriveSession(row){
+  const d = {};
+  METRICS.forEach(m=>{
+    if (m.derived) return;
+    if (m.paired){ d[m.key+'_L']=pf(row[m.key+'_L']); d[m.key+'_R']=pf(row[m.key+'_R']); }
+    else { d[m.key]=pf(row[m.key]); }
+  });
+  d.aerobic_testType = row.aerobic_testType || null;
+  d.aerobic_vift = pf(row.aerobic_vift);
+  d.aerobic_trialDistance_m = pf(row.aerobic_trialDistance_m);
+  d.aerobic_trialTime_s = pf(row.aerobic_trialTime_s);
+  d.test_date = row.test_date;
+  d.notes = row.notes;
+  d.weight_kg = pf(row.weight_kg);
+  recomputeDerived(d);
+  return d;
+}
+// ---- Test groupings for the Add Session form (derived from METRICS prefixes) ----
+const TEST_NAMES = {
+  cmj:'Countermovement Jump', slcmj:'Single Leg CMJ', hop:'Hop Test (10/5)', slhop:'SL Hop Test (10/5)',
+  zigzag:'Zig Zag 5-Hop', hipAnkle:'Hip ADD/ABD — Ankle', hipKnee:'Hip ADD/ABD — Knee',
+  speed:'Sprint Splits', sts:'Single Leg Sit-to-Stand', hamstringBridge:'Single Leg Hamstring Bridge (to failure)',
+  heelRaise:'Single Leg Heel Raise', copenhagen:'Copenhagen Plank', sidePlank:'Side Plank',
+};
+function buildTestGroups(){
+  const groups = {};
+  METRICS.forEach(m=>{
+    if (m.derived) return;
+    const prefix = m.key.split('_')[0];
+    if (!groups[prefix]) groups[prefix] = { id:prefix, name:TEST_NAMES[prefix]||prefix, group:m.group, paired:m.paired, fields:[] };
+    groups[prefix].fields.push(m);
+  });
+  groups.aerobic = { id:'aerobic', name:'Aerobic Capacity', group:'Speed & Aerobic', aerobic:true, fields:[] };
+  return groups;
+}
+const TEST_GROUPS = buildTestGroups();
+// ---- Upsert (dashboard entry + sheet import share this) ----
+function upsertSession(playerId, date, fields){
+  const player = athleteMap[playerId];
+  if (!player) return null;
+  let session = player.sessions.find(s=>s.test_date===date);
+  if (!session){ session = { test_date: date }; player.sessions.push(session); }
+  Object.keys(fields).forEach(k=>{ if (fields[k]!=null && fields[k]!=='') session[k]=fields[k]; });
+  recomputeDerived(session);
+  player.sessions.sort((x,y)=> new Date(y.test_date) - new Date(x.test_date));
+  return session;
+}
+function upsertPlayer(fields, existingId){
+  const id = existingId || ('p_'+Date.now()+Math.random().toString(36).slice(2,7));
+  if (!athleteMap[id]) athleteMap[id] = { id, sessions:[] };
+  const p = athleteMap[id];
+  Object.keys(fields).forEach(k=>{ if (fields[k]!=null && fields[k]!=='') p[k]=fields[k]; });
+  p.gender = (p.gender||'W').trim().toUpperCase().startsWith('M') ? 'M' : 'W';
+  p.age = computeAge(p.birthdate, p.age);
+  nameIndex[normalizeName(p.name)] = id;
+  return id;
+}
+function mergeAthletesFromSheet(athleteRows){
+  let added=0, updated=0;
+  athleteRows.forEach(a=>{
+    const key = normalizeName(a.name);
+    const existed = !!nameIndex[key];
+    upsertPlayer(a, nameIndex[key]);
+    existed ? updated++ : added++;
+  });
+  return {added, updated};
+}
+function mergeResultsFromSheet(resultRows){
+  let matched=0, unmatched=0;
+  resultRows.forEach(r=>{
+    const id = nameIndex[normalizeName(r.name)];
+    if (!id){ unmatched++; return; }
+    const parsed = deriveSession(r); // parses + computes derived fields
+    upsertSession(id, r.test_date, parsed);
+    matched++;
+  });
+  return {matched, unmatched};
+}
+function bs(v, key, gender){
+  const m = metricByKey(key);
+  if (!m || m.noNorm || v==null) return null;
+  const band = NORMS[key] && NORMS[key][gender];
+  if (!band || band.min==null || band.max==null) return null;
+  const t1=0.10, t2=0.20;
+  if (m.lb){ if(v<=band.min) return 4; if(v<=band.max) return 3; if(v<=band.max*(1+t1)) return 2; if(v<=band.max*(1+t2)) return 1; return 0; }
+  return v>=band.max ? 4 : v>=band.min ? 3 : v>=band.min*(1-t1) ? 2 : v>=band.min*(1-t2) ? 1 : 0;
+}
+function pill(s){ return s==null ? '' : `<span class="pill ${SC[s]}"><span class="pill-dot" style="background:${SCORE_COLS[s]}"></span>${SL[s]}</span>`; }
+function dHtml(val, prev, lb){
+  if (val==null||prev==null) return '<span class="miss">—</span>';
+  const d=((val-prev)/prev*100), imp=lb?d<0:d>0, unc=Math.abs(d)<0.5;
+  const col=unc?'#7a8290':imp?'#16a34a':'#dc2626';
+  return `<span class="delta" style="color:${col}">${unc?'→':imp?'↑':'↓'} ${d>0?'+':''}${d.toFixed(1)}%</span>`;
+}
+function repVal(m, d){
+  if (m.paired || m.derived){ const l=d[m.key+'_L'], r=d[m.key+'_R']; if(l==null&&r==null) return null; return (l!=null&&r!=null)?(l+r)/2:(l??r); }
+  return d[m.key];
+}
+function metricScore(m, d, gender){
+  if (m.noNorm) return null;
+  if (m.paired || m.derived){
+    const sL = bs(d[m.key+'_L'], m.key, gender), sR = bs(d[m.key+'_R'], m.key, gender);
+    const scores=[sL,sR].filter(s=>s!=null);
+    return scores.length ? scores.reduce((a,b)=>a+b,0)/scores.length : null;
+  }
+  return bs(d[m.key], m.key, gender);
+}
+function catLabel(avg){
+  if (avg==null) return null;
+  if (avg>=3.5) return {l:'Above Standard', c:SCORE_COLS[4]};
+  if (avg>=2.5) return {l:'At Standard',    c:SCORE_COLS[3]};
+  if (avg>=1.5) return {l:'Building',       c:SCORE_COLS[1]};
+  return              {l:'Primary Focus',  c:SCORE_COLS[0]};
+}
+function groupScore(group, d, gender){
+  const scores = METRICS.filter(m=>m.group===group).map(m=>metricScore(m,d,gender)).filter(s=>s!=null);
+  if (!scores.length) return null;
+  return scores.reduce((a,b)=>a+b,0)/scores.length;
+}
+function sidebarCol(d, gender){
+  if (!d) return '#c2c6cc';
+  const scores = METRICS.map(m=>metricScore(m,d,gender)).filter(s=>s!=null);
+  if (!scores.length) return '#c2c6cc';
+  const avg = scores.reduce((a,b)=>a+b,0)/scores.length;
+  return SCORE_COLS[Math.max(0,Math.min(4,Math.round(avg)))];
+}
+function latestVal(sessions, key){ for(const s of sessions){ if (s[key]!=null) return s[key]; } return null; }
+function buildLatest(sessions){
+  const out = {};
+  METRICS.forEach(m=>{
+    if (m.paired || m.derived){ out[m.key+'_L']=latestVal(sessions,m.key+'_L'); out[m.key+'_R']=latestVal(sessions,m.key+'_R'); }
+    else out[m.key]=latestVal(sessions,m.key);
+  });
+  out.aerobic_testType = latestVal(sessions,'aerobic_testType');
+  out.test_date = sessions[0]?.test_date;
+  out.notes = sessions[0]?.notes;
+  return out;
+}
+function fmt(n){ if(n==null||isNaN(n)) return '—'; return (Math.round(n*100)/100).toLocaleString(undefined,{maximumFractionDigits:2}); }
+
+// ============================================================
+// PERSISTED CONFIG (window.storage — never localStorage)
+// ============================================================
+let CONFIG = { athletesUrl:'', resultsUrl:'' };
+let SETTINGS = { asymFlag: 10, stsThreshold: null };
+let athleteMap={}, nameIndex={}, selectedId=null, searchQ='', genderFilterVal='all', mode='individual';
+let saveTimer=null, dataSaveTimer=null;
+function persist(){
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(async ()=>{
+    try{ await window.storage.set('roar-config', JSON.stringify({CONFIG,NORMS,SETTINGS}), false); }
+    catch(e){ console.error('save failed', e); }
+  }, 200);
+}
+function persistData(){
+  clearTimeout(dataSaveTimer);
+  dataSaveTimer = setTimeout(async ()=>{
+    try{ await window.storage.set('roar-data', JSON.stringify({athletes:Object.values(athleteMap)}), false); }
+    catch(e){ console.error('data save failed', e); }
+  }, 200);
+}
+async function loadPersisted(){
+  try{
+    const res = await window.storage.get('roar-config', false);
+    if (res && res.value){
+      const p = JSON.parse(res.value);
+      if (p.CONFIG) CONFIG = p.CONFIG;
+      if (p.NORMS) NORMS = p.NORMS;
+      if (p.SETTINGS) SETTINGS = Object.assign(SETTINGS, p.SETTINGS);
+    }
+  }catch(e){ /* nothing saved yet */ }
+  try{
+    const res = await window.storage.get('roar-data', false);
+    if (res && res.value){
+      const p = JSON.parse(res.value);
+      athleteMap={}; nameIndex={};
+      (p.athletes||[]).forEach(a=>{
+        athleteMap[a.id]=a;
+        nameIndex[normalizeName(a.name)]=a.id;
+      });
+    }
+  }catch(e){ /* nothing saved yet */ }
+}
+
+// ============================================================
+// GOOGLE SHEETS CSV — bulk import / sync, merges into the dashboard's
+// own data rather than replacing it. Dashboard entry is the primary
+// way to add data; the sheet is an optional bulk-import source.
+// ============================================================
+async function fetchSheet(url){ const r=await fetch(url); if(!r.ok) throw new Error(`HTTP ${r.status} — check the URL`); return r.text(); }
+function parseCSV(text){
+  const lines = text.trim().split('\n').map(l=>{
+    const cols=[]; let cur='', inQ=false;
+    for (const ch of l){ if(ch==='"'){inQ=!inQ} else if(ch===','&&!inQ){cols.push(cur.trim());cur=''} else {cur+=ch} }
+    cols.push(cur.trim()); return cols;
+  });
+  const headers = lines[0].map(h=>h.trim());
+  return lines.slice(1).filter(r=>r.some(c=>c)).map(r=>{ const obj={}; headers.forEach((h,i)=>obj[h]=(r[i]||'').trim()); return obj; });
+}
+async function importFromSheet(){
+  if (!CONFIG.athletesUrl || !CONFIG.resultsUrl){ alert('Add both sheet URLs first.'); return; }
+  const btn = document.getElementById('btnImportSheet');
+  if (btn){ btn.disabled=true; btn.textContent='Importing…'; }
+  try{
+    const [aText,rText] = await Promise.all([fetchSheet(CONFIG.athletesUrl), fetchSheet(CONFIG.resultsUrl)]);
+    const athletes=parseCSV(aText), results=parseCSV(rText);
+    const {added,updated} = mergeAthletesFromSheet(athletes);
+    const {matched,unmatched} = mergeResultsFromSheet(results);
+    persistData(); persist();
+    document.getElementById('sheetStatus').textContent = `${Object.keys(athleteMap).length} players · last import ${added} added, ${updated} updated, ${matched} sessions`;
+    if (!selectedId){ const ids=Object.keys(athleteMap); if(ids.length) selectedId=ids[0]; }
+    renderSidebar(); renderMain();
+    if (btn){ btn.disabled=false; btn.textContent='Import now'; }
+    if (unmatched>0) alert(`Imported. ${unmatched} result row(s) had a name that didn't match any athlete and were skipped.`);
+  }catch(e){
+    if (btn){ btn.disabled=false; btn.textContent='Import now'; }
+    alert('Import failed: '+e.message);
+  }
+}
+
+// ============================================================
+// SIDEBAR + MODE
+// ============================================================
+function filterAthletes(v){ searchQ=v.toLowerCase(); renderSidebar(); }
+function renderSidebar(){
+  const el=document.getElementById('alist');
+  const list=Object.values(athleteMap).filter(a=>
+    (genderFilterVal==='all' || a.gender===genderFilterVal) &&
+    ((a.name||'').toLowerCase().includes(searchQ) || (a.position||'').toLowerCase().includes(searchQ))
+  );
+  if (!list.length){ el.innerHTML='<div style="padding:16px;font-size:12px;color:#7a8290;text-align:center">No players found</div>'; return; }
+  el.innerHTML = list.map(a=>{
+    const ini=(a.name||'?').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+    const latest = a.sessions.length ? buildLatest(a.sessions) : null;
+    const col = sidebarCol(latest, a.gender);
+    return `<div class="aitem${a.id===selectedId?' active':''}" onclick="selectAthlete('${a.id}')">
+      <div class="av">${ini}</div>
+      <div class="ameta"><div class="aname">${a.name}</div><div class="apos">${a.position||''}${a.age?' · '+a.age+'y':''} · ${a.gender}</div></div>
+      <span class="sdot" style="background:${col}"></span>
+    </div>`;
+  }).join('');
+}
+function selectAthlete(id){ selectedId=id; renderSidebar(); renderMain(); }
+document.querySelectorAll('#genderFilter button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('#genderFilter button').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active'); genderFilterVal=b.dataset.g; renderSidebar(); if(mode==='team') renderMain();
+});
+document.querySelectorAll('#modeToggle button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('#modeToggle button').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active'); mode=b.dataset.m; renderMain();
+});
+
+// ============================================================
+// TABS (individual)
+// ============================================================
+function switchTab(t){
+  document.querySelectorAll('.tab').forEach(e=>e.classList.toggle('active', e.dataset.t===t));
+  document.querySelectorAll('.tc').forEach(e=>e.classList.toggle('active', e.dataset.t===t));
+  if (t==='trends') setTimeout(drawAllTrendCharts,60);
+  if (t==='quadrants') setTimeout(()=>drawQuadrant(),60);
+  if (t==='history') setTimeout(renderHistory,60);
+}
+function switchTeamTab(t){
+  document.querySelectorAll('.team-tab').forEach(e=>e.classList.toggle('active', e.dataset.t===t));
+  document.querySelectorAll('.team-tc').forEach(e=>e.classList.toggle('active', e.dataset.t===t));
+  if (t==='teamtrends') setTimeout(drawTeamTrendChart,60);
+}
+
+// ============================================================
+// MAIN RENDER (dispatch)
+// ============================================================
+function renderMain(){
+  if (!Object.keys(athleteMap).length) return;
+  if (mode==='team') renderTeam(); else renderIndividual();
+}
+
+// ---------- INDIVIDUAL ----------
+function renderIndividual(){
+  if (!selectedId || !athleteMap[selectedId]) selectedId = Object.keys(athleteMap)[0];
+  const a = athleteMap[selectedId]; if (!a) return;
+  const d = buildLatest(a.sessions);
+  const ini = (a.name||'?').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+  const genderLabel = a.gender==='W' ? 'Women' : 'Men';
+  const inj = a.injury_hx ? `<span class="ptag inj">⚠ Injury hx</span><span class="ptag" style="font-size:10px">${a.injury_hx}</span>` : '';
+
+  document.getElementById('main').innerHTML = `
+    <div class="profile-card">
+      <div class="pav">${ini}</div>
+      <div class="pinfo" style="flex:1">
+        <h2>${a.name}</h2>
+        <div class="pmeta">${a.position||''} · ${genderLabel}${a.age?' · '+a.age+'y':''}${a.height_cm?' · '+a.height_cm+'cm':''}${a.weight_kg?' · '+a.weight_kg+'kg':''}${d.test_date?' · Last tested '+d.test_date:''}</div>
+        <div class="ptags">${inj}<span class="ptag">${a.sessions.length} session${a.sessions.length===1?'':'s'}</span></div>
+      </div>
+    </div>
+    <div class="cat-status-heading">Performance Category Status</div>
+    <div class="cat-grid">
+      ${GROUPS.map(g=>{
+        const gs = a.sessions.length ? groupScore(g,d,a.gender) : null;
+        const cl = catLabel(gs);
+        if (!cl) return `<div class="cat-card"><div class="cat-name">${g}</div><div class="cat-status" style="color:#7a8290">No data</div></div>`;
+        return `<div class="cat-card" style="border-left:3px solid ${cl.c}"><div class="cat-name">${g}</div><div class="cat-status" style="color:${cl.c}">${cl.l}</div></div>`;
+      }).join('')}
+    </div>
+    <div class="tab-card">
+      <div class="tabs">
+        <div class="tab active" data-t="results" onclick="switchTab('results')">Latest Results</div>
+        <div class="tab" data-t="trends" onclick="switchTab('trends')">Trend Charts</div>
+        <div class="tab" data-t="quadrants" onclick="switchTab('quadrants')">Quadrants</div>
+        <div class="tab" data-t="history" onclick="switchTab('history')">History</div>
+      </div>
+      <div class="tc active" data-t="results"><div class="results-body" id="resultsBody"></div></div>
+      <div class="tc" data-t="trends"><div class="charts-body">
+        <div class="chart-grid" id="chartGrid"></div>
+        <div class="chart-note"><span>▪ Shaded band = norm range for ${genderLabel.toLowerCase()} (25th–75th percentile, where set)</span><span>▪ Paired tests show L and R separately</span></div>
+      </div></div>
+      <div class="tc" data-t="quadrants"><div class="quad-body">
+        <div class="quad-ctrl-row">
+          <span class="control-label">X axis</span>
+          <select class="axis-select" id="quadX"></select>
+          <span class="control-label">Y axis</span>
+          <select class="axis-select" id="quadY"></select>
+        </div>
+        <div id="quadContainer"></div>
+        <div class="quad-legend">
+          <span class="ql-dot" style="background:#f26522"></span><span>${a.name}</span>
+          <span class="ql-dot" style="background:#cbd5e1"></span><span>Other ${genderLabel.toLowerCase()} players (anonymous)</span>
+          <span>Dividers at norm-band midpoint (or squad median if no norm set)</span>
+        </div>
+      </div></div>
+      <div class="tc" data-t="history"><div id="historyBody" style="padding:14px 20px"></div></div>
+    </div>`;
+
+  buildResultsBody(a, d);
+  buildQuadrantAxisOptions();
+  document.getElementById('quadX').onchange = drawQuadrant;
+  document.getElementById('quadY').onchange = drawQuadrant;
+}
+
+function buildResultsBody(a, d){
+  const prevSessions = a.sessions.slice(1);
+  const prevD = prevSessions.length ? buildLatest(prevSessions) : null;
+  let html = '';
+  GROUPS.forEach(g=>{
+    html += `<div class="grp-heading">${g}</div><table><tbody>`;
+    METRICS.filter(m=>m.group===g).forEach(m=>{ html += renderMetricRow(m, d, prevD, a); });
+    html += `</tbody></table>`;
+  });
+  document.getElementById('resultsBody').innerHTML = html + `
+    <div class="status-key">
+      <span class="key-label">Status</span>
+      ${SL.map((l,i)=>`<span class="pill ${SC[i]}"><span class="pill-dot" style="background:${SCORE_COLS[i]}"></span>${l}</span>`).join('')}
+      <span style="margin-left:auto;font-size:11px;color:#7a8290">Norms shown are per-gender — edit or add sources in Settings → Norms.</span>
+    </div>`;
+}
+function pbBadge(m, side, val, a){
+  if (val==null || a.sessions.length<2) return '';
+  const key = (m.paired||m.derived) ? m.key+(side?'_'+side:'') : m.key;
+  const hist = a.sessions.map(s=>s[key]).filter(v=>v!=null);
+  if (hist.length<2) return '';
+  const best = m.lb ? Math.min(...hist) : Math.max(...hist);
+  return val===best ? '<span class="pb-badge">★ PB</span>' : '';
+}
+function normText(m, gender){
+  const band = NORMS[m.key] && NORMS[m.key][gender];
+  if (!band || band.min==null || band.max==null) return m.noNorm ? 'Tracked individually' : 'No norm set';
+  const src = NORM_SOURCES[m.key] ? `<span class="norm-source">${NORM_SOURCES[m.key]}</span>` : '';
+  return `${band.min}–${band.max} ${m.unit}${src}`;
+}
+function renderMetricRow(m, d, prevD, a){
+  if (m.key==='aerobic_result'){
+    const val = d.aerobic_result, prev = prevD ? prevD.aerobic_result : null;
+    const label = d.aerobic_testType || m.label;
+    if (val==null) return `<tr><td class="lbl">${label}</td><td colspan="2" class="miss">— not tested</td><td style="font-size:11px;color:var(--text-muted)">${normText(m,a.gender)}</td><td class="miss">—</td></tr>`;
+    const s = bs(val, m.key, a.gender);
+    return `<tr><td class="lbl">${label}</td><td><span class="rval">${fmt(val)}</span><span class="runit">${m.unit}</span>${pbBadge(m,null,val,a)}</td><td>${pill(s)}</td><td style="font-size:11px;color:var(--text-muted)">${normText(m,a.gender)}</td><td>${dHtml(val,prev,m.lb)}</td></tr>`;
+  }
+  if (m.paired){
+    const l = d[m.key+'_L'], r = d[m.key+'_R'];
+    if (l==null && r==null) return `<tr><td class="lbl">${m.label}</td><td colspan="2" class="miss">— not tested</td><td style="font-size:11px;color:var(--text-muted)">${normText(m,a.gender)}</td><td class="miss">—</td></tr>`;
+    const asym = asymmetry(l,r);
+    const asymFlag = SETTINGS.asymFlag!=null && asym!=null && asym>SETTINGS.asymFlag;
+    const stsFlag = m.stsThreshold && SETTINGS.stsThreshold!=null && ((l!=null&&l<SETTINGS.stsThreshold)||(r!=null&&r<SETTINGS.stsThreshold));
+    const sL = bs(l,m.key,a.gender), sR = bs(r,m.key,a.gender);
+    const scores=[sL,sR].filter(s=>s!=null);
+    const avgScore = scores.length ? Math.round(scores.reduce((x,y)=>x+y,0)/scores.length) : null;
+    const prevL = prevD ? prevD[m.key+'_L'] : null, prevR = prevD ? prevD[m.key+'_R'] : null;
+    const prevAvg = (prevL!=null&&prevR!=null) ? (prevL+prevR)/2 : (prevL??prevR);
+    const curAvg = (l!=null&&r!=null) ? (l+r)/2 : (l??r);
+    let statusCell;
+    if (stsFlag) statusCell = `<span class="pill p0"><span class="pill-dot" style="background:#dc2626"></span>Below sit-to-stand threshold</span>`;
+    else if (asymFlag) statusCell = `<span class="pill p1"><span class="pill-dot" style="background:#ea580c"></span>Asymmetry ${fmt(asym)}%</span>`;
+    else if (m.noNorm) statusCell = asym!=null ? `<span style="font-size:11px;color:var(--text-muted)">Asym ${fmt(asym)}%</span>` : '';
+    else statusCell = pill(avgScore);
+    return `<tr><td class="lbl">${m.label}</td>
+      <td><span class="rval">${fmt(l)} / ${fmt(r)}</span><span class="runit">${m.unit} (L/R)</span>${!asymFlag&&!stsFlag&&asym!=null?`<span class="rsub">asym ${fmt(asym)}%</span>`:''}${pbBadge(m,'L',l,a)}${pbBadge(m,'R',r,a)}</td>
+      <td>${statusCell}</td>
+      <td style="font-size:11px;color:var(--text-muted)">${normText(m,a.gender)}</td>
+      <td>${dHtml(curAvg,prevAvg,m.lb)}</td></tr>`;
+  }
+  if (m.derived){
+    const l = d[m.key+'_L'], r = d[m.key+'_R'];
+    if (l==null && r==null) return `<tr><td class="lbl">${m.label}</td><td colspan="2" class="miss">— not tested</td><td style="font-size:11px;color:var(--text-muted)">${normText(m,a.gender)}</td><td class="miss">—</td></tr>`;
+    const sL = bs(l,m.key,a.gender), sR = bs(r,m.key,a.gender);
+    const scores=[sL,sR].filter(s=>s!=null);
+    const avgScore = scores.length ? Math.round(scores.reduce((x,y)=>x+y,0)/scores.length) : null;
+    const prevL = prevD ? prevD[m.key+'_L'] : null, prevR = prevD ? prevD[m.key+'_R'] : null;
+    const prevAvg = (prevL!=null&&prevR!=null) ? (prevL+prevR)/2 : (prevL??prevR);
+    const curAvg = (l!=null&&r!=null) ? (l+r)/2 : (l??r);
+    return `<tr><td class="lbl">${m.label}</td>
+      <td><span class="rval">${fmt(l)} / ${fmt(r)}</span><span class="runit">L / R</span>${pbBadge(m,'L',l,a)}${pbBadge(m,'R',r,a)}</td>
+      <td>${pill(avgScore)}</td>
+      <td style="font-size:11px;color:var(--text-muted)">${normText(m,a.gender)}</td>
+      <td>${dHtml(curAvg,prevAvg,m.lb)}</td></tr>`;
+  }
+  const val = d[m.key], prev = prevD ? prevD[m.key] : null;
+  if (val==null) return `<tr><td class="lbl">${m.label}</td><td colspan="2" class="miss">— not tested</td><td style="font-size:11px;color:var(--text-muted)">${normText(m,a.gender)}</td><td class="miss">—</td></tr>`;
+  const s = bs(val, m.key, a.gender);
+  return `<tr><td class="lbl">${m.label}</td><td><span class="rval">${fmt(val)}</span><span class="runit">${m.unit}</span>${pbBadge(m,null,val,a)}</td><td>${m.noNorm?'':pill(s)}</td><td style="font-size:11px;color:var(--text-muted)">${normText(m,a.gender)}</td><td>${dHtml(val,prev,m.lb)}</td></tr>`;
+}
+
+// ============================================================
+// TREND CHARTS (small multiples grid, per athlete)
+// ============================================================
+let trendCharts=[];
+function drawAllTrendCharts(){
+  const a = athleteMap[selectedId]; if (!a) return;
+  trendCharts.forEach(c=>c.destroy()); trendCharts=[];
+  const grid = document.getElementById('chartGrid');
+  grid.innerHTML = METRICS.map(m=>`<div class="chart-wrap"><div class="chart-title">${m.label}</div><canvas id="tc_${m.key}" height="140"></canvas></div>`).join('');
+  const hist = [...a.sessions].sort((x,y)=>new Date(x.test_date)-new Date(y.test_date));
+  const labels = hist.map(s=>s.test_date);
+  METRICS.forEach(m=>{
+    const ctx = document.getElementById('tc_'+m.key).getContext('2d');
+    const band = NORMS[m.key] && NORMS[m.key][a.gender];
+    const datasets = [];
+    if (band && band.min!=null && band.max!=null){
+      datasets.push({label:'min', data:labels.map(()=>band.min), borderColor:'transparent', pointRadius:0, fill:false});
+      datasets.push({label:'Norm range', data:labels.map(()=>band.max), borderColor:'transparent', backgroundColor:'rgba(148,163,184,0.28)', pointRadius:0, fill:'-1'});
+    }
+    if (m.paired || m.derived){
+      datasets.push({label:'Left', data:hist.map(s=>s[m.key+'_L']), borderColor:'#f26522', backgroundColor:'#f26522', tension:0.25, spanGaps:true, pointRadius:3});
+      datasets.push({label:'Right', data:hist.map(s=>s[m.key+'_R']), borderColor:'#3568c4', backgroundColor:'#3568c4', tension:0.25, spanGaps:true, pointRadius:3, borderDash:[4,3]});
+    } else if (m.key==='aerobic_result'){
+      datasets.push({label:m.label, data:hist.map(s=>s.aerobic_result), borderColor:'#f26522', backgroundColor:'#f26522', tension:0.25, spanGaps:true, pointRadius:3});
+    } else {
+      datasets.push({label:m.label, data:hist.map(s=>s[m.key]), borderColor:'#f26522', backgroundColor:'#f26522', tension:0.25, spanGaps:true, pointRadius:3});
+    }
+    trendCharts.push(new Chart(ctx, { type:'line', data:{labels,datasets}, options:{responsive:true, plugins:{legend:{display:(m.paired||m.derived), position:'bottom', labels:{filter:l=>l.text==='Left'||l.text==='Right'}}}, scales:{y:{beginAtZero:false}} } }));
+  });
+}
+
+// ============================================================
+// QUADRANTS (dropdown-driven scatter)
+// ============================================================
+function buildQuadrantAxisOptions(){
+  const xs=document.getElementById('quadX'), ys=document.getElementById('quadY');
+  const opts = GROUPS.map(g=>`<optgroup label="${g}">${METRICS.filter(m=>m.group===g).map(m=>`<option value="${m.key}">${m.label}</option>`).join('')}</optgroup>`).join('');
+  xs.innerHTML = opts; ys.innerHTML = opts;
+  xs.value = 'cmj_jumpHeight'; ys.value = 'cmj_peakPowerBW';
+}
+function cohortValues(key, gender){
+  const m = metricByKey(key);
+  return Object.values(athleteMap).filter(p=>p.gender===gender && p.sessions.length).map(p=>{
+    const d = buildLatest(p.sessions);
+    return { id:p.id, name:p.name, val: repVal(m,d) };
+  }).filter(x=>x.val!=null);
+}
+function drawQuadrant(){
+  const a = athleteMap[selectedId]; if (!a) return;
+  const xKey = document.getElementById('quadX').value, yKey = document.getElementById('quadY').value;
+  const mx = metricByKey(xKey), my = metricByKey(yKey);
+  const xs = cohortValues(xKey, a.gender), ys = cohortValues(yKey, a.gender);
+  const container = document.getElementById('quadContainer');
+  const dLatest = buildLatest(a.sessions);
+  const myXVal = repVal(mx, dLatest), myYVal = repVal(my, dLatest);
+  if (myXVal==null || myYVal==null){
+    container.innerHTML = `<div style="padding:40px;text-align:center;color:#7a8290">Missing data for ${myXVal==null?mx.label:my.label}. Pick different axes or add a session.</div>`;
+    return;
+  }
+  const xVals = xs.map(p=>p.val), yVals = ys.map(p=>p.val);
+  const xBand = NORMS[xKey] && NORMS[xKey][a.gender], yBand = NORMS[yKey] && NORMS[yKey][a.gender];
+  const xMin = Math.min(myXVal,...xVals), xMax = Math.max(myXVal,...xVals);
+  const yMin = Math.min(myYVal,...yVals), yMax = Math.max(myYVal,...yVals);
+  const xPad = (xMax-xMin)*0.15 || Math.abs(xMax)*0.1 || 1, yPad = (yMax-yMin)*0.15 || Math.abs(yMax)*0.1 || 1;
+  const dxMin=xMin-xPad, dxMax=xMax+xPad, dyMin=yMin-yPad, dyMax=yMax+yPad;
+  const median = arr => { const s=[...arr].sort((a,b)=>a-b); const mid=Math.floor(s.length/2); return s.length%2?s[mid]:(s[mid-1]+s[mid])/2; };
+  const xDiv = (xBand && xBand.min!=null && xBand.max!=null) ? (xBand.min+xBand.max)/2 : median([myXVal,...xVals]);
+  const yDiv = (yBand && yBand.min!=null && yBand.max!=null) ? (yBand.min+yBand.max)/2 : median([myYVal,...yVals]);
+
+  const W=700,H=440,ML=60,MR=20,MT=20,MB=40,CW=W-ML-MR,CH=H-MT-MB;
+  const sx = v => ML + (v-dxMin)/(dxMax-dxMin)*CW;
+  const sy = v => MT + CH - (v-dyMin)/(dyMax-dyMin)*CH;
+  const xDivPx = sx(xDiv), yDivPx = sy(yDiv);
+
+  let s = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-height:460px;font-family:-apple-system,sans-serif">`;
+  [[ML,MT,xDivPx-ML,yDivPx-MT,'#fff8e1'],[xDivPx,MT,W-MR-xDivPx,yDivPx-MT,'#f0fdf4'],
+   [ML,yDivPx,xDivPx-ML,H-MB-yDivPx,'#fef2f2'],[xDivPx,yDivPx,W-MR-xDivPx,H-MB-yDivPx,'#eff6ff']]
+    .forEach(([x,y,w,h,fill])=>{ s+=`<rect x="${x}" y="${y}" width="${Math.max(0,w)}" height="${Math.max(0,h)}" fill="${fill}" opacity="0.7"/>`; });
+  s += `<line x1="${xDivPx}" y1="${MT}" x2="${xDivPx}" y2="${H-MB}" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6,3"/>`;
+  s += `<line x1="${ML}" y1="${yDivPx}" x2="${W-MR}" y2="${yDivPx}" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6,3"/>`;
+  s += `<rect x="${ML}" y="${MT}" width="${CW}" height="${CH}" fill="none" stroke="#e4e6ea" stroke-width="1"/>`;
+  const lo_x = mx.lb ? 'Higher '+mx.label : 'Lower '+mx.label, hi_x = mx.lb ? 'Lower '+mx.label : 'Higher '+mx.label;
+  const lo_y = my.lb ? 'Higher '+my.label : 'Lower '+my.label, hi_y = my.lb ? 'Lower '+my.label : 'Higher '+my.label;
+  [[`${hi_y} / ${lo_x}`, ML+8, MT+14,'start'],[`${hi_y} / ${hi_x}`, W-MR-8, MT+14,'end'],
+   [`${lo_y} / ${lo_x}`, ML+8, H-MB-8,'start'],[`${lo_y} / ${hi_x}`, W-MR-8, H-MB-8,'end']]
+    .forEach(([label,x,y,anchor])=>{ s+=`<text x="${x}" y="${y}" font-size="9.5" font-weight="600" fill="#64748b" text-anchor="${anchor}">${label}</text>`; });
+  for (let i=0;i<=4;i++){
+    const vx = dxMin+(dxMax-dxMin)*i/4, px = sx(vx);
+    s += `<text x="${px}" y="${H-MB+15}" font-size="9" text-anchor="middle" fill="#7a8290">${fmt(vx)}</text>`;
+    const vy = dyMin+(dyMax-dyMin)*i/4, py = sy(vy);
+    s += `<text x="${ML-7}" y="${py+3}" font-size="9" text-anchor="end" fill="#7a8290">${fmt(vy)}</text>`;
+  }
+  s += `<text x="${ML+CW/2}" y="${H-6}" font-size="11" text-anchor="middle" fill="#444c56" font-weight="500">${mx.label} (${mx.unit})</text>`;
+  s += `<text x="12" y="${MT+CH/2}" font-size="11" text-anchor="middle" fill="#444c56" font-weight="500" transform="rotate(-90,12,${MT+CH/2})">${my.label} (${my.unit})</text>`;
+  xs.forEach(px=>{
+    const py = ys.find(y=>y.id===px.id);
+    if (px.id!==a.id && py) s += `<circle cx="${sx(px.val)}" cy="${sy(py.val)}" r="6" fill="#cbd5e1" stroke="#94a3b8" stroke-width="1" opacity="0.7"/>`;
+  });
+  const cx=sx(myXVal), cy=sy(myYVal);
+  s += `<circle cx="${cx}" cy="${cy}" r="12" fill="#f26522" stroke="#fff" stroke-width="2.5"/>`;
+  const ini=(a.name||'?').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+  s += `<text x="${cx}" y="${cy+4}" font-size="9" text-anchor="middle" fill="#fff" font-weight="700">${ini}</text>`;
+  const lx = cx+16>W-MR-90?cx-16:cx+16, la = cx+16>W-MR-90?'end':'start', ly = cy-10<MT+20?cy+22:cy-10;
+  s += `<text x="${lx}" y="${ly}" font-size="11" text-anchor="${la}" fill="#0d1117" font-weight="600">${a.name}</text>`;
+  s += `<text x="${lx}" y="${ly+13}" font-size="10" text-anchor="${la}" fill="#7a8290">${fmt(myXVal)} ${mx.unit} · ${fmt(myYVal)} ${my.unit}</text>`;
+  s += '</svg>';
+  container.innerHTML = s;
+}
+
+// ============================================================
+// HISTORY
+// ============================================================
+function renderHistory(){
+  const a = athleteMap[selectedId]; if (!a) return;
+  const el = document.getElementById('historyBody');
+  if (!a.sessions.length){ el.innerHTML = '<p class="hint">No sessions recorded yet.</p>'; return; }
+  el.innerHTML = a.sessions.map(s=>{
+    const rows = [];
+    METRICS.forEach(m=>{
+      if (m.paired || m.derived){
+        const l=s[m.key+'_L'], r=s[m.key+'_R'];
+        if (l!=null||r!=null) rows.push(`<div class="hist-metric"><span>${m.label}</span><b>${fmt(l)} / ${fmt(r)} ${m.unit}</b></div>`);
+      } else if (m.key==='aerobic_result'){
+        if (s.aerobic_result!=null) rows.push(`<div class="hist-metric"><span>${s.aerobic_testType||'Aerobic'}</span><b>${fmt(s.aerobic_result)} ${m.unit}</b></div>`);
+      } else {
+        if (s[m.key]!=null) rows.push(`<div class="hist-metric"><span>${m.label}</span><b>${fmt(s[m.key])} ${m.unit}</b></div>`);
+      }
+    });
+    return `<div class="hist-card"><div class="hist-date">${s.test_date} <button class="btn-sm" style="float:right;color:#dc2626;padding:3px 9px;font-size:11px;" onclick="removeSession('${a.id}','${s.test_date}')">Delete</button></div><div class="hist-metrics">${rows.join('')||'<span class="hint">No metrics recorded</span>'}</div>${s.notes?`<div class="hist-notes">${s.notes}</div>`:''}</div>`;
+  }).join('');
+}
+
+// ============================================================
+// TEAM VIEW
+// ============================================================
+function renderTeam(){
+  document.getElementById('main').innerHTML = `
+    <div class="tab-card">
+      <div class="tabs">
+        <div class="team-tab tab active" data-t="squad" onclick="switchTeamTab('squad')">Squad Table</div>
+        <div class="team-tab tab" data-t="teamtrends" onclick="switchTeamTab('teamtrends')">Team Trends</div>
+      </div>
+      <div class="team-tc tc active" data-t="squad"><div id="squadBody" style="padding:0"></div></div>
+      <div class="team-tc tc" data-t="teamtrends"><div class="charts-body">
+        <div class="quad-ctrl-row">
+          <span class="control-label">Metric</span>
+          <select class="axis-select" id="teamTrendMetric"></select>
+        </div>
+        <canvas id="teamTrendChart" height="110"></canvas>
+        <div class="chart-note"><span>▪ Squad average per test date${genderFilterVal!=='all'?' ('+(genderFilterVal==='W'?'Women':'Men')+' only)':''}</span></div>
+      </div></div>
+    </div>`;
+  buildSquadTable();
+  buildTeamTrendMetricOptions();
+  document.getElementById('teamTrendMetric').onchange = drawTeamTrendChart;
+}
+function buildSquadTable(){
+  const players = Object.values(athleteMap).filter(a=>genderFilterVal==='all'||a.gender===genderFilterVal);
+  let html = '';
+  GROUPS.forEach(g=>{
+    html += `<div class="grp-heading">${g}</div><table><thead><tr><th>Player</th>${METRICS.filter(m=>m.group===g).map(m=>`<th>${m.label}</th>`).join('')}</tr></thead><tbody>`;
+    players.forEach(a=>{
+      const d = a.sessions.length ? buildLatest(a.sessions) : {};
+      html += `<tr><td class="lbl">${a.name}</td>` + METRICS.filter(m=>m.group===g).map(m=>{
+        const v = repVal(m, d);
+        const s = a.sessions.length ? metricScore(m,d,a.gender) : null;
+        const cls = s!=null ? SCORE_COLS[Math.round(s)] : '';
+        return `<td style="text-align:right;">${v==null?'<span class="miss">—</span>':fmt(v)+' '+m.unit}${cls?` <span class="pill-dot" style="display:inline-block;background:${cls}"></span>`:''}</td>`;
+      }).join('') + `</tr>`;
+    });
+    html += `</tbody></table>`;
+  });
+  document.getElementById('squadBody').innerHTML = html || '<p class="hint" style="padding:20px">No players match this filter.</p>';
+}
+function buildTeamTrendMetricOptions(){
+  const sel = document.getElementById('teamTrendMetric');
+  sel.innerHTML = GROUPS.map(g=>`<optgroup label="${g}">${METRICS.filter(m=>m.group===g).map(m=>`<option value="${m.key}">${m.label}</option>`).join('')}</optgroup>`).join('');
+}
+let teamTrendChartInstance=null;
+function drawTeamTrendChart(){
+  const key = document.getElementById('teamTrendMetric').value;
+  const m = metricByKey(key);
+  const players = Object.values(athleteMap).filter(a=>(genderFilterVal==='all'||a.gender===genderFilterVal) && a.sessions.length);
+  const dateSet = new Set();
+  players.forEach(a=>a.sessions.forEach(s=>dateSet.add(s.test_date)));
+  const dates = [...dateSet].sort((a,b)=>new Date(a)-new Date(b));
+  const avgPerDate = dates.map(dt=>{
+    const vals = [];
+    players.forEach(a=>{
+      const s = a.sessions.find(s=>s.test_date===dt);
+      if (s){ const v = repVal(m,s); if (v!=null) vals.push(v); }
+    });
+    return vals.length ? vals.reduce((x,y)=>x+y,0)/vals.length : null;
+  });
+  const ctx = document.getElementById('teamTrendChart').getContext('2d');
+  if (teamTrendChartInstance) teamTrendChartInstance.destroy();
+  teamTrendChartInstance = new Chart(ctx, { type:'line', data:{ labels:dates, datasets:[{ label:'Squad average — '+m.label, data:avgPerDate, borderColor:'#f26522', backgroundColor:'#f26522', tension:0.25, spanGaps:true }] }, options:{responsive:true, plugins:{legend:{position:'bottom'}}, scales:{y:{beginAtZero:false}}} });
+}
+
+// ============================================================
+// SETTINGS MODAL
+// ============================================================
+document.querySelectorAll('[data-close]').forEach(el=>el.addEventListener('click',()=>el.closest('.overlay').classList.remove('show')));
+document.querySelectorAll('.overlay').forEach(ov=>ov.addEventListener('click',e=>{ if(e.target===ov) ov.classList.remove('show'); }));
+document.querySelectorAll('.settings-tabs button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.settings-tabs button').forEach(x=>x.classList.remove('active'));
+  document.querySelectorAll('.settings-pane').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active');
+  document.getElementById('pane'+b.dataset.p).classList.add('active');
+});
+function showConfig(){ buildPaneSheet(); buildPaneNorms(); buildPaneThresholds(); document.getElementById('overlaySettings').classList.add('show'); }
+function buildPaneSheet(){
+  document.getElementById('paneSheet').innerHTML = `
+    <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Athletes tab URL</label>
+    <input id="setA" type="text" value="${CONFIG.athletesUrl||''}" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:10px;">
+    <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Results tab URL</label>
+    <input id="setR" type="text" value="${CONFIG.resultsUrl||''}" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:14px;">
+    <div style="display:flex;gap:8px;align-items:center;">
+      <button class="btn-sm" onclick="saveSheetSettings()">Save URLs</button>
+      <button class="btn" id="btnImportSheet" onclick="importFromSheet()">Import now</button>
+    </div>
+    <p class="hint">Importing merges into your dashboard data — players are matched by name (existing players get their profile fields updated, new names are added), and sessions are matched by player + date. Nothing is duplicated, and nothing already entered in the dashboard is overwritten unless the sheet has a value for that same field.</p>
+    <p class="hint"><b>Athletes tab:</b> athlete_id, name, position, birthdate (YYYY-MM-DD), age, height_cm, leg_length_cm, weight_kg, injury_hx, gender (W/M)</p>
+    <p class="hint"><b>Results tab:</b> name (matched to Athletes tab), test_date, weight_kg, notes, then one column per metric:</p>
+    <p class="hint" style="font-family:monospace;font-size:10.5px;line-height:1.8;">${METRICS.map(m=> (m.paired||m.derived) ? m.key+'_L, '+m.key+'_R' : (m.key==='aerobic_result'?'aerobic_testType, aerobic_vift, aerobic_trialDistance_m, aerobic_trialTime_s':m.key) ).join(' &nbsp; ')}</p>`;
+}
+function saveSheetSettings(){
+  CONFIG.athletesUrl = document.getElementById('setA').value.trim();
+  CONFIG.resultsUrl = document.getElementById('setR').value.trim();
+  persist();
+}
+function buildPaneNorms(){
+  document.getElementById('paneNorms').innerHTML = `
+    <p class="hint" style="margin-top:0;">Pre-filled from VALD's 2025/26 Women's Super League and Premier League normative reports (senior, 25th–75th percentile). Edit anything to match your own data.</p>
+    <table class="norms-table"><thead><tr><th>Metric</th><th>Unit</th><th>Women min</th><th>Women max</th><th>Men min</th><th>Men max</th></tr></thead><tbody>
+      ${METRICS.filter(m=>!m.noNorm).map(m=>{
+        const w = (NORMS[m.key]&&NORMS[m.key].W)||{}; const mm=(NORMS[m.key]&&NORMS[m.key].M)||{};
+        return `<tr>
+          <td>${m.label}${NORM_SOURCES[m.key]?`<span class="norm-source">${NORM_SOURCES[m.key]}</span>`:''}</td><td>${m.unit}</td>
+          <td><input type="number" step="any" data-k="${m.key}" data-g="W" data-b="min" value="${w.min??''}"></td>
+          <td><input type="number" step="any" data-k="${m.key}" data-g="W" data-b="max" value="${w.max??''}"></td>
+          <td><input type="number" step="any" data-k="${m.key}" data-g="M" data-b="min" value="${mm.min??''}"></td>
+          <td><input type="number" step="any" data-k="${m.key}" data-g="M" data-b="max" value="${mm.max??''}"></td>
+        </tr>`;
+      }).join('')}
+    </tbody></table>`;
+  document.querySelectorAll('#paneNorms input').forEach(inp=>{
+    inp.onchange = ()=>{
+      const {k,g,b} = inp.dataset;
+      if (!NORMS[k]) NORMS[k]={};
+      if (!NORMS[k][g]) NORMS[k][g]={min:null,max:null};
+      NORMS[k][g][b] = inp.value===''?null:Number(inp.value);
+      persist(); renderMain();
+    };
+  });
+}
+function buildPaneThresholds(){
+  document.getElementById('paneThresholds').innerHTML = `
+    <div class="field"><label>L/R asymmetry flag (%)</label><input type="number" step="0.5" id="setAsym" value="${SETTINGS.asymFlag??''}"></div>
+    <div class="field"><label>Single leg sit-to-stand — minimum reps (e.g. Melbourne ACL RTS threshold)</label><input type="number" step="1" id="setSts" value="${SETTINGS.stsThreshold??''}"></div>
+    <button class="btn" onclick="saveThresholds()">Save</button>
+    <p class="hint">Leave blank to turn a flag off.</p>`;
+}
+function saveThresholds(){
+  SETTINGS.asymFlag = document.getElementById('setAsym').value===''?null:Number(document.getElementById('setAsym').value);
+  SETTINGS.stsThreshold = document.getElementById('setSts').value===''?null:Number(document.getElementById('setSts').value);
+  persist(); renderMain();
+  document.getElementById('overlaySettings').classList.remove('show');
+}
+
+// ============================================================
+// ADD PLAYER MODAL
+// ============================================================
+function openAddPlayer(editId){
+  document.getElementById('playerModalTitle').textContent = editId ? 'Edit player' : 'Add player';
+  document.getElementById('pEditId').value = editId||'';
+  const a = editId ? athleteMap[editId] : null;
+  document.getElementById('pName').value = a?.name||'';
+  document.getElementById('pPosition').value = a?.position||'';
+  document.getElementById('pGender').value = a?.gender||'W';
+  document.getElementById('pBirthdate').value = a?.birthdate||'';
+  document.getElementById('pAge').value = a?.age||'';
+  document.getElementById('pHeight').value = a?.height_cm||'';
+  document.getElementById('pLegLength').value = a?.leg_length_cm||'';
+  document.getElementById('pWeight').value = a?.weight_kg||'';
+  document.getElementById('pInjury').value = a?.injury_hx||'';
+  document.getElementById('overlayPlayer').classList.add('show');
+}
+function saveAddPlayer(){
+  const name = document.getElementById('pName').value.trim();
+  if (!name){ alert('Enter a name.'); return; }
+  const editId = document.getElementById('pEditId').value || null;
+  const fields = {
+    name,
+    position: document.getElementById('pPosition').value.trim(),
+    gender: document.getElementById('pGender').value,
+    birthdate: document.getElementById('pBirthdate').value,
+    age: document.getElementById('pAge').value,
+    height_cm: document.getElementById('pHeight').value,
+    leg_length_cm: document.getElementById('pLegLength').value,
+    weight_kg: document.getElementById('pWeight').value,
+    injury_hx: document.getElementById('pInjury').value,
+  };
+  const id = upsertPlayer(fields, editId);
+  persistData();
+  document.getElementById('overlayPlayer').classList.remove('show');
+  selectedId = id;
+  renderSidebar(); renderMain();
+}
+
+// ============================================================
+// ADD SESSION MODAL
+// ============================================================
+function openAddSession(){
+  const playerSel = document.getElementById('sPlayer');
+  const players = Object.values(athleteMap);
+  if (!players.length){ alert('Add a player first.'); openAddPlayer(); return; }
+  playerSel.innerHTML = players.map(p=>`<option value="${p.id}" ${p.id===selectedId?'selected':''}>${p.name}</option>`).join('');
+  document.getElementById('sDate').value = new Date().toISOString().slice(0,10);
+  document.getElementById('sNotes').value = '';
+  const testSel = document.getElementById('sTest');
+  testSel.innerHTML = GROUPS.map(g=>`<optgroup label="${g}">${Object.values(TEST_GROUPS).filter(t=>t.group===g).map(t=>`<option value="${t.id}">${t.name}</option>`).join('')}</optgroup>`).join('');
+  testSel.onchange = buildSessionFields;
+  buildSessionFields();
+  document.getElementById('overlaySession').classList.add('show');
+}
+function buildSessionFields(){
+  const test = TEST_GROUPS[document.getElementById('sTest').value];
+  const wrap = document.getElementById('sFields');
+  if (test.aerobic){
+    wrap.innerHTML = `<div class="subhead">Aerobic capacity</div>
+      <div class="field"><label>Test type</label><select data-f="aerobic_testType"><option>30-15 IFT</option><option>Time Trial</option></select></div>
+      <div class="field-2col">
+        <div class="field"><label>VIFT — 30-15 IFT (km/h)</label><input type="number" step="any" data-f="aerobic_vift"></div>
+        <div class="field"></div>
+      </div>
+      <div class="field-2col">
+        <div class="field"><label>Trial distance (m)</label><input type="number" step="any" data-f="aerobic_trialDistance_m"></div>
+        <div class="field"><label>Trial time (s)</label><input type="number" step="any" data-f="aerobic_trialTime_s"></div>
+      </div>`;
+    return;
+  }
+  let html = '';
+  test.fields.forEach(m=>{
+    if (test.paired){
+      html += `<div class="subhead">${m.label.split(' — ')[1]||m.label} ${m.unit?'('+m.unit+')':''}</div>
+        <div class="side-pair">
+          <div class="field"><label>Left</label><input type="number" step="any" data-f="${m.key}_L"></div>
+          <div class="field"><label>Right</label><input type="number" step="any" data-f="${m.key}_R"></div>
+        </div>`;
+    } else {
+      html += `<div class="field"><label>${m.label.split(' — ')[1]||m.label} ${m.unit?'('+m.unit+')':''}</label><input type="number" step="any" data-f="${m.key}"></div>`;
+    }
+  });
+  wrap.innerHTML = html;
+}
+function saveAddSession(){
+  const playerId = document.getElementById('sPlayer').value;
+  const date = document.getElementById('sDate').value;
+  if (!playerId || !date){ alert('Select a player and date.'); return; }
+  const fields = {};
+  document.querySelectorAll('#sFields [data-f]').forEach(el=>{
+    fields[el.dataset.f] = el.tagName==='SELECT' ? el.value : (el.value===''?null:Number(el.value));
+  });
+  const notes = document.getElementById('sNotes').value.trim();
+  if (notes) fields.notes = notes;
+  upsertSession(playerId, date, fields);
+  persistData();
+  document.getElementById('overlaySession').classList.remove('show');
+  selectedId = playerId;
+  renderSidebar(); renderMain();
+}
+
+// ============================================================
+// MANAGE PLAYERS MODAL
+// ============================================================
+function openManagePlayers(){
+  const players = Object.values(athleteMap);
+  document.getElementById('playersListBody').innerHTML = players.length ? players.map(p=>`
+    <div class="row-item">
+      <div style="flex:1;">
+        <div class="ri-name">${p.name}</div>
+        <div class="ri-meta">${p.position||''}${p.age?' · '+p.age+'y':''} · ${p.gender} · ${p.sessions.length} session${p.sessions.length===1?'':'s'}</div>
+      </div>
+      <button class="btn-sm" onclick="document.getElementById('overlayPlayers').classList.remove('show'); openAddPlayer('${p.id}')">Edit</button>
+      <button class="btn-sm" style="color:#dc2626;" onclick="removePlayer('${p.id}')">Remove</button>
+    </div>`).join('') : '<p class="hint">No players yet.</p>';
+  document.getElementById('overlayPlayers').classList.add('show');
+}
+function removePlayer(id){
+  if (!confirm('Remove this player and all their sessions? This cannot be undone.')) return;
+  delete nameIndex[normalizeName(athleteMap[id]?.name)];
+  delete athleteMap[id];
+  persistData();
+  if (selectedId===id) selectedId = Object.keys(athleteMap)[0]||null;
+  openManagePlayers();
+  renderSidebar(); renderMain();
+}
+function removeSession(playerId, date){
+  if (!confirm('Delete this session?')) return;
+  const p = athleteMap[playerId];
+  p.sessions = p.sessions.filter(s=>s.test_date!==date);
+  persistData();
+  renderMain();
+}
+
+// ============================================================
+// EMPTY STATE + INIT
+// ============================================================
+function renderEmptyState(){
+  document.getElementById('main').innerHTML = `<div class="state-screen"><div class="config-box" style="text-align:center;">
+    <h3>No players yet</h3>
+    <p>Add your squad here in the dashboard, or bring in a Google Sheet as a one-off bulk import.</p>
+    <div style="display:flex;gap:10px;justify-content:center;margin-top:14px;">
+      <button class="btn" onclick="openAddPlayer()">+ Add player</button>
+      <button class="btn-sm" onclick="showConfig()">Import from Google Sheet</button>
+    </div>
+  </div></div>`;
+}
+(async function init(){
+  await loadPersisted();
+  renderSidebar();
+  if (Object.keys(athleteMap).length){ selectedId = Object.keys(athleteMap)[0]; renderMain(); }
+  else renderEmptyState();
+})();
+</script>
+</body>
+</html>
