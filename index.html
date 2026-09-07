@@ -44,6 +44,12 @@
   .radar-list { flex:1; min-width:240px; display:flex; flex-direction:column; gap:4px; }
   .radar-row { display:flex; justify-content:space-between; font-size:12px; padding:5px 8px; border-radius:6px; background:var(--surface-alt); }
   .radar-row b { font-weight:700; }
+  .composite-picker { display:flex; flex-wrap:wrap; gap:6px; padding:10px; background:var(--surface-alt); border:1px solid var(--border); border-radius:8px; margin-bottom:10px; }
+  .composite-picker label { display:flex; align-items:center; gap:5px; font-size:11.5px; background:#fff; border:1px solid var(--border); border-radius:6px; padding:4px 8px; cursor:pointer; }
+  .lb-mode-toggle { display:inline-flex; gap:4px; background:var(--surface-alt); padding:3px; border-radius:8px; border:1px solid var(--border); }
+  .lb-mode-toggle button { border:none; background:transparent; padding:6px 12px; border-radius:6px; font-size:11.5px; font-weight:600; color:var(--text-muted); cursor:pointer; }
+  .lb-mode-toggle button.active { background:var(--accent); color:#fff; }
+  .heat-cell { border-radius:5px; padding:3px 6px; display:inline-block; min-width:44px; text-align:center; font-weight:600; }
   .alist { flex:1; overflow-y:auto; padding:6px 0; }
   .aitem { display:flex; align-items:center; gap:10px; padding:8px 14px; cursor:pointer; border-left:2px solid transparent; }
   .aitem:hover { background:var(--surface-alt); }
@@ -570,6 +576,24 @@ function squadZ(val, stats){
   if (val==null || stats.n<2 || stats.sd===0 || stats.sd==null) return null;
   return (val - stats.mean) / stats.sd;
 }
+function quartiles(values){
+  const s = [...values].sort((a,b)=>a-b);
+  const n = s.length;
+  const pct = p => { const idx=p*(n-1), lo=Math.floor(idx), hi=Math.ceil(idx); if(lo===hi) return s[lo]; return s[lo]+(s[hi]-s[lo])*(idx-lo); };
+  return { min:s[0], q1:pct(0.25), median:pct(0.5), q3:pct(0.75), max:s[n-1] };
+}
+function compositeZ(zScores){
+  const valid = zScores.filter(z=>z!=null);
+  if (!valid.length) return null;
+  return valid.reduce((a,b)=>a+b,0)/valid.length;
+}
+function heatColor(score01){ // 0=worst(red) .. 1=best(green), via amber midpoint
+  score01 = Math.max(0, Math.min(1, score01));
+  let r,g,b;
+  if (score01 < 0.5){ const t=score01/0.5; r=220+t*(202-220); g=38+t*(138-38); b=38+t*(4-38); }
+  else { const t=(score01-0.5)/0.5; r=202+t*(22-202); g=138+t*(163-138); b=4+t*(74-4); }
+  return `rgba(${Math.round(r)},${Math.round(g)},${Math.round(b)},0.3)`;
+}
 const SQUAD_MIN_N = 5; // below this, the Squad toggle is disabled for that metric
 function refToggleHtml(scope, current){
   return `<div class="ref-toggle" data-scope="${scope}">
@@ -603,12 +627,13 @@ const DEFAULT_RESULTS_URL  = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vR
 let CONFIG = { athletesUrl: DEFAULT_ATHLETES_URL, resultsUrl: DEFAULT_RESULTS_URL };
 let SETTINGS = { asymFlag: 10, stsThreshold: null };
 let athleteMap={}, nameIndex={}, selectedId=null, searchQ='', genderFilterVal='all', mode='individual';
-let refFrame = { trends:'league', scatter:'league', radar:'league' };
+let refFrame = { trends:'league', scatter:'league', radar:'league', heatmap:'league' };
 function setRefFrame(scope, val){
   refFrame[scope] = val;
   if (scope==='trends') drawAllTrendCharts();
   if (scope==='scatter') drawTeamScatter();
   if (scope==='radar') drawRadar();
+  if (scope==='heatmap') buildSquadTable();
 }
 let saveTimer=null, dataSaveTimer=null;
 function persist(){
@@ -747,6 +772,7 @@ function switchTeamTab(t){
   document.querySelectorAll('.team-tc').forEach(e=>e.classList.toggle('active', e.dataset.t===t));
   if (t==='teamtrends') setTimeout(drawTeamTrendChart,60);
   if (t==='scatter') setTimeout(()=>{ buildScatterAxisOptions(); drawTeamScatter(); },60);
+  if (t==='analysis') setTimeout(initTeamAnalysis,60);
 }
 
 // ============================================================
@@ -1127,8 +1153,11 @@ function renderTeam(){
         <div class="team-tab tab active" data-t="squad" onclick="switchTeamTab('squad')">Squad Table</div>
         <div class="team-tab tab" data-t="teamtrends" onclick="switchTeamTab('teamtrends')">Team Trends</div>
         <div class="team-tab tab" data-t="scatter" onclick="switchTeamTab('scatter')">Team Scatter</div>
+        <div class="team-tab tab" data-t="analysis" onclick="switchTeamTab('analysis')">Team Analysis</div>
       </div>
-      <div class="team-tc tc active" data-t="squad"><div id="squadBody" style="padding:0"></div></div>
+      <div class="team-tc tc active" data-t="squad"><div class="quad-body" style="padding-bottom:0;">
+        <div class="quad-ctrl-row">${refToggleHtml('heatmap', refFrame.heatmap)}<span class="ref-note">Cell color = status against the selected reference. Toggle changes color only, not the raw values shown.</span></div>
+      </div><div id="squadBody" style="padding:0"></div></div>
       <div class="team-tc tc" data-t="teamtrends"><div class="charts-body">
         <div class="quad-ctrl-row">
           <span class="control-label">Metric</span>
@@ -1148,6 +1177,23 @@ function renderTeam(){
         <div id="scatterContainer"></div>
         <div class="quad-legend" id="scatterLegend"></div>
       </div></div>
+      <div class="team-tc tc" data-t="analysis"><div class="quad-body">
+        <div class="quad-ctrl-row">
+          <div class="lb-mode-toggle" id="lbModeToggle">
+            <button data-lm="single" class="active" onclick="setLbMode('single')">Single metric</button>
+            <button data-lm="composite" onclick="setLbMode('composite')">Composite</button>
+          </div>
+          <span class="control-label" id="lbMetricLabel">Metric</span>
+          <select class="axis-select" id="lbMetric"></select>
+        </div>
+        <div id="lbCompositePicker" style="display:none;"></div>
+        <div class="chart-title" style="margin-top:6px;">Squad Leaderboard — standardized (Z) score</div>
+        <canvas id="leaderboardChart"></canvas>
+        <div class="chart-note" id="lbNote" style="margin:10px 0 18px;"></div>
+        <div class="chart-title">Squad Distribution</div>
+        <div id="boxPlotContainer"></div>
+        <div class="chart-note"><span>▪ Box = middle 50% of the squad (IQR) · line = median · whiskers = full range · dots = individual players</span></div>
+      </div></div>
     </div>`;
   buildSquadTable();
   buildTeamTrendMetricOptions();
@@ -1155,6 +1201,7 @@ function renderTeam(){
 }
 function buildSquadTable(){
   const players = Object.values(athleteMap).filter(a=>genderFilterVal==='all'||a.gender===genderFilterVal);
+  const useSquad = refFrame.heatmap==='squad';
   let html = '';
   GROUPS.forEach(g=>{
     html += `<div class="grp-heading">${g}</div><table><thead><tr><th>Player</th>${METRICS.filter(m=>m.group===g).map(m=>`<th>${m.label}</th>`).join('')}</tr></thead><tbody>`;
@@ -1162,9 +1209,18 @@ function buildSquadTable(){
       const d = a.sessions.length ? buildLatest(a.sessions) : {};
       html += `<tr><td class="lbl">${a.name}</td>` + METRICS.filter(m=>m.group===g).map(m=>{
         const v = repVal(m, d);
-        const s = a.sessions.length ? metricScore(m,d,a.gender) : null;
-        const cls = s!=null ? SCORE_COLS[Math.round(s)] : '';
-        return `<td style="text-align:right;">${v==null?'<span class="miss">—</span>':fmt(v)+' '+m.unit}${cls?` <span class="pill-dot" style="display:inline-block;background:${cls}"></span>`:''}</td>`;
+        if (v==null) return `<td style="text-align:right;"><span class="miss">—</span></td>`;
+        let bg = 'transparent';
+        if (!a.sessions.length){ /* no data at all */ }
+        else if (useSquad){
+          const stats = squadStats(m.key, a.gender, a.id);
+          const z = squadZ(v, stats);
+          if (z!=null) bg = heatColor(0.5 + Math.max(-2,Math.min(2,z))/4);
+        } else {
+          const s = metricScore(m,d,a.gender);
+          if (s!=null) bg = heatColor(s/4);
+        }
+        return `<td style="text-align:right;"><span class="heat-cell" style="background:${bg}">${fmt(v)}</span></td>`;
       }).join('') + `</tr>`;
     });
     html += `</tbody></table>`;
@@ -1194,6 +1250,144 @@ function drawTeamTrendChart(){
   const ctx = document.getElementById('teamTrendChart').getContext('2d');
   if (teamTrendChartInstance) teamTrendChartInstance.destroy();
   teamTrendChartInstance = new Chart(ctx, { type:'line', data:{ labels:dates, datasets:[{ label:'Squad average — '+m.label, data:avgPerDate, borderColor:'#f26522', backgroundColor:'#f26522', tension:0.25, spanGaps:true }] }, options:{responsive:true, plugins:{legend:{position:'bottom'}}, scales:{y:{beginAtZero:false}}} });
+}
+
+// ============================================================
+// TEAM ANALYSIS — Z-score leaderboard + squad distribution box plot.
+// Z-scores are computed within-gender (each player vs their own
+// gender's squad spread), so mixed-gender leaderboards are still
+// standardized fairly before being ranked together.
+// ============================================================
+let lbMode = 'single';
+let lbCompositeKeys = new Set(RADAR_METRIC_KEYS);
+let leaderboardChartInstance = null;
+function setLbMode(m){
+  lbMode = m;
+  document.querySelectorAll('#lbModeToggle button').forEach(b=>b.classList.toggle('active', b.dataset.lm===m));
+  document.getElementById('lbMetric').style.display = m==='single' ? '' : 'none';
+  document.getElementById('lbMetricLabel').style.display = m==='single' ? '' : 'none';
+  document.getElementById('lbCompositePicker').style.display = m==='composite' ? 'flex' : 'none';
+  drawLeaderboard(); drawBoxPlot();
+}
+function initTeamAnalysis(){
+  const sel = document.getElementById('lbMetric');
+  sel.innerHTML = GROUPS.map(g=>`<optgroup label="${g}">${METRICS.filter(m=>m.group===g && !m.noNorm).map(m=>`<option value="${m.key}">${m.label}</option>`).join('')}</optgroup>`).join('');
+  sel.value = 'cmj_jumpHeight';
+  sel.onchange = ()=>{ drawLeaderboard(); drawBoxPlot(); };
+  const picker = document.getElementById('lbCompositePicker');
+  picker.className = 'composite-picker';
+  picker.innerHTML = RADAR_METRIC_KEYS.map(k=>{
+    const m = metricByKey(k);
+    return `<label><input type="checkbox" value="${k}" ${lbCompositeKeys.has(k)?'checked':''} onchange="toggleCompositeKey('${k}',this.checked)">${m.label}</label>`;
+  }).join('');
+  drawLeaderboard(); drawBoxPlot();
+}
+function toggleCompositeKey(key, checked){
+  if (checked) lbCompositeKeys.add(key); else lbCompositeKeys.delete(key);
+  drawLeaderboard(); drawBoxPlot();
+}
+// Returns [{a, value, z}] for the current mode/metric selection.
+function leaderboardData(){
+  const players = Object.values(athleteMap).filter(a=>(genderFilterVal==='all'||a.gender===genderFilterVal) && a.sessions.length);
+  if (lbMode==='single'){
+    const key = document.getElementById('lbMetric').value;
+    const m = metricByKey(key);
+    return players.map(a=>{
+      const d = buildLatest(a.sessions);
+      const val = repVal(m, d);
+      if (val==null) return null;
+      const stats = squadStats(key, a.gender, a.id);
+      return { a, value:val, z:squadZ(val, stats), unit:m.unit, label:m.label };
+    }).filter(x=>x!=null && x.z!=null);
+  }
+  const keys = [...lbCompositeKeys];
+  return players.map(a=>{
+    const d = buildLatest(a.sessions);
+    const zs = keys.map(k=>{
+      const m = metricByKey(k);
+      const val = repVal(m, d);
+      if (val==null) return null;
+      return squadZ(val, squadStats(k, a.gender, a.id));
+    });
+    const z = compositeZ(zs);
+    if (z==null) return null;
+    return { a, value:z, z, unit:'composite Z', label:'Composite score' };
+  }).filter(x=>x!=null);
+}
+function drawLeaderboard(){
+  const canvas = document.getElementById('leaderboardChart'); if (!canvas) return;
+  const data = leaderboardData().sort((x,y)=>y.z-x.z);
+  const note = document.getElementById('lbNote');
+  if (data.length<3){
+    canvas.style.display='none';
+    if (note) note.innerHTML = 'Not enough players with this data yet (need at least 3) to build a leaderboard.';
+    if (leaderboardChartInstance){ leaderboardChartInstance.destroy(); leaderboardChartInstance=null; }
+    return;
+  }
+  canvas.style.display='';
+  const n = data.length;
+  const colors = data.map((x,i)=>{
+    const third = n/3;
+    if (i < third) return '#16a34a';
+    if (i < 2*third) return '#ca8a04';
+    return '#dc2626';
+  });
+  const ctx = canvas.getContext('2d');
+  if (leaderboardChartInstance) leaderboardChartInstance.destroy();
+  canvas.parentElement.style.height = Math.max(220, n*26)+'px';
+  canvas.height = Math.max(220, n*26);
+  leaderboardChartInstance = new Chart(ctx, {
+    type:'bar',
+    data:{ labels:data.map(x=>x.a.name), datasets:[{ label:'Z-score', data:data.map(x=>+x.z.toFixed(2)), backgroundColor:colors }] },
+    options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{display:false}, tooltip:{ callbacks:{ label:ctx=>{ const d=data[ctx.dataIndex]; return `${d.label}: ${fmt(d.value)} ${d.unit==='composite Z'?'':d.unit} (Z=${fmt(d.z)})`; } } } },
+      scales:{ x:{ title:{display:true, text:'Standardized (Z) score — 0 = squad average'} } } }
+  });
+  if (note) note.innerHTML = `Green = top third of squad · Amber = middle third · Red = bottom third. ${lbMode==='composite' ? `Composite of ${lbCompositeKeys.size} test${lbCompositeKeys.size===1?'':'s'}.` : ''} Each player is standardized against their own gender's squad spread.`;
+}
+function drawBoxPlot(){
+  const container = document.getElementById('boxPlotContainer'); if (!container) return;
+  const data = leaderboardData();
+  if (data.length<4){
+    container.innerHTML = '<div style="padding:30px;text-align:center;color:#7a8290">Not enough players yet (need at least 4) to plot a distribution.</div>';
+    return;
+  }
+  const isComposite = lbMode==='composite';
+  const values = data.map(x=>isComposite ? x.z : x.value);
+  const q = quartiles(values);
+  const vMin = Math.min(...values), vMax = Math.max(...values);
+  const pad = (vMax-vMin)*0.12 || 1;
+  const dMin = vMin-pad, dMax = vMax+pad;
+  const W=760, H=150, ML=60, MR=40, MT=30, MB=40, CW=W-ML-MR;
+  const sx = v => ML + (v-dMin)/(dMax-dMin)*CW;
+  const boxY = 55, boxH = 34;
+  let s = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;font-family:-apple-system,sans-serif">`;
+  // whiskers
+  s += `<line x1="${sx(q.min)}" y1="${boxY+boxH/2}" x2="${sx(q.q1)}" y2="${boxY+boxH/2}" stroke="#94a3b8" stroke-width="1.5"/>`;
+  s += `<line x1="${sx(q.q3)}" y1="${boxY+boxH/2}" x2="${sx(q.max)}" y2="${boxY+boxH/2}" stroke="#94a3b8" stroke-width="1.5"/>`;
+  s += `<line x1="${sx(q.min)}" y1="${boxY+8}" x2="${sx(q.min)}" y2="${boxY+boxH-8}" stroke="#94a3b8" stroke-width="1.5"/>`;
+  s += `<line x1="${sx(q.max)}" y1="${boxY+8}" x2="${sx(q.max)}" y2="${boxY+boxH-8}" stroke="#94a3b8" stroke-width="1.5"/>`;
+  // box (IQR)
+  s += `<rect x="${sx(q.q1)}" y="${boxY}" width="${sx(q.q3)-sx(q.q1)}" height="${boxH}" fill="rgba(242,101,34,0.15)" stroke="#f26522" stroke-width="1.5" rx="3"/>`;
+  s += `<line x1="${sx(q.median)}" y1="${boxY}" x2="${sx(q.median)}" y2="${boxY+boxH}" stroke="#f26522" stroke-width="2.5"/>`;
+  // player dots (jittered)
+  const jitter = [-11,9,-5,13,-13,5,-9,11,-3,3,-7,7,0];
+  data.forEach((d,i)=>{
+    const v = isComposite ? d.z : d.value;
+    const cx = sx(v), cy = boxY+boxH/2 + jitter[i%jitter.length];
+    const col = d.z>=0.5 ? '#16a34a' : d.z<=-0.5 ? '#dc2626' : '#ca8a04';
+    s += `<circle cx="${cx}" cy="${cy}" r="4.5" fill="${col}" stroke="#fff" stroke-width="1"><title>${d.a.name}: ${fmt(d.value)} ${d.unit==='composite Z'?'':d.unit}</title></circle>`;
+  });
+  // axis
+  for (let i=0;i<=4;i++){
+    const v = dMin+(dMax-dMin)*i/4, px = sx(v);
+    s += `<text x="${px}" y="${H-14}" font-size="10" text-anchor="middle" fill="#7a8290">${fmt(v)}</text>`;
+    s += `<line x1="${px}" y1="${boxY-6}" x2="${px}" y2="${boxY+boxH+6}" stroke="#f1f2f4" stroke-width="1"/>`;
+  }
+  s += `<text x="${ML+CW/2}" y="${H-2}" font-size="10.5" text-anchor="middle" fill="#444c56">${isComposite ? 'Composite Z-score' : (metricByKey(document.getElementById('lbMetric').value).label+' ('+metricByKey(document.getElementById('lbMetric').value).unit+')')}</text>`;
+  s += `<text x="${ML}" y="18" font-size="10" fill="#7a8290">n=${data.length} · median ${fmt(q.median)}</text>`;
+  s += '</svg>';
+  container.innerHTML = s;
 }
 
 // ============================================================
