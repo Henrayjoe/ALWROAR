@@ -594,7 +594,13 @@ function fmt(n){ if(n==null||isNaN(n)) return '—'; return (Math.round(n*100)/1
 // ============================================================
 // PERSISTED CONFIG (window.storage — never localStorage)
 // ============================================================
-let CONFIG = { athletesUrl:'', resultsUrl:'' };
+// Default sheet URLs — pre-filled so the dashboard never starts empty
+// even in a fresh browser/storage. Change these in Settings → Sheet if
+// the source sheet ever moves; that edit is saved and takes over from
+// here.
+const DEFAULT_ATHLETES_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRks76KA_H05de2gPv3Ni-OxogWovkyrjwWjAuzh0UYaIt-0zGRPHMhkssFX8dw3kImnMDZ5-T7ZQak/pub?gid=0&single=true&output=csv';
+const DEFAULT_RESULTS_URL  = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRks76KA_H05de2gPv3Ni-OxogWovkyrjwWjAuzh0UYaIt-0zGRPHMhkssFX8dw3kImnMDZ5-T7ZQak/pub?gid=1486780869&single=true&output=csv';
+let CONFIG = { athletesUrl: DEFAULT_ATHLETES_URL, resultsUrl: DEFAULT_RESULTS_URL };
 let SETTINGS = { asymFlag: 10, stsThreshold: null };
 let athleteMap={}, nameIndex={}, selectedId=null, searchQ='', genderFilterVal='all', mode='individual';
 let refFrame = { trends:'league', scatter:'league', radar:'league' };
@@ -625,6 +631,8 @@ async function loadPersisted(){
     if (res && res.value){
       const p = JSON.parse(res.value);
       if (p.CONFIG) CONFIG = p.CONFIG;
+      if (!CONFIG.athletesUrl) CONFIG.athletesUrl = DEFAULT_ATHLETES_URL;
+      if (!CONFIG.resultsUrl) CONFIG.resultsUrl = DEFAULT_RESULTS_URL;
       if (p.NORMS) NORMS = p.NORMS;
       if (p.SETTINGS) SETTINGS = Object.assign(SETTINGS, p.SETTINGS);
     }
@@ -649,32 +657,45 @@ async function loadPersisted(){
 // ============================================================
 async function fetchSheet(url){ const r=await fetch(url); if(!r.ok) throw new Error(`HTTP ${r.status} — check the URL`); return r.text(); }
 function parseCSV(text){
-  const lines = text.trim().split('\n').map(l=>{
+  const rows = text.trim().split('\n').map(l=>{
     const cols=[]; let cur='', inQ=false;
     for (const ch of l){ if(ch==='"'){inQ=!inQ} else if(ch===','&&!inQ){cols.push(cur.trim());cur=''} else {cur+=ch} }
     cols.push(cur.trim()); return cols;
   });
-  const headers = lines[0].map(h=>h.trim());
-  return lines.slice(1).filter(r=>r.some(c=>c)).map(r=>{ const obj={}; headers.forEach((h,i)=>obj[h]=(r[i]||'').trim()); return obj; });
+  // Find the real header row: scan the first few rows for one containing a
+  // 'name' cell. Handles an extra title/grouping row above the actual
+  // column keys (e.g. row 1 = test names like "Countermovement Jump",
+  // row 2 = the real column keys like cmj_jumpHeight).
+  let headerIdx = 0;
+  for (let i=0; i<Math.min(5, rows.length); i++){
+    if (rows[i].some(c=>c.trim().toLowerCase()==='name')){ headerIdx = i; break; }
+  }
+  const headers = rows[headerIdx].map(h=>h.trim());
+  return rows.slice(headerIdx+1).filter(r=>r.some(c=>c)).map(r=>{ const obj={}; headers.forEach((h,i)=>obj[h]=(r[i]||'').trim()); return obj; });
 }
-async function importFromSheet(){
-  if (!CONFIG.athletesUrl || !CONFIG.resultsUrl){ alert('Add both sheet URLs first.'); return; }
+async function importFromSheet(silent){
+  if (!CONFIG.athletesUrl || !CONFIG.resultsUrl){ if(!silent) alert('Add both sheet URLs first.'); return; }
   const btn = document.getElementById('btnImportSheet');
   if (btn){ btn.disabled=true; btn.textContent='Importing…'; }
+  const statusEl = document.getElementById('sheetStatus');
+  if (statusEl && silent) statusEl.textContent = 'Syncing from sheet…';
   try{
     const [aText,rText] = await Promise.all([fetchSheet(CONFIG.athletesUrl), fetchSheet(CONFIG.resultsUrl)]);
     const athletes=parseCSV(aText), results=parseCSV(rText);
     const {added,updated} = mergeAthletesFromSheet(athletes);
     const {matched,unmatched} = mergeResultsFromSheet(results);
     persistData(); persist();
-    document.getElementById('sheetStatus').textContent = `${Object.keys(athleteMap).length} players · last import ${added} added, ${updated} updated, ${matched} sessions`;
+    const stamp = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+    if (statusEl) statusEl.textContent = `${Object.keys(athleteMap).length} players · synced ${stamp}`;
     if (!selectedId){ const ids=Object.keys(athleteMap); if(ids.length) selectedId=ids[0]; }
     renderSidebar(); renderMain();
     if (btn){ btn.disabled=false; btn.textContent='Import now'; }
-    if (unmatched>0) alert(`Imported. ${unmatched} result row(s) had a name that didn't match any athlete and were skipped.`);
+    if (unmatched>0 && !silent) alert(`Imported. ${unmatched} result row(s) had a name that didn't match any athlete and were skipped.`);
   }catch(e){
     if (btn){ btn.disabled=false; btn.textContent='Import now'; }
-    alert('Import failed: '+e.message);
+    if (statusEl) statusEl.textContent = 'Sheet sync failed — click Import now to retry';
+    if (!silent) alert('Import failed: '+e.message);
+    else console.warn('Silent auto-import failed:', e.message);
   }
 }
 
@@ -1575,6 +1596,10 @@ function renderEmptyState(){
   renderSidebar();
   if (Object.keys(athleteMap).length){ selectedId = Object.keys(athleteMap)[0]; renderMain(); }
   else renderEmptyState();
+  // Auto-sync from the linked sheet on every load, quietly — merges in,
+  // never wipes local dashboard entries. Settings → Sheet still has a
+  // manual "Import now" for an on-demand refresh mid-session.
+  importFromSheet(true);
 })();
 </script>
 </body>
