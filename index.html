@@ -34,6 +34,16 @@
   .gender-filter { display:flex; gap:4px; padding:8px 12px; border-bottom:1px solid var(--border); }
   .gender-filter button { flex:1; border:1px solid var(--border); background:var(--surface-alt); padding:5px 0; border-radius:6px; font-size:11px; font-weight:600; color:var(--text-muted); cursor:pointer; }
   .gender-filter button.active { background:var(--accent-light); color:var(--accent); border-color:var(--accent); }
+  .ref-toggle { display:inline-flex; gap:4px; background:var(--surface-alt); padding:3px; border-radius:8px; border:1px solid var(--border); }
+  .ref-toggle button { border:none; background:transparent; padding:6px 12px; border-radius:6px; font-size:11.5px; font-weight:600; color:var(--text-muted); cursor:pointer; }
+  .ref-toggle button.active { background:var(--accent); color:#fff; }
+  .ref-note { font-size:11px; color:var(--text-muted); margin-left:8px; }
+  .scatter-legend-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:4px; }
+  .radar-wrap { display:flex; gap:24px; flex-wrap:wrap; align-items:flex-start; }
+  .radar-canvas-box { flex:1; min-width:320px; max-width:520px; }
+  .radar-list { flex:1; min-width:240px; display:flex; flex-direction:column; gap:4px; }
+  .radar-row { display:flex; justify-content:space-between; font-size:12px; padding:5px 8px; border-radius:6px; background:var(--surface-alt); }
+  .radar-row b { font-weight:700; }
   .alist { flex:1; overflow-y:auto; padding:6px 0; }
   .aitem { display:flex; align-items:center; gap:10px; padding:8px 14px; cursor:pointer; border-left:2px solid transparent; }
   .aitem:hover { background:var(--surface-alt); }
@@ -536,6 +546,37 @@ function sidebarCol(d, gender){
   const avg = scores.reduce((a,b)=>a+b,0)/scores.length;
   return SCORE_COLS[Math.max(0,Math.min(4,Math.round(avg)))];
 }
+// ============================================================
+// SQUAD STATISTICS — Z-scores computed live from your own roster,
+// as an alternative reference frame to the external VALD norms.
+// Small-N-aware: callers should check .n before trusting .sd.
+// ============================================================
+function squadValues(key, gender, excludeId){
+  const m = metricByKey(key);
+  return Object.values(athleteMap)
+    .filter(p=>p.gender===gender && p.sessions.length && p.id!==excludeId)
+    .map(p=>repVal(m, buildLatest(p.sessions)))
+    .filter(v=>v!=null);
+}
+function squadStats(key, gender, excludeId){
+  const values = squadValues(key, gender, excludeId);
+  const n = values.length;
+  if (n===0) return {mean:null, sd:null, n:0};
+  const mn = values.reduce((a,b)=>a+b,0)/n;
+  const sd = n<2 ? 0 : Math.sqrt(values.reduce((a,b)=>a+(b-mn)**2,0)/(n-1));
+  return {mean:mn, sd, n};
+}
+function squadZ(val, stats){
+  if (val==null || stats.n<2 || stats.sd===0 || stats.sd==null) return null;
+  return (val - stats.mean) / stats.sd;
+}
+const SQUAD_MIN_N = 5; // below this, the Squad toggle is disabled for that metric
+function refToggleHtml(scope, current){
+  return `<div class="ref-toggle" data-scope="${scope}">
+    <button data-r="league" class="${current==='league'?'active':''}" onclick="setRefFrame('${scope}','league')">League norms</button>
+    <button data-r="squad" class="${current==='squad'?'active':''}" onclick="setRefFrame('${scope}','squad')">Squad spread</button>
+  </div>`;
+}
 function latestVal(sessions, key){ for(const s of sessions){ if (s[key]!=null) return s[key]; } return null; }
 function buildLatest(sessions){
   const out = {};
@@ -556,6 +597,13 @@ function fmt(n){ if(n==null||isNaN(n)) return '—'; return (Math.round(n*100)/1
 let CONFIG = { athletesUrl:'', resultsUrl:'' };
 let SETTINGS = { asymFlag: 10, stsThreshold: null };
 let athleteMap={}, nameIndex={}, selectedId=null, searchQ='', genderFilterVal='all', mode='individual';
+let refFrame = { trends:'league', scatter:'league', radar:'league' };
+function setRefFrame(scope, val){
+  refFrame[scope] = val;
+  if (scope==='trends') drawAllTrendCharts();
+  if (scope==='scatter') drawTeamScatter();
+  if (scope==='radar') drawRadar();
+}
 let saveTimer=null, dataSaveTimer=null;
 function persist(){
   clearTimeout(saveTimer);
@@ -670,12 +718,14 @@ function switchTab(t){
   document.querySelectorAll('.tc').forEach(e=>e.classList.toggle('active', e.dataset.t===t));
   if (t==='trends') setTimeout(drawAllTrendCharts,60);
   if (t==='quadrants') setTimeout(()=>drawQuadrant(),60);
+  if (t==='profile') setTimeout(drawRadar,60);
   if (t==='history') setTimeout(renderHistory,60);
 }
 function switchTeamTab(t){
   document.querySelectorAll('.team-tab').forEach(e=>e.classList.toggle('active', e.dataset.t===t));
   document.querySelectorAll('.team-tc').forEach(e=>e.classList.toggle('active', e.dataset.t===t));
   if (t==='teamtrends') setTimeout(drawTeamTrendChart,60);
+  if (t==='scatter') setTimeout(()=>{ buildScatterAxisOptions(); drawTeamScatter(); },60);
 }
 
 // ============================================================
@@ -718,12 +768,17 @@ function renderIndividual(){
         <div class="tab active" data-t="results" onclick="switchTab('results')">Latest Results</div>
         <div class="tab" data-t="trends" onclick="switchTab('trends')">Trend Charts</div>
         <div class="tab" data-t="quadrants" onclick="switchTab('quadrants')">Quadrants</div>
+        <div class="tab" data-t="profile" onclick="switchTab('profile')">Profile</div>
         <div class="tab" data-t="history" onclick="switchTab('history')">History</div>
       </div>
       <div class="tc active" data-t="results"><div class="results-body" id="resultsBody"></div></div>
       <div class="tc" data-t="trends"><div class="charts-body">
+        <div class="quad-ctrl-row">
+          ${refToggleHtml('trends', refFrame.trends)}
+          <span class="ref-note" id="trendsRefNote"></span>
+        </div>
         <div class="chart-grid" id="chartGrid"></div>
-        <div class="chart-note"><span>▪ Shaded band = norm range for ${genderLabel.toLowerCase()} (25th–75th percentile, where set)</span><span>▪ Paired tests show L and R separately</span></div>
+        <div class="chart-note"><span>▪ League mode: shaded band = norm range for ${genderLabel.toLowerCase()} (25th–75th percentile, where set)</span><span>▪ Squad mode: shaded band = your own roster's mean ± 1 SD</span><span>▪ Paired tests show L and R separately</span></div>
       </div></div>
       <div class="tc" data-t="quadrants"><div class="quad-body">
         <div class="quad-ctrl-row">
@@ -737,6 +792,16 @@ function renderIndividual(){
           <span class="ql-dot" style="background:#f26522"></span><span>${a.name}</span>
           <span class="ql-dot" style="background:#cbd5e1"></span><span>Other ${genderLabel.toLowerCase()} players (anonymous)</span>
           <span>Dividers at norm-band midpoint (or squad median if no norm set)</span>
+        </div>
+      </div></div>
+      <div class="tc" data-t="profile"><div class="quad-body">
+        <div class="quad-ctrl-row">
+          ${refToggleHtml('radar', refFrame.radar)}
+          <span class="ref-note" id="radarRefNote"></span>
+        </div>
+        <div class="radar-wrap">
+          <div class="radar-canvas-box"><canvas id="radarChart"></canvas></div>
+          <div class="radar-list" id="radarList"></div>
         </div>
       </div></div>
       <div class="tc" data-t="history"><div id="historyBody" style="padding:14px 20px"></div></div>
@@ -826,13 +891,26 @@ function drawAllTrendCharts(){
   grid.innerHTML = METRICS.map(m=>`<div class="chart-wrap"><div class="chart-title">${m.label}</div><canvas id="tc_${m.key}" height="140"></canvas></div>`).join('');
   const hist = [...a.sessions].sort((x,y)=>new Date(x.test_date)-new Date(y.test_date));
   const labels = hist.map(s=>s.test_date);
+  const useSquad = refFrame.trends==='squad';
+  let minN = Infinity;
   METRICS.forEach(m=>{
     const ctx = document.getElementById('tc_'+m.key).getContext('2d');
-    const band = NORMS[m.key] && NORMS[m.key][a.gender];
     const datasets = [];
-    if (band && band.min!=null && band.max!=null){
-      datasets.push({label:'min', data:labels.map(()=>band.min), borderColor:'transparent', pointRadius:0, fill:false});
-      datasets.push({label:'Norm range', data:labels.map(()=>band.max), borderColor:'transparent', backgroundColor:'rgba(148,163,184,0.28)', pointRadius:0, fill:'-1'});
+    if (useSquad){
+      const stats = squadStats(m.key, a.gender, a.id);
+      if (stats.n>0) minN = Math.min(minN, stats.n);
+      if (stats.n>=2 && stats.sd>0){
+        const lo = stats.mean - stats.sd, hi = stats.mean + stats.sd;
+        datasets.push({label:'min', data:labels.map(()=>lo), borderColor:'transparent', pointRadius:0, fill:false});
+        datasets.push({label:'Squad ±1SD', data:labels.map(()=>hi), borderColor:'transparent', backgroundColor:'rgba(58,141,122,0.22)', pointRadius:0, fill:'-1'});
+        datasets.push({label:'Squad mean', data:labels.map(()=>stats.mean), borderColor:'#3a8d7a', borderDash:[3,3], pointRadius:0});
+      }
+    } else {
+      const band = NORMS[m.key] && NORMS[m.key][a.gender];
+      if (band && band.min!=null && band.max!=null){
+        datasets.push({label:'min', data:labels.map(()=>band.min), borderColor:'transparent', pointRadius:0, fill:false});
+        datasets.push({label:'Norm range', data:labels.map(()=>band.max), borderColor:'transparent', backgroundColor:'rgba(148,163,184,0.28)', pointRadius:0, fill:'-1'});
+      }
     }
     if (m.paired){
       datasets.push({label:'Left', data:hist.map(s=>s[m.key+'_L']), borderColor:'#f26522', backgroundColor:'#f26522', tension:0.25, spanGaps:true, pointRadius:3});
@@ -844,6 +922,8 @@ function drawAllTrendCharts(){
     }
     trendCharts.push(new Chart(ctx, { type:'line', data:{labels,datasets}, options:{responsive:true, plugins:{legend:{display:m.paired, position:'bottom', labels:{filter:l=>l.text==='Left'||l.text==='Right'}}}, scales:{y:{beginAtZero:false}} } }));
   });
+  const note = document.getElementById('trendsRefNote');
+  if (note) note.textContent = useSquad ? (minN===Infinity ? 'No squad data yet for this player\'s gender.' : `Squad n≈${minN} (min across metrics) — bands hidden where n<2.`) : '';
 }
 
 // ============================================================
@@ -925,6 +1005,75 @@ function drawQuadrant(){
 }
 
 // ============================================================
+// ATHLETIC PROFILE (radar chart)
+// ============================================================
+const RADAR_METRIC_KEYS = [
+  'cmj_jumpHeight','cmj_peakPowerBW','slcmj_jumpHeight','hop_meanJumpHeight','hop_rsi',
+  'slhop_meanJumpHeight','sj_jumpHeight','eur','hipAnkle_ratio','hipKnee_ratio',
+  'imtp_relForce','dsi','speed_10m','speed_20m','speed_maxVel','aerobic_result',
+];
+function squadRadarScore(m, val, gender, athleteId){
+  const stats = squadStats(m.key, gender, athleteId);
+  const z = squadZ(val, stats);
+  if (z==null) return null;
+  return Math.max(0, Math.min(4, 2 + z)); // squad mean -> 2, ±1SD -> ±1
+}
+let radarChartInstance = null;
+function drawRadar(){
+  const a = athleteMap[selectedId]; if (!a) return;
+  const d = buildLatest(a.sessions);
+  const useSquad = refFrame.radar==='squad';
+  const axisData = [];
+  RADAR_METRIC_KEYS.forEach(key=>{
+    const m = metricByKey(key);
+    const val = repVal(m, d);
+    if (val==null) return;
+    let score, note;
+    if (useSquad){
+      const stats = squadStats(key, a.gender, a.id);
+      if (stats.n < SQUAD_MIN_N){ return; } // skip axis, not enough squad data
+      score = squadRadarScore(m, val, a.gender, a.id);
+      const z = squadZ(val, stats);
+      note = `${fmt(val)} ${m.unit} (${z>=0?'+':''}${fmt(z)} SD, squad n=${stats.n})`;
+    } else {
+      score = metricScore(m, d, a.gender);
+      if (score==null){ return; } // no league band for this gender, skip axis
+      note = `${fmt(val)} ${m.unit}`;
+    }
+    axisData.push({ label:m.label.length>22 ? m.label.slice(0,20)+'…' : m.label, fullLabel:m.label, score, note });
+  });
+
+  const listEl = document.getElementById('radarList');
+  const noteEl = document.getElementById('radarRefNote');
+  if (!axisData.length){
+    document.getElementById('radarChart').style.display='none';
+    listEl.innerHTML = `<p class="hint">${useSquad ? 'Not enough squad data yet (need at least '+SQUAD_MIN_N+' tested players per metric) to build a squad-relative profile.' : 'No league norms are set for this player\'s gender on any profile metric yet — add some in Settings → Norms.'}</p>`;
+    if (radarChartInstance){ radarChartInstance.destroy(); radarChartInstance=null; }
+    if (noteEl) noteEl.textContent = '';
+    return;
+  }
+  document.getElementById('radarChart').style.display='';
+
+  const ctx = document.getElementById('radarChart').getContext('2d');
+  if (radarChartInstance) radarChartInstance.destroy();
+  const benchmarkVal = useSquad ? 2 : 3; // squad mean, or league "At Standard" floor
+  radarChartInstance = new Chart(ctx, {
+    type:'radar',
+    data:{
+      labels: axisData.map(x=>x.label),
+      datasets:[
+        { label:a.name, data:axisData.map(x=>x.score), borderColor:'#f26522', backgroundColor:'rgba(242,101,34,0.22)', pointBackgroundColor:'#f26522' },
+        { label:useSquad?'Squad mean':'At Standard', data:axisData.map(()=>benchmarkVal), borderColor:'#94a3b8', borderDash:[4,3], pointRadius:0, backgroundColor:'transparent' },
+      ]
+    },
+    options:{ responsive:true, scales:{ r:{ min:0, max:4, ticks:{stepSize:1, showLabelBackdrop:false} } }, plugins:{ legend:{position:'bottom'} } }
+  });
+
+  listEl.innerHTML = axisData.map(x=>`<div class="radar-row"><span>${x.fullLabel}</span><b>${x.note}</b></div>`).join('');
+  if (noteEl) noteEl.textContent = useSquad ? `Squad mode — axes with fewer than ${SQUAD_MIN_N} tested squad members are hidden.` : 'League mode — axes with no norm set for this gender are hidden.';
+}
+
+// ============================================================
 // HISTORY
 // ============================================================
 function renderHistory(){
@@ -956,6 +1105,7 @@ function renderTeam(){
       <div class="tabs">
         <div class="team-tab tab active" data-t="squad" onclick="switchTeamTab('squad')">Squad Table</div>
         <div class="team-tab tab" data-t="teamtrends" onclick="switchTeamTab('teamtrends')">Team Trends</div>
+        <div class="team-tab tab" data-t="scatter" onclick="switchTeamTab('scatter')">Team Scatter</div>
       </div>
       <div class="team-tc tc active" data-t="squad"><div id="squadBody" style="padding:0"></div></div>
       <div class="team-tc tc" data-t="teamtrends"><div class="charts-body">
@@ -965,6 +1115,17 @@ function renderTeam(){
         </div>
         <canvas id="teamTrendChart" height="110"></canvas>
         <div class="chart-note"><span>▪ Squad average per test date${genderFilterVal!=='all'?' ('+(genderFilterVal==='W'?'Women':'Men')+' only)':''}</span></div>
+      </div></div>
+      <div class="team-tc tc" data-t="scatter"><div class="quad-body">
+        <div class="quad-ctrl-row">
+          <span class="control-label">X axis</span>
+          <select class="axis-select" id="scatterX"></select>
+          <span class="control-label">Y axis</span>
+          <select class="axis-select" id="scatterY"></select>
+          ${refToggleHtml('scatter', refFrame.scatter)}
+        </div>
+        <div id="scatterContainer"></div>
+        <div class="quad-legend" id="scatterLegend"></div>
       </div></div>
     </div>`;
   buildSquadTable();
@@ -1012,6 +1173,94 @@ function drawTeamTrendChart(){
   const ctx = document.getElementById('teamTrendChart').getContext('2d');
   if (teamTrendChartInstance) teamTrendChartInstance.destroy();
   teamTrendChartInstance = new Chart(ctx, { type:'line', data:{ labels:dates, datasets:[{ label:'Squad average — '+m.label, data:avgPerDate, borderColor:'#f26522', backgroundColor:'#f26522', tension:0.25, spanGaps:true }] }, options:{responsive:true, plugins:{legend:{position:'bottom'}}, scales:{y:{beginAtZero:false}}} });
+}
+
+// ============================================================
+// TEAM SCATTER — whole squad plotted at once (not anonymized),
+// colored by overall status, with a League/Squad reference toggle.
+// ============================================================
+function buildScatterAxisOptions(){
+  const xs=document.getElementById('scatterX'), ys=document.getElementById('scatterY');
+  const opts = GROUPS.map(g=>`<optgroup label="${g}">${METRICS.filter(m=>m.group===g).map(m=>`<option value="${m.key}">${m.label}</option>`).join('')}</optgroup>`).join('');
+  xs.innerHTML = opts; ys.innerHTML = opts;
+  if (!xs.value || xs.selectedIndex<0) xs.value = 'cmj_jumpHeight';
+  if (!ys.value || ys.selectedIndex<0) ys.value = 'cmj_peakPowerBW';
+  xs.onchange = drawTeamScatter; ys.onchange = drawTeamScatter;
+}
+function drawTeamScatter(){
+  const xKey = document.getElementById('scatterX')?.value, yKey = document.getElementById('scatterY')?.value;
+  if (!xKey || !yKey) return;
+  const mx = metricByKey(xKey), my = metricByKey(yKey);
+  const singleGender = genderFilterVal!=='all' ? genderFilterVal : null;
+  const players = Object.values(athleteMap).filter(a=>(genderFilterVal==='all'||a.gender===genderFilterVal) && a.sessions.length);
+  const pts = players.map(a=>{
+    const d = buildLatest(a.sessions);
+    return { a, x: repVal(mx,d), y: repVal(my,d), col: sidebarCol(d, a.gender) };
+  }).filter(p=>p.x!=null && p.y!=null);
+  const container = document.getElementById('scatterContainer');
+  const legend = document.getElementById('scatterLegend');
+  if (pts.length<2){
+    container.innerHTML = `<div style="padding:40px;text-align:center;color:#7a8290">Not enough players with both ${mx.label} and ${my.label} recorded yet.</div>`;
+    legend.innerHTML = '';
+    return;
+  }
+  const xVals = pts.map(p=>p.x), yVals = pts.map(p=>p.y);
+  const xMin=Math.min(...xVals), xMax=Math.max(...xVals), yMin=Math.min(...yVals), yMax=Math.max(...yVals);
+  const xPad=(xMax-xMin)*0.15||Math.abs(xMax)*0.1||1, yPad=(yMax-yMin)*0.15||Math.abs(yMax)*0.1||1;
+  const dxMin=xMin-xPad, dxMax=xMax+xPad, dyMin=yMin-yPad, dyMax=yMax+yPad;
+  const W=760,H=460,ML=60,MR=20,MT=20,MB=40,CW=W-ML-MR,CH=H-MT-MB;
+  const sx = v => ML + (v-dxMin)/(dxMax-dxMin)*CW;
+  const sy = v => MT + CH - (v-dyMin)/(dyMax-dyMin)*CH;
+
+  let xDiv=null, yDiv=null, nNote='';
+  if (singleGender){
+    const useSquad = refFrame.scatter==='squad';
+    if (useSquad){
+      const xs2 = squadStats(xKey, singleGender), ys2 = squadStats(yKey, singleGender);
+      if (xs2.n>=2) xDiv = xs2.mean;
+      if (ys2.n>=2) yDiv = ys2.mean;
+      nNote = `Squad mode — n=${xs2.n} (${mx.label}), n=${ys2.n} (${my.label})`;
+    } else {
+      const xBand = NORMS[xKey]&&NORMS[xKey][singleGender], yBand = NORMS[yKey]&&NORMS[yKey][singleGender];
+      if (xBand&&xBand.min!=null&&xBand.max!=null) xDiv=(xBand.min+xBand.max)/2;
+      if (yBand&&yBand.min!=null&&yBand.max!=null) yDiv=(yBand.min+yBand.max)/2;
+      nNote = 'League mode — dividers at norm-band midpoint (where set)';
+    }
+  }
+
+  let s = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-height:480px;font-family:-apple-system,sans-serif">`;
+  if (xDiv!=null && yDiv!=null){
+    const xDivPx=sx(xDiv), yDivPx=sy(yDiv);
+    [[ML,MT,xDivPx-ML,yDivPx-MT,'#fff8e1'],[xDivPx,MT,W-MR-xDivPx,yDivPx-MT,'#f0fdf4'],
+     [ML,yDivPx,xDivPx-ML,H-MB-yDivPx,'#fef2f2'],[xDivPx,yDivPx,W-MR-xDivPx,H-MB-yDivPx,'#eff6ff']]
+      .forEach(([x,y,w,h,fill])=>{ s+=`<rect x="${x}" y="${y}" width="${Math.max(0,w)}" height="${Math.max(0,h)}" fill="${fill}" opacity="0.6"/>`; });
+    s += `<line x1="${xDivPx}" y1="${MT}" x2="${xDivPx}" y2="${H-MB}" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6,3"/>`;
+    s += `<line x1="${ML}" y1="${yDivPx}" x2="${W-MR}" y2="${yDivPx}" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6,3"/>`;
+  }
+  s += `<rect x="${ML}" y="${MT}" width="${CW}" height="${CH}" fill="none" stroke="#e4e6ea" stroke-width="1"/>`;
+  for (let i=0;i<=4;i++){
+    const vx = dxMin+(dxMax-dxMin)*i/4, px = sx(vx);
+    s += `<text x="${px}" y="${H-MB+15}" font-size="9" text-anchor="middle" fill="#7a8290">${fmt(vx)}</text>`;
+    const vy = dyMin+(dyMax-dyMin)*i/4, py = sy(vy);
+    s += `<text x="${ML-7}" y="${py+3}" font-size="9" text-anchor="end" fill="#7a8290">${fmt(vy)}</text>`;
+  }
+  s += `<text x="${ML+CW/2}" y="${H-6}" font-size="11" text-anchor="middle" fill="#444c56" font-weight="500">${mx.label} (${mx.unit})</text>`;
+  s += `<text x="12" y="${MT+CH/2}" font-size="11" text-anchor="middle" fill="#444c56" font-weight="500" transform="rotate(-90,12,${MT+CH/2})">${my.label} (${my.unit})</text>`;
+  pts.forEach(p=>{
+    const cx=sx(p.x), cy=sy(p.y);
+    const ini=(p.a.name||'?').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+    s += `<circle cx="${cx}" cy="${cy}" r="9" fill="${p.col}" stroke="#fff" stroke-width="1.5"><title>${p.a.name} — ${fmt(p.x)} ${mx.unit}, ${fmt(p.y)} ${my.unit}</title></circle>`;
+    s += `<text x="${cx}" y="${cy+3}" font-size="7.5" text-anchor="middle" fill="#fff" font-weight="700" style="pointer-events:none">${ini}</text>`;
+  });
+  s += '</svg>';
+  container.innerHTML = s;
+  legend.innerHTML = `
+    <span class="scatter-legend-dot" style="background:${SCORE_COLS[4]}"></span>Above Standard
+    <span class="scatter-legend-dot" style="background:${SCORE_COLS[3]}"></span>At Standard
+    <span class="scatter-legend-dot" style="background:${SCORE_COLS[1]}"></span>Building
+    <span class="scatter-legend-dot" style="background:${SCORE_COLS[0]}"></span>Primary Focus
+    <span class="scatter-legend-dot" style="background:#c2c6cc"></span>No norm data
+    <span style="margin-left:auto">${singleGender ? nNote : 'Showing both genders — select Women or Men in the sidebar filter to see reference dividers.'}</span>`;
 }
 
 // ============================================================
