@@ -68,7 +68,7 @@
   .ptag  { font-size:11px; padding:3px 9px; border-radius:20px; background:var(--surface-alt); border:1px solid var(--border); color:var(--text-secondary); }
   .ptag.inj { background:#fffbeb; border-color:#fbbf24; color:#92400e; }
   .cat-status-heading { font-size:10.5px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.08em; font-weight:700; padding-left:2px; }
-  .cat-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; }
+  .cat-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; }
   .cat-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:12px 14px; }
   .cat-name   { font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.07em; font-weight:600; margin-bottom:5px; }
   .cat-status { font-size:13px; font-weight:600; }
@@ -243,12 +243,15 @@
       <button data-p="Sheet" class="active">Sheet</button>
       <button data-p="Norms">Norms</button>
       <button data-p="Thresholds">Thresholds</button>
+      <button data-p="Backup">Backup</button>
     </div>
     <div class="settings-pane active" id="paneSheet"></div>
     <div class="settings-pane" id="paneNorms"></div>
     <div class="settings-pane" id="paneThresholds"></div>
+    <div class="settings-pane" id="paneBackup"></div>
   </div>
 </div>
+<input type="file" id="restoreFileInput" accept=".json" style="display:none;" onchange="handleRestoreFile(event)">
 
 <script>
 // ============================================================
@@ -271,6 +274,9 @@ const METRICS = [
   {key:'slhop_rsi', label:'SL Hop Test (10/5) — RSI', unit:'', lb:false, group:'Jump', paired:true},
   {key:'slhop_activeStiffness', label:'SL Hop Test (10/5) — Active Stiffness', unit:'N/m', noNorm:true, group:'Jump', paired:true},
   {key:'zigzag_distance', label:'Zig Zag 5-Hop — Distance', unit:'m', lb:false, noNorm:true, group:'Jump', paired:true},
+  {key:'sj_jumpHeight', label:'Squat Jump — Jump Height', unit:'cm', lb:false, group:'Jump', paired:false},
+  {key:'sj_peakPowerBW', label:'Squat Jump — Peak Power/BW', unit:'W/kg', lb:false, group:'Jump', paired:false},
+  {key:'eur', label:'EUR (CMJ ÷ SJ)', unit:'', lb:false, group:'Jump', paired:false, derived:true},
   {key:'hipAnkle_addPeak', label:'Hip Add (ankle) — Peak Force', unit:'N', lb:false, group:'Hip Strength', paired:true},
   {key:'hipAnkle_addMean', label:'Hip Add (ankle) — Mean Force', unit:'N', noNorm:true, group:'Hip Strength', paired:true},
   {key:'hipAnkle_abdPeak', label:'Hip Abd (ankle) — Peak Force', unit:'N', lb:false, group:'Hip Strength', paired:true},
@@ -281,30 +287,33 @@ const METRICS = [
   {key:'hipKnee_abdPeak', label:'Hip Abd (knee) — Peak Force', unit:'N', lb:false, group:'Hip Strength', paired:true},
   {key:'hipKnee_abdMean', label:'Hip Abd (knee) — Mean Force', unit:'N', noNorm:true, group:'Hip Strength', paired:true},
   {key:'hipKnee_ratio', label:'Hip ADD/ABD Ratio (knee)', unit:'', lb:false, group:'Hip Strength', paired:true, derived:true},
+  {key:'imtp_relForce', label:'IMTP — Relative Peak Force', unit:'N/kg', lb:false, group:'Strength', paired:false},
+  {key:'dsi', label:'DSI (CMJ force ÷ IMTP force)', unit:'', lb:false, group:'Strength', paired:false, derived:true},
   {key:'speed_5m', label:'Sprint — 5 m', unit:'s', lb:true, noNorm:true, group:'Speed & Aerobic', paired:false},
-  {key:'speed_10m', label:'Sprint — 10 m', unit:'s', lb:true, noNorm:true, group:'Speed & Aerobic', paired:false},
-  {key:'speed_20m', label:'Sprint — 20 m', unit:'s', lb:true, noNorm:true, group:'Speed & Aerobic', paired:false},
+  {key:'speed_10m', label:'Sprint — 10 m', unit:'s', lb:true, group:'Speed & Aerobic', paired:false},
+  {key:'speed_20m', label:'Sprint — 20 m', unit:'s', lb:true, group:'Speed & Aerobic', paired:false},
   {key:'speed_30m', label:'Sprint — 30 m', unit:'s', lb:true, noNorm:true, group:'Speed & Aerobic', paired:false},
   {key:'speed_40m', label:'Sprint — 40 m', unit:'s', lb:true, noNorm:true, group:'Speed & Aerobic', paired:false},
-  {key:'aerobic_result', label:'Aerobic Capacity', unit:'km/h', lb:false, noNorm:true, group:'Speed & Aerobic', paired:false, derived:true},
+  {key:'speed_maxVel', label:'Max Velocity (flying sprint)', unit:'m/s', lb:false, group:'Speed & Aerobic', paired:false},
+  {key:'aerobic_result', label:'Aerobic Capacity (MAS)', unit:'km/h', lb:false, group:'Speed & Aerobic', paired:false, derived:true},
+  {key:'vo2max_result', label:'Est. VO₂max (from MAS)', unit:'ml/kg/min', lb:false, group:'Speed & Aerobic', paired:false, derived:true},
   {key:'sts_reps', label:'Single Leg Sit-to-Stand', unit:'reps', lb:false, noNorm:true, group:'Capacity', paired:true, stsThreshold:true},
   {key:'hamstringBridge_reps', label:'Single Leg Hamstring Bridge (to failure)', unit:'reps', lb:false, noNorm:true, group:'Capacity', paired:true},
   {key:'heelRaise_reps', label:'Single Leg Heel Raise', unit:'reps', lb:false, noNorm:true, group:'Capacity', paired:true},
   {key:'copenhagen_time', label:'Copenhagen Plank', unit:'s', lb:false, noNorm:true, group:'Capacity', paired:true},
   {key:'sidePlank_time', label:'Side Plank', unit:'s', lb:false, noNorm:true, group:'Capacity', paired:true},
 ];
-const GROUPS = ['Jump','Hip Strength','Speed & Aerobic','Capacity'];
+const GROUPS = ['Jump','Hip Strength','Strength','Speed & Aerobic','Capacity'];
 function metricByKey(k){ return METRICS.find(m=>m.key===k); }
 const SL = ['Primary Focus','Building','Approaching Standard','At Standard','Above Standard'];
 const SC = ['p0','p1','p2','p3','p4'];
 const SCORE_COLS = ['#dc2626','#ea580c','#ca8a04','#1a56db','#16a34a'];
 
 // ============================================================
-// NORMS — pre-filled from VALD 2025/26 normative reports (25th–75th
-// senior percentile band). W = Women's Super League report. M = Premier
-// League report (men), used as the closest available professional
-// reference. Sources shown in Settings → Norms; edit any of these to
-// match your own club's data.
+// NORMS — pre-filled from VALD 2025/26 normative reports where a real
+// percentile table exists, and from published literature elsewhere.
+// Confidence varies a lot by row — see Settings → Norms for the source
+// and confidence tier behind every band. W = women, M = men.
 // ============================================================
 let NORMS = {
   cmj_jumpHeight:        { W:{min:26.4, max:31.7}, M:{min:35.3, max:42.4} },
@@ -319,33 +328,54 @@ let NORMS = {
   slhop_meanJumpHeight:  { W:{min:14.8, max:18.8}, M:{min:18.5, max:24.6} },
   slhop_meanPeakPowerBW: { W:{min:64.7, max:79.7}, M:{min:79, max:97} },
   slhop_rsi:             { W:{min:1.22, max:1.52}, M:{min:1.41, max:1.76} },
+  sj_jumpHeight:         { W:{min:25.6, max:31.1}, M:{min:32.5, max:39.2} },
+  sj_peakPowerBW:        { W:{min:42.2, max:49.4}, M:{min:52.7, max:59.9} },
+  eur:                   { W:{min:0.90, max:1.15}, M:{min:0.99, max:1.13} },
   hipAnkle_addPeak:      { W:{min:138, max:185},   M:{min:176, max:257} },
   hipAnkle_abdPeak:      { W:{min:146, max:180},   M:{min:189, max:252} },
   hipAnkle_ratio:        { W:{min:0.94, max:1.15}, M:{min:0.89, max:1.16} },
   hipKnee_addPeak:       { W:{min:359, max:432} },
   hipKnee_abdPeak:       { W:{min:339, max:404} },
   hipKnee_ratio:         { W:{min:0.99, max:1.18} },
+  imtp_relForce:         { W:{min:20.2, max:23.0}, M:{min:30, max:45} },
+  dsi:                   { W:{min:0.60, max:0.80}, M:{min:0.69, max:0.90} },
+  speed_10m:             { W:{min:1.90, max:2.05}, M:{min:1.65, max:1.80} },
+  speed_20m:             { W:{min:3.25, max:3.55}, M:{min:2.85, max:3.05} },
+  speed_maxVel:          { W:{min:7.2, max:8.0},   M:{min:8.3, max:9.5} },
+  aerobic_result:        { W:{min:13.1, max:16.5}, M:{min:16.2, max:18.0} },
+  vo2max_result:         { W:{min:46, max:57.6},   M:{min:55, max:70} },
 };
-// Short source strings shown under each norm range in the UI.
+// Short source strings shown under each norm range in the UI — check
+// these before trusting a band your athletes' status is scored against.
 const NORM_SOURCES = {
-  cmj_jumpHeight:  'VALD WSL / Premier League 2025/26, senior 25th–75th percentile (Impulse-Momentum)',
-  cmj_peakPowerBW: 'VALD WSL / Premier League 2025/26, senior 25th–75th percentile',
-  cmj_contractionTime: 'VALD WSL / Premier League 2025/26 — concentric duration, senior 25th–75th',
-  cmj_conForce:    'VALD WSL / Premier League 2025/26 — force at zero velocity/BM, senior 25th–75th',
-  slcmj_jumpHeight: 'VALD Single Leg Jump (SLJ), senior 25th–75th — closest available proxy for SLCMJ',
-  slcmj_peakPowerBW:'VALD SLJ, senior 25th–75th — proxy for SLCMJ',
-  slcmj_eccBrakingImpulse:'VALD SLJ eccentric deceleration impulse, senior 25th–75th — proxy for SLCMJ',
-  hop_meanJumpHeight:'VALD Hop Test, senior 25th–75th (flight time)',
-  hop_rsi:         'VALD Hop Test, senior 25th–75th (flight time)',
-  slhop_meanJumpHeight:'VALD Single Leg Drop Jump (SLDJ), senior 25th–75th — proxy for SL Hop Test',
-  slhop_meanPeakPowerBW:'VALD SLDJ, senior 25th–75th — proxy for SL Hop Test',
-  slhop_rsi:       'VALD SLDJ, senior 25th–75th — proxy for SL Hop Test',
-  hipAnkle_addPeak:'VALD ForceFrame Hip ADD/ABD Supine (Ankle), senior 25th–75th',
-  hipAnkle_abdPeak:'VALD ForceFrame Hip ADD/ABD Supine (Ankle), senior 25th–75th',
-  hipAnkle_ratio:  'VALD ForceFrame Hip ADD:ABD ratio (ankle), senior 25th–75th',
-  hipKnee_addPeak: 'VALD ForceFrame Hip ADD/ABD Supine (Knee) — WSL report only, no PL equivalent found',
-  hipKnee_abdPeak: 'VALD ForceFrame Hip ADD/ABD Supine (Knee) — WSL report only, no PL equivalent found',
-  hipKnee_ratio:   'VALD ForceFrame Hip ADD:ABD ratio (knee) — WSL report only, no PL equivalent found',
+  cmj_jumpHeight:  'VALD WSL / Premier League 2025/26, senior 25th–75th percentile (Impulse-Momentum). Well supported.',
+  cmj_peakPowerBW: 'VALD WSL / Premier League 2025/26, senior 25th–75th percentile. Well supported.',
+  cmj_contractionTime: 'VALD WSL / Premier League 2025/26 — concentric duration, senior 25th–75th. Well supported.',
+  cmj_conForce:    'VALD WSL / Premier League 2025/26 — force at zero velocity/BM, senior 25th–75th. Well supported.',
+  slcmj_jumpHeight: 'VALD Single Leg Jump (SLJ), senior 25th–75th — closest available proxy for SLCMJ. Moderate confidence.',
+  slcmj_peakPowerBW:'VALD SLJ, senior 25th–75th — proxy for SLCMJ. Moderate confidence.',
+  slcmj_eccBrakingImpulse:'VALD SLJ eccentric deceleration impulse, senior 25th–75th — proxy for SLCMJ. Moderate confidence.',
+  hop_meanJumpHeight:'VALD Hop Test, senior 25th–75th (flight time). Well supported.',
+  hop_rsi:         'VALD Hop Test, senior 25th–75th (flight time). Well supported.',
+  slhop_meanJumpHeight:'VALD Single Leg Drop Jump (SLDJ), senior 25th–75th — proxy for SL Hop Test. Moderate confidence.',
+  slhop_meanPeakPowerBW:'VALD SLDJ, senior 25th–75th — proxy for SL Hop Test. Moderate confidence.',
+  slhop_rsi:       'VALD SLDJ, senior 25th–75th — proxy for SL Hop Test. Moderate confidence.',
+  sj_jumpHeight:   'VALD WSL / Premier League 2025/26, senior 25th–75th percentile (Impulse-Momentum). Well supported.',
+  sj_peakPowerBW:  'VALD WSL / Premier League 2025/26, senior 25th–75th percentile. Well supported.',
+  eur:             'Men: real VALD Premier League 2025/26 EUR distribution, 25th–75th, well supported. Women: no EUR table in the WSL report — using the general team-sport literature band (McGuigan et al. 2006), not women\'s-specific, moderate confidence.',
+  hipAnkle_addPeak:'VALD ForceFrame Hip ADD/ABD Supine (Ankle), senior 25th–75th. Well supported.',
+  hipAnkle_abdPeak:'VALD ForceFrame Hip ADD/ABD Supine (Ankle), senior 25th–75th. Well supported.',
+  hipAnkle_ratio:  'VALD ForceFrame Hip ADD:ABD ratio (ankle), senior 25th–75th. Well supported.',
+  hipKnee_addPeak: 'VALD ForceFrame Hip ADD/ABD Supine (Knee) — WSL report only, no PL equivalent found. Well supported for women, no band set for men.',
+  hipKnee_abdPeak: 'VALD ForceFrame Hip ADD/ABD Supine (Knee) — WSL report only, no PL equivalent found. Well supported for women, no band set for men.',
+  hipKnee_ratio:   'VALD ForceFrame Hip ADD:ABD ratio (knee) — WSL report only, no PL equivalent found. Well supported for women, no band set for men.',
+  imtp_relForce:   'Men: Badby et al. 2025, professional soccer, well supported (median ~40 N/kg). Women: Seraphin & Edson et al., pro female club soccer, single study n=28, moderate confidence.',
+  dsi:             'Men: real VALD Premier League 2025/26 DSI distribution, 25th–75th, well supported. Women: Sheppard et al. 2011 "concurrent strength training" zone as cited in the VALD WSL report — a training-recommendation band, not a women\'s-specific population percentile. Moderate confidence.',
+  speed_10m:       'Men: Haugen et al. 2019, well supported. Women: derived from Vescovi 2012 (FAiM study, female pro try-out sample) mean split speed ± SD, converted to time — moderate confidence, not a direct percentile table.',
+  speed_20m:       'Men: Haugen et al. 2019, well supported. Women: derived from Vescovi 2012 (FAiM study) — moderate confidence.',
+  speed_maxVel:    'Men: LaLiga match-speed data, well supported. Women: derived from Vescovi 2012 (FAiM study) peak flying-sprint speed ± SD — moderate confidence.',
+  aerobic_result:  'Men: 4.5–5.0 m/s per Baker & Heaney (2015) field-sport MAS review, well supported. Women: back-calculated from published women\'s soccer VO2max ranges (not a direct MAS measurement) — lower confidence, treat as a rough estimate.',
+  vo2max_result:   'Auto-calculated from MAS using the Léger & Mercier (1984) formula: VO2max = MAS(km/h) × 3.5. Band shown is the general elite-soccer VO2max range from the literature, not derived from the MAS band above.',
 };
 
 // ============================================================
@@ -367,12 +397,16 @@ function computeAge(birthdate, fallbackAge){
   return pf(fallbackAge);
 }
 function normalizeName(n){ return (n||'').trim().toLowerCase().replace(/\s+/g,' '); }
+function safeDiv(a,b){ a=pf(a); b=pf(b); if(a==null||b==null||b===0) return null; return +(a/b).toFixed(2); }
 function recomputeDerived(d){
   d.hipAnkle_ratio_L = ratioOf(d.hipAnkle_addPeak_L, d.hipAnkle_abdPeak_L);
   d.hipAnkle_ratio_R = ratioOf(d.hipAnkle_addPeak_R, d.hipAnkle_abdPeak_R);
   d.hipKnee_ratio_L  = ratioOf(d.hipKnee_addPeak_L, d.hipKnee_abdPeak_L);
   d.hipKnee_ratio_R  = ratioOf(d.hipKnee_addPeak_R, d.hipKnee_abdPeak_R);
+  d.eur = safeDiv(d.cmj_jumpHeight, d.sj_jumpHeight);
+  d.dsi = safeDiv(d.cmj_conForce, d.imtp_relForce);
   d.aerobic_result = aerobicResult(d.aerobic_testType, d.aerobic_vift, d.aerobic_trialDistance_m, d.aerobic_trialTime_s);
+  d.vo2max_result = (d.aerobic_result!=null) ? +(d.aerobic_result*3.5).toFixed(1) : null;
   return d;
 }
 function deriveSession(row){
@@ -395,7 +429,8 @@ function deriveSession(row){
 // ---- Test groupings for the Add Session form (derived from METRICS prefixes) ----
 const TEST_NAMES = {
   cmj:'Countermovement Jump', slcmj:'Single Leg CMJ', hop:'Hop Test (10/5)', slhop:'SL Hop Test (10/5)',
-  zigzag:'Zig Zag 5-Hop', hipAnkle:'Hip ADD/ABD — Ankle', hipKnee:'Hip ADD/ABD — Knee',
+  zigzag:'Zig Zag 5-Hop', sj:'Squat Jump', hipAnkle:'Hip ADD/ABD — Ankle', hipKnee:'Hip ADD/ABD — Knee',
+  imtp:'Isometric Mid-Thigh Pull (IMTP)',
   speed:'Sprint Splits', sts:'Single Leg Sit-to-Stand', hamstringBridge:'Single Leg Hamstring Bridge (to failure)',
   heelRaise:'Single Leg Heel Raise', copenhagen:'Copenhagen Plank', sidePlank:'Side Plank',
 };
@@ -470,12 +505,12 @@ function dHtml(val, prev, lb){
   return `<span class="delta" style="color:${col}">${unc?'→':imp?'↑':'↓'} ${d>0?'+':''}${d.toFixed(1)}%</span>`;
 }
 function repVal(m, d){
-  if (m.paired || m.derived){ const l=d[m.key+'_L'], r=d[m.key+'_R']; if(l==null&&r==null) return null; return (l!=null&&r!=null)?(l+r)/2:(l??r); }
+  if (m.paired){ const l=d[m.key+'_L'], r=d[m.key+'_R']; if(l==null&&r==null) return null; return (l!=null&&r!=null)?(l+r)/2:(l??r); }
   return d[m.key];
 }
 function metricScore(m, d, gender){
   if (m.noNorm) return null;
-  if (m.paired || m.derived){
+  if (m.paired){
     const sL = bs(d[m.key+'_L'], m.key, gender), sR = bs(d[m.key+'_R'], m.key, gender);
     const scores=[sL,sR].filter(s=>s!=null);
     return scores.length ? scores.reduce((a,b)=>a+b,0)/scores.length : null;
@@ -505,7 +540,7 @@ function latestVal(sessions, key){ for(const s of sessions){ if (s[key]!=null) r
 function buildLatest(sessions){
   const out = {};
   METRICS.forEach(m=>{
-    if (m.paired || m.derived){ out[m.key+'_L']=latestVal(sessions,m.key+'_L'); out[m.key+'_R']=latestVal(sessions,m.key+'_R'); }
+    if (m.paired){ out[m.key+'_L']=latestVal(sessions,m.key+'_L'); out[m.key+'_R']=latestVal(sessions,m.key+'_R'); }
     else out[m.key]=latestVal(sessions,m.key);
   });
   out.aerobic_testType = latestVal(sessions,'aerobic_testType');
@@ -774,21 +809,6 @@ function renderMetricRow(m, d, prevD, a){
       <td style="font-size:11px;color:var(--text-muted)">${normText(m,a.gender)}</td>
       <td>${dHtml(curAvg,prevAvg,m.lb)}</td></tr>`;
   }
-  if (m.derived){
-    const l = d[m.key+'_L'], r = d[m.key+'_R'];
-    if (l==null && r==null) return `<tr><td class="lbl">${m.label}</td><td colspan="2" class="miss">— not tested</td><td style="font-size:11px;color:var(--text-muted)">${normText(m,a.gender)}</td><td class="miss">—</td></tr>`;
-    const sL = bs(l,m.key,a.gender), sR = bs(r,m.key,a.gender);
-    const scores=[sL,sR].filter(s=>s!=null);
-    const avgScore = scores.length ? Math.round(scores.reduce((x,y)=>x+y,0)/scores.length) : null;
-    const prevL = prevD ? prevD[m.key+'_L'] : null, prevR = prevD ? prevD[m.key+'_R'] : null;
-    const prevAvg = (prevL!=null&&prevR!=null) ? (prevL+prevR)/2 : (prevL??prevR);
-    const curAvg = (l!=null&&r!=null) ? (l+r)/2 : (l??r);
-    return `<tr><td class="lbl">${m.label}</td>
-      <td><span class="rval">${fmt(l)} / ${fmt(r)}</span><span class="runit">L / R</span>${pbBadge(m,'L',l,a)}${pbBadge(m,'R',r,a)}</td>
-      <td>${pill(avgScore)}</td>
-      <td style="font-size:11px;color:var(--text-muted)">${normText(m,a.gender)}</td>
-      <td>${dHtml(curAvg,prevAvg,m.lb)}</td></tr>`;
-  }
   const val = d[m.key], prev = prevD ? prevD[m.key] : null;
   if (val==null) return `<tr><td class="lbl">${m.label}</td><td colspan="2" class="miss">— not tested</td><td style="font-size:11px;color:var(--text-muted)">${normText(m,a.gender)}</td><td class="miss">—</td></tr>`;
   const s = bs(val, m.key, a.gender);
@@ -814,7 +834,7 @@ function drawAllTrendCharts(){
       datasets.push({label:'min', data:labels.map(()=>band.min), borderColor:'transparent', pointRadius:0, fill:false});
       datasets.push({label:'Norm range', data:labels.map(()=>band.max), borderColor:'transparent', backgroundColor:'rgba(148,163,184,0.28)', pointRadius:0, fill:'-1'});
     }
-    if (m.paired || m.derived){
+    if (m.paired){
       datasets.push({label:'Left', data:hist.map(s=>s[m.key+'_L']), borderColor:'#f26522', backgroundColor:'#f26522', tension:0.25, spanGaps:true, pointRadius:3});
       datasets.push({label:'Right', data:hist.map(s=>s[m.key+'_R']), borderColor:'#3568c4', backgroundColor:'#3568c4', tension:0.25, spanGaps:true, pointRadius:3, borderDash:[4,3]});
     } else if (m.key==='aerobic_result'){
@@ -822,7 +842,7 @@ function drawAllTrendCharts(){
     } else {
       datasets.push({label:m.label, data:hist.map(s=>s[m.key]), borderColor:'#f26522', backgroundColor:'#f26522', tension:0.25, spanGaps:true, pointRadius:3});
     }
-    trendCharts.push(new Chart(ctx, { type:'line', data:{labels,datasets}, options:{responsive:true, plugins:{legend:{display:(m.paired||m.derived), position:'bottom', labels:{filter:l=>l.text==='Left'||l.text==='Right'}}}, scales:{y:{beginAtZero:false}} } }));
+    trendCharts.push(new Chart(ctx, { type:'line', data:{labels,datasets}, options:{responsive:true, plugins:{legend:{display:m.paired, position:'bottom', labels:{filter:l=>l.text==='Left'||l.text==='Right'}}}, scales:{y:{beginAtZero:false}} } }));
   });
 }
 
@@ -914,7 +934,7 @@ function renderHistory(){
   el.innerHTML = a.sessions.map(s=>{
     const rows = [];
     METRICS.forEach(m=>{
-      if (m.paired || m.derived){
+      if (m.paired){
         const l=s[m.key+'_L'], r=s[m.key+'_R'];
         if (l!=null||r!=null) rows.push(`<div class="hist-metric"><span>${m.label}</span><b>${fmt(l)} / ${fmt(r)} ${m.unit}</b></div>`);
       } else if (m.key==='aerobic_result'){
@@ -1005,7 +1025,7 @@ document.querySelectorAll('.settings-tabs button').forEach(b=>b.onclick=()=>{
   b.classList.add('active');
   document.getElementById('pane'+b.dataset.p).classList.add('active');
 });
-function showConfig(){ buildPaneSheet(); buildPaneNorms(); buildPaneThresholds(); document.getElementById('overlaySettings').classList.add('show'); }
+function showConfig(){ buildPaneSheet(); buildPaneNorms(); buildPaneThresholds(); buildPaneBackup(); document.getElementById('overlaySettings').classList.add('show'); }
 function buildPaneSheet(){
   document.getElementById('paneSheet').innerHTML = `
     <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">Athletes tab URL</label>
@@ -1019,7 +1039,7 @@ function buildPaneSheet(){
     <p class="hint">Importing merges into your dashboard data — players are matched by name (existing players get their profile fields updated, new names are added), and sessions are matched by player + date. Nothing is duplicated, and nothing already entered in the dashboard is overwritten unless the sheet has a value for that same field.</p>
     <p class="hint"><b>Athletes tab:</b> athlete_id, name, position, birthdate (YYYY-MM-DD), age, height_cm, leg_length_cm, weight_kg, injury_hx, gender (W/M)</p>
     <p class="hint"><b>Results tab:</b> name (matched to Athletes tab), test_date, weight_kg, notes, then one column per metric:</p>
-    <p class="hint" style="font-family:monospace;font-size:10.5px;line-height:1.8;">${METRICS.map(m=> (m.paired||m.derived) ? m.key+'_L, '+m.key+'_R' : (m.key==='aerobic_result'?'aerobic_testType, aerobic_vift, aerobic_trialDistance_m, aerobic_trialTime_s':m.key) ).join(' &nbsp; ')}</p>`;
+    <p class="hint" style="font-family:monospace;font-size:10.5px;line-height:1.8;">${resultsColumns().join(', ')}</p>`;
 }
 function saveSheetSettings(){
   CONFIG.athletesUrl = document.getElementById('setA').value.trim();
@@ -1063,6 +1083,93 @@ function saveThresholds(){
   SETTINGS.stsThreshold = document.getElementById('setSts').value===''?null:Number(document.getElementById('setSts').value);
   persist(); renderMain();
   document.getElementById('overlaySettings').classList.remove('show');
+}
+
+// ============================================================
+// BACKUP / EXPORT / RESTORE — your safety net, independent of any
+// Google Sheet. Everything entered in the dashboard lives in your
+// account's storage, but this lets you pull a copy out any time.
+// ============================================================
+function resultsColumns(){
+  const cols = ['name','test_date','weight_kg','notes'];
+  METRICS.forEach(m=>{
+    if (m.key==='aerobic_result'){ cols.push('aerobic_testType','aerobic_vift','aerobic_trialDistance_m','aerobic_trialTime_s'); return; }
+    if (m.derived) return;
+    if (m.paired){ cols.push(m.key+'_L', m.key+'_R'); }
+    else cols.push(m.key);
+  });
+  return cols;
+}
+function csvEscape(v){
+  if (v==null) return '';
+  const s = String(v);
+  return /[",\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
+}
+function downloadFile(filename, text, mime){
+  const blob = new Blob([text], {type: mime||'text/plain'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
+}
+function todayStamp(){ return new Date().toISOString().slice(0,10); }
+function exportAthletesCSV(){
+  const cols = ['athlete_id','name','position','birthdate','age','height_cm','leg_length_cm','weight_kg','injury_hx','gender'];
+  const rows = [cols.join(',')];
+  Object.values(athleteMap).forEach(a=>{
+    rows.push(cols.map(c=> csvEscape(c==='athlete_id' ? a.id : a[c])).join(','));
+  });
+  downloadFile(`roar-athletes-backup-${todayStamp()}.csv`, rows.join('\n'), 'text/csv');
+}
+function exportResultsCSV(){
+  const cols = resultsColumns();
+  const rows = [cols.join(',')];
+  Object.values(athleteMap).forEach(a=>{
+    a.sessions.forEach(s=>{
+      rows.push(cols.map(c=> csvEscape(c==='name' ? a.name : s[c])).join(','));
+    });
+  });
+  downloadFile(`roar-results-backup-${todayStamp()}.csv`, rows.join('\n'), 'text/csv');
+}
+function exportJSONBackup(){
+  const payload = { exportedAt: new Date().toISOString(), athletes: Object.values(athleteMap), norms: NORMS, settings: SETTINGS };
+  downloadFile(`roar-dashboard-backup-${todayStamp()}.json`, JSON.stringify(payload, null, 2), 'application/json');
+}
+function triggerRestoreFile(){ document.getElementById('restoreFileInput').click(); }
+function handleRestoreFile(evt){
+  const file = evt.target.files[0]; if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ()=>{
+    try{
+      const payload = JSON.parse(reader.result);
+      const rows = payload.athletes || [];
+      if (!confirm(`Restore ${rows.length} player(s) from this backup? Existing players with the same name will be updated, not duplicated.`)) return;
+      rows.forEach(a=>{
+        const id = upsertPlayer(a, nameIndex[normalizeName(a.name)]);
+        (a.sessions||[]).forEach(s=> upsertSession(id, s.test_date, s));
+      });
+      persistData();
+      if (!selectedId){ const ids=Object.keys(athleteMap); if(ids.length) selectedId=ids[0]; }
+      renderSidebar(); renderMain();
+      alert('Backup restored.');
+    }catch(e){ alert('Could not read that file: '+e.message); }
+    evt.target.value = '';
+  };
+  reader.readAsText(file);
+}
+function buildPaneBackup(){
+  const n = Object.keys(athleteMap).length;
+  const sessions = Object.values(athleteMap).reduce((sum,a)=>sum+a.sessions.length,0);
+  document.getElementById('paneBackup').innerHTML = `
+    <p class="hint" style="margin-top:0;">${n} player${n===1?'':'s'}, ${sessions} session${sessions===1?'':'s'} currently stored in this dashboard. This data lives in your account's storage — it isn't in your Google Sheet unless you've imported from it, and dashboard entries don't write back to the Sheet automatically. Export a copy whenever you want a safety net.</p>
+    <div class="subhead" style="margin-top:0;">Full backup (recommended)</div>
+    <button class="btn-sm" onclick="exportJSONBackup()">⬇ Download full backup (.json)</button>
+    <button class="btn-sm" onclick="triggerRestoreFile()">⬆ Restore from backup</button>
+    <p class="hint">One file with every player, session, your norm edits and thresholds. Restoring merges by name — safe to re-run.</p>
+    <div class="subhead">Spreadsheet-style export</div>
+    <button class="btn-sm" onclick="exportAthletesCSV()">⬇ Athletes.csv</button>
+    <button class="btn-sm" onclick="exportResultsCSV()">⬇ Results.csv</button>
+    <p class="hint">Same column layout as the Google Sheet import — paste these into a spreadsheet to keep a human-readable copy, or to bring dashboard entries back into your Sheet by hand.</p>`;
 }
 
 // ============================================================
