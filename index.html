@@ -793,7 +793,7 @@ function chainLoops(segs){
 // raster, no canvas, so no pixelation and no fill/outline misalignment.
 function densityCloud(pointsPx, w, h, bandwidth){
   if (!pointsPx.length) return '';
-  const gw = 110, gh = Math.max(16, Math.round(gw*h/w));
+  const gw = 190, gh = Math.max(16, Math.round(gw*h/w));
   const cellW = w/gw, cellH = h/gh;
   const bw2 = 2*bandwidth*bandwidth;
   const kde = (px,py) => { let d=0; for (let i=0;i<pointsPx.length;i++){ const dx=px-pointsPx[i][0], dy=py-pointsPx[i][1]; d+=Math.exp(-(dx*dx+dy*dy)/bw2); } return d; };
