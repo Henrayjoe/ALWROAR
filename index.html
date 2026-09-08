@@ -163,10 +163,9 @@
   .axis-select { border:1px solid var(--border); border-radius:6px; padding:6px 10px; font-size:12px; }
   .quad-legend { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:8px; font-size:11px; color:var(--text-muted); }
   .pq-heading { font-size:12px; font-weight:800; letter-spacing:.02em; color:var(--text-primary); margin-bottom:10px; }
-  .pq-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:16px; }
-  .pq-card { min-width:0; overflow:hidden; }
-  .pq-card svg { display:block; width:100%; height:auto; }
-  .pq-card { background:var(--surface); box-shadow:var(--shadow-sm); border-radius:var(--radius); padding:14px 16px; transition:box-shadow .22s var(--ease); }
+  .pq-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(440px,1fr)); gap:16px; }
+  .pq-card { position:relative; min-width:0; overflow:hidden; background:var(--surface); box-shadow:var(--shadow-sm); border-radius:var(--radius); padding:14px 16px; transition:box-shadow .22s var(--ease); }
+  .pq-card svg { display:block; width:100%; height:auto; max-width:100%; }
   .pq-card:hover { box-shadow:var(--shadow-md); }
   .pq-title { font-size:12.5px; font-weight:800; color:var(--text-primary); }
   .pq-sub { font-size:10.5px; color:var(--text-muted); margin-bottom:8px; }
@@ -705,14 +704,14 @@ function robustDomain(vals, divVal){
 function quadrantBadgeSvg(text, xEdge, yTop, anchor){
   const parts = text.split(' / ');
   const maxLen = Math.max(...parts.map(p=>p.length));
-  const w = Math.min(230, Math.max(74, maxLen*5.4+16));
-  const h = 10 + parts.length*14;
+  const w = Math.min(200, Math.max(70, maxLen*4.9+14));
+  const h = 9 + parts.length*13;
   const rx = anchor==='start' ? xEdge : xEdge - w;
-  let out = `<rect x="${rx}" y="${yTop}" width="${w}" height="${h}" rx="7" fill="#ffffff" fill-opacity="0.94" stroke="#e4e6ea" stroke-width="1"/>`;
+  let out = `<rect x="${rx}" y="${yTop}" width="${w}" height="${h}" rx="6" fill="#ffffff" fill-opacity="0.94" stroke="#e4e6ea" stroke-width="1"/>`;
   parts.forEach((p,i)=>{
-    const tx = anchor==='start' ? rx+9 : rx+w-9;
-    const ty = yTop+17+i*14;
-    out += `<text x="${tx}" y="${ty}" font-size="9.5" font-weight="700" fill="#444c56" text-anchor="${anchor}">${p}</text>`;
+    const tx = anchor==='start' ? rx+8 : rx+w-8;
+    const ty = yTop+15+i*13;
+    out += `<text x="${tx}" y="${ty}" font-size="8.5" font-weight="700" fill="#444c56" text-anchor="${anchor}">${p}</text>`;
   });
   return out;
 }
