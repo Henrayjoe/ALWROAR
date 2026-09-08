@@ -26,16 +26,17 @@
   .sb-brand h1 { font-size:14px; font-weight:800; letter-spacing:.01em; }
   .sb-brand p  { font-size:9.5px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.08em; margin-top:1px; }
   .mode-toggle { display:flex; gap:4px; padding:10px 12px; border-bottom:1px solid var(--border); }
-  .mode-toggle button { flex:1; border:1px solid var(--border); background:var(--surface-alt); padding:7px 0; border-radius:6px; font-size:12px; font-weight:700; color:var(--text-muted); cursor:pointer; }
+  .mode-toggle button { flex:1; border:1px solid var(--border); background:var(--surface-alt); padding:7px 0; border-radius:6px; font-size:12px; font-weight:700; color:var(--text-muted); cursor:pointer; transition:background 0.22s ease, color 0.22s ease, border-color 0.22s ease; }
   .mode-toggle button.active { background:var(--accent); color:#fff; border-color:var(--accent); }
   .sb-search { padding:10px 12px; border-bottom:1px solid var(--border); }
   .sb-search input { width:100%; padding:6px 10px; font-size:12px; background:var(--surface-alt); border:1px solid var(--border); border-radius:6px; color:var(--text-primary); outline:none; }
   .sb-search input:focus { border-color:var(--accent); }
   .gender-filter { display:flex; gap:4px; padding:8px 12px; border-bottom:1px solid var(--border); }
-  .gender-filter button { flex:1; border:1px solid var(--border); background:var(--surface-alt); padding:5px 0; border-radius:6px; font-size:11px; font-weight:600; color:var(--text-muted); cursor:pointer; }
+  .gender-filter button { flex:1; border:1px solid var(--border); background:var(--surface-alt); padding:5px 0; border-radius:6px; font-size:11px; font-weight:600; color:var(--text-muted); cursor:pointer; transition:background 0.22s ease, color 0.22s ease, border-color 0.22s ease; }
   .gender-filter button.active { background:var(--accent-light); color:var(--accent); border-color:var(--accent); }
   .ref-toggle { display:inline-flex; gap:4px; background:var(--surface-alt); padding:3px; border-radius:8px; border:1px solid var(--border); }
-  .ref-toggle button { border:none; background:transparent; padding:6px 12px; border-radius:6px; font-size:11.5px; font-weight:600; color:var(--text-muted); cursor:pointer; }
+  .ref-toggle button { border:none; background:transparent; padding:6px 12px; border-radius:6px; font-size:11.5px; font-weight:600; color:var(--text-muted); cursor:pointer; transition:background 0.22s ease, color 0.22s ease, transform 0.15s ease; }
+  .ref-toggle button:active { transform:scale(0.96); }
   .ref-toggle button.active { background:var(--accent); color:#fff; }
   .ref-note { font-size:11px; color:var(--text-muted); margin-left:8px; }
   .scatter-legend-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:4px; }
@@ -47,9 +48,23 @@
   .composite-picker { display:flex; flex-wrap:wrap; gap:6px; padding:10px; background:var(--surface-alt); border:1px solid var(--border); border-radius:8px; margin-bottom:10px; }
   .composite-picker label { display:flex; align-items:center; gap:5px; font-size:11.5px; background:#fff; border:1px solid var(--border); border-radius:6px; padding:4px 8px; cursor:pointer; }
   .lb-mode-toggle { display:inline-flex; gap:4px; background:var(--surface-alt); padding:3px; border-radius:8px; border:1px solid var(--border); }
-  .lb-mode-toggle button { border:none; background:transparent; padding:6px 12px; border-radius:6px; font-size:11.5px; font-weight:600; color:var(--text-muted); cursor:pointer; }
+  .lb-mode-toggle button { border:none; background:transparent; padding:6px 12px; border-radius:6px; font-size:11.5px; font-weight:600; color:var(--text-muted); cursor:pointer; transition:background 0.22s ease, color 0.22s ease, transform 0.15s ease; }
+  .lb-mode-toggle button:active { transform:scale(0.96); }
   .lb-mode-toggle button.active { background:var(--accent); color:#fff; }
   .heat-cell { border-radius:5px; padding:3px 6px; display:inline-block; min-width:44px; text-align:center; font-weight:600; }
+  @keyframes fadeSlideIn { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:translateY(0); } }
+  .fade-redraw { animation: fadeSlideIn 0.28s ease; }
+  .pctl-bar-wrap { position:relative; width:120px; height:8px; background:#eef0f2; border-radius:4px; margin-top:4px; overflow:visible; }
+  .pctl-bar-band { position:absolute; top:0; bottom:0; background:rgba(148,163,184,0.35); border-radius:4px; }
+  .pctl-bar-marker { position:absolute; top:-3px; width:3px; height:14px; border-radius:2px; background:#0d1117; transform:translateX(-50%); }
+  .lb-row { display:flex; align-items:center; gap:10px; padding:7px 4px; border-radius:8px; transition:background 0.15s ease; }
+  .lb-row:hover { background:var(--surface-alt); }
+  .lb-avatar { width:26px; height:26px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; color:#fff; flex-shrink:0; }
+  .lb-name { width:110px; flex-shrink:0; font-size:12.5px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .lb-track { flex:1; height:20px; background:#f1f2f4; border-radius:10px; position:relative; overflow:hidden; }
+  .lb-fill { position:absolute; top:0; bottom:0; border-radius:10px; transition:width 0.5s cubic-bezier(.22,1,.36,1); }
+  .lb-zero { position:absolute; top:-3px; bottom:-3px; width:2px; background:#94a3b8; }
+  .lb-value { width:52px; text-align:right; font-size:12px; font-weight:700; flex-shrink:0; }
   .alist { flex:1; overflow-y:auto; padding:6px 0; }
   .aitem { display:flex; align-items:center; gap:10px; padding:8px 14px; cursor:pointer; border-left:2px solid transparent; }
   .aitem:hover { background:var(--surface-alt); }
@@ -90,7 +105,7 @@
   .cat-status { font-size:13px; font-weight:600; }
   .tab-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg); overflow:hidden; }
   .tabs { display:flex; border-bottom:1px solid var(--border); background:var(--surface-alt); }
-  .tab { padding:10px 18px; font-size:13px; font-weight:500; color:var(--text-muted); cursor:pointer; border-bottom:2px solid transparent; }
+  .tab { padding:10px 18px; font-size:13px; font-weight:500; color:var(--text-muted); cursor:pointer; border-bottom:2px solid transparent; transition:color 0.2s ease, border-color 0.2s ease, background 0.2s ease; }
   .tab:hover { color:var(--text-primary); }
   .tab.active { color:var(--accent); border-bottom-color:var(--accent); background:var(--surface); }
   .tc { display:none; }
@@ -147,7 +162,7 @@
   .norms-table th, .norms-table td{padding:6px 8px;border-bottom:1px solid var(--border);text-align:left;font-size:11.5px;vertical-align:top;}
   .norms-table input{width:74px;border:1px solid var(--border);border-radius:4px;padding:5px 6px;}
   .settings-tabs{display:flex;gap:6px;margin-bottom:14px;}
-  .settings-tabs button{border:1px solid var(--border);background:var(--surface-alt);padding:6px 14px;border-radius:999px;font-size:12px;font-weight:600;color:var(--text-muted);cursor:pointer;}
+  .settings-tabs button{border:1px solid var(--border);background:var(--surface-alt);padding:6px 14px;border-radius:999px;font-size:12px;font-weight:600;color:var(--text-muted);cursor:pointer;transition:background 0.22s ease,color 0.22s ease,border-color 0.22s ease;}
   .settings-tabs button.active{background:var(--accent-light);color:var(--accent);border-color:var(--accent);}
   .settings-pane{display:none; max-height:65vh; overflow:auto;} .settings-pane.active{display:block;}
   .field{display:flex;flex-direction:column;gap:5px;margin-bottom:12px;}
@@ -890,17 +905,33 @@ function normText(m, gender){
   const src = NORM_SOURCES[m.key] ? `<span class="norm-source">${NORM_SOURCES[m.key]}</span>` : '';
   return `${band.min}–${band.max} ${m.unit}${src}`;
 }
+function pctlBarHtml(val, band){
+  if (val==null || !band || band.min==null || band.max==null) return '';
+  const span = band.max - band.min;
+  const pad = span*0.4 || Math.abs(band.max)*0.15 || 1;
+  const lo = band.min-pad, hi = band.max+pad;
+  const pct = p => Math.max(1, Math.min(99, ((p-lo)/(hi-lo))*100));
+  const bandL = pct(band.min), bandR = pct(band.max);
+  return `<div class="pctl-bar-wrap">
+    <div class="pctl-bar-band" style="left:${bandL}%; width:${Math.max(1,bandR-bandL)}%;"></div>
+    <div class="pctl-bar-marker" style="left:${pct(val)}%;"></div>
+  </div>`;
+}
+function normCell(m, gender, val){
+  const band = NORMS[m.key] && NORMS[m.key][gender];
+  return `<div>${normText(m,gender)}</div>${pctlBarHtml(val, band)}`;
+}
 function renderMetricRow(m, d, prevD, a){
   if (m.key==='aerobic_result'){
     const val = d.aerobic_result, prev = prevD ? prevD.aerobic_result : null;
     const label = d.aerobic_testType || m.label;
-    if (val==null) return `<tr><td class="lbl">${label}</td><td colspan="2" class="miss">— not tested</td><td style="font-size:11px;color:var(--text-muted)">${normText(m,a.gender)}</td><td class="miss">—</td></tr>`;
+    if (val==null) return `<tr><td class="lbl">${label}</td><td colspan="2" class="miss">— not tested</td><td style="font-size:11px;color:var(--text-muted)">${normCell(m,a.gender,null)}</td><td class="miss">—</td></tr>`;
     const s = bs(val, m.key, a.gender);
-    return `<tr><td class="lbl">${label}</td><td><span class="rval">${fmt(val)}</span><span class="runit">${m.unit}</span>${pbBadge(m,null,val,a)}</td><td>${pill(s)}</td><td style="font-size:11px;color:var(--text-muted)">${normText(m,a.gender)}</td><td>${dHtml(val,prev,m.lb)}</td></tr>`;
+    return `<tr><td class="lbl">${label}</td><td><span class="rval">${fmt(val)}</span><span class="runit">${m.unit}</span>${pbBadge(m,null,val,a)}</td><td>${pill(s)}</td><td style="font-size:11px;color:var(--text-muted)">${normCell(m,a.gender,val)}</td><td>${dHtml(val,prev,m.lb)}</td></tr>`;
   }
   if (m.paired){
     const l = d[m.key+'_L'], r = d[m.key+'_R'];
-    if (l==null && r==null) return `<tr><td class="lbl">${m.label}</td><td colspan="2" class="miss">— not tested</td><td style="font-size:11px;color:var(--text-muted)">${normText(m,a.gender)}</td><td class="miss">—</td></tr>`;
+    if (l==null && r==null) return `<tr><td class="lbl">${m.label}</td><td colspan="2" class="miss">— not tested</td><td style="font-size:11px;color:var(--text-muted)">${normCell(m,a.gender,null)}</td><td class="miss">—</td></tr>`;
     const asym = asymmetry(l,r);
     const asymFlag = SETTINGS.asymFlag!=null && asym!=null && asym>SETTINGS.asymFlag;
     const stsFlag = m.stsThreshold && SETTINGS.stsThreshold!=null && ((l!=null&&l<SETTINGS.stsThreshold)||(r!=null&&r<SETTINGS.stsThreshold));
@@ -918,13 +949,13 @@ function renderMetricRow(m, d, prevD, a){
     return `<tr><td class="lbl">${m.label}</td>
       <td><span class="rval">${fmt(l)} / ${fmt(r)}</span><span class="runit">${m.unit} (L/R)</span>${!asymFlag&&!stsFlag&&asym!=null?`<span class="rsub">asym ${fmt(asym)}%</span>`:''}${pbBadge(m,'L',l,a)}${pbBadge(m,'R',r,a)}</td>
       <td>${statusCell}</td>
-      <td style="font-size:11px;color:var(--text-muted)">${normText(m,a.gender)}</td>
+      <td style="font-size:11px;color:var(--text-muted)">${normCell(m,a.gender,curAvg)}</td>
       <td>${dHtml(curAvg,prevAvg,m.lb)}</td></tr>`;
   }
   const val = d[m.key], prev = prevD ? prevD[m.key] : null;
-  if (val==null) return `<tr><td class="lbl">${m.label}</td><td colspan="2" class="miss">— not tested</td><td style="font-size:11px;color:var(--text-muted)">${normText(m,a.gender)}</td><td class="miss">—</td></tr>`;
+  if (val==null) return `<tr><td class="lbl">${m.label}</td><td colspan="2" class="miss">— not tested</td><td style="font-size:11px;color:var(--text-muted)">${normCell(m,a.gender,null)}</td><td class="miss">—</td></tr>`;
   const s = bs(val, m.key, a.gender);
-  return `<tr><td class="lbl">${m.label}</td><td><span class="rval">${fmt(val)}</span><span class="runit">${m.unit}</span>${pbBadge(m,null,val,a)}</td><td>${m.noNorm?'':pill(s)}</td><td style="font-size:11px;color:var(--text-muted)">${normText(m,a.gender)}</td><td>${dHtml(val,prev,m.lb)}</td></tr>`;
+  return `<tr><td class="lbl">${m.label}</td><td><span class="rval">${fmt(val)}</span><span class="runit">${m.unit}</span>${pbBadge(m,null,val,a)}</td><td>${m.noNorm?'':pill(s)}</td><td style="font-size:11px;color:var(--text-muted)">${normCell(m,a.gender,val)}</td><td>${dHtml(val,prev,m.lb)}</td></tr>`;
 }
 
 // ============================================================
@@ -1163,8 +1194,9 @@ function renderTeam(){
           <span class="control-label">Metric</span>
           <select class="axis-select" id="teamTrendMetric"></select>
         </div>
+        <div class="cat-grid" id="teamTrendStats" style="margin:4px 0 14px;"></div>
         <canvas id="teamTrendChart" height="110"></canvas>
-        <div class="chart-note"><span>▪ Squad average per test date${genderFilterVal!=='all'?' ('+(genderFilterVal==='W'?'Women':'Men')+' only)':''}</span></div>
+        <div class="chart-note"><span>▪ Solid line = squad mean · shaded band = ±1 SD · dashed line = median</span><span>▪ Per test date${genderFilterVal!=='all'?' ('+(genderFilterVal==='W'?'Women':'Men')+' only)':''}</span></div>
       </div></div>
       <div class="team-tc tc" data-t="scatter"><div class="quad-body">
         <div class="quad-ctrl-row">
@@ -1187,9 +1219,9 @@ function renderTeam(){
           <select class="axis-select" id="lbMetric"></select>
         </div>
         <div id="lbCompositePicker" style="display:none;"></div>
-        <div class="chart-title" style="margin-top:6px;">Squad Leaderboard — standardized (Z) score</div>
-        <canvas id="leaderboardChart"></canvas>
-        <div class="chart-note" id="lbNote" style="margin:10px 0 18px;"></div>
+        <div class="chart-title" style="margin-top:10px;">Squad Leaderboard — standardized (Z) score</div>
+        <div id="leaderboardChart"></div>
+        <div class="chart-note" id="lbNote" style="margin:10px 0 22px;"></div>
         <div class="chart-title">Squad Distribution</div>
         <div id="boxPlotContainer"></div>
         <div class="chart-note"><span>▪ Box = middle 50% of the squad (IQR) · line = median · whiskers = full range · dots = individual players</span></div>
@@ -1225,7 +1257,7 @@ function buildSquadTable(){
     });
     html += `</tbody></table>`;
   });
-  document.getElementById('squadBody').innerHTML = html || '<p class="hint" style="padding:20px">No players match this filter.</p>';
+  document.getElementById('squadBody').innerHTML = html ? `<div class="fade-redraw">${html}</div>` : '<p class="hint" style="padding:20px">No players match this filter.</p>';
 }
 function buildTeamTrendMetricOptions(){
   const sel = document.getElementById('teamTrendMetric');
@@ -1239,17 +1271,42 @@ function drawTeamTrendChart(){
   const dateSet = new Set();
   players.forEach(a=>a.sessions.forEach(s=>dateSet.add(s.test_date)));
   const dates = [...dateSet].sort((a,b)=>new Date(a)-new Date(b));
-  const avgPerDate = dates.map(dt=>{
+  const perDate = dates.map(dt=>{
     const vals = [];
     players.forEach(a=>{
       const s = a.sessions.find(s=>s.test_date===dt);
       if (s){ const v = repVal(m,s); if (v!=null) vals.push(v); }
     });
-    return vals.length ? vals.reduce((x,y)=>x+y,0)/vals.length : null;
+    if (!vals.length) return { mean:null, median:null, sdLo:null, sdHi:null, n:0 };
+    const mn = vals.reduce((x,y)=>x+y,0)/vals.length;
+    const sd = vals.length<2 ? 0 : Math.sqrt(vals.reduce((x,y)=>x+(y-mn)**2,0)/(vals.length-1));
+    const q = quartiles(vals);
+    return { mean:mn, median:q.median, sdLo:mn-sd, sdHi:mn+sd, n:vals.length };
   });
   const ctx = document.getElementById('teamTrendChart').getContext('2d');
   if (teamTrendChartInstance) teamTrendChartInstance.destroy();
-  teamTrendChartInstance = new Chart(ctx, { type:'line', data:{ labels:dates, datasets:[{ label:'Squad average — '+m.label, data:avgPerDate, borderColor:'#f26522', backgroundColor:'#f26522', tension:0.25, spanGaps:true }] }, options:{responsive:true, plugins:{legend:{position:'bottom'}}, scales:{y:{beginAtZero:false}}} });
+  teamTrendChartInstance = new Chart(ctx, { type:'line', data:{ labels:dates, datasets:[
+    { label:'−1 SD', data:perDate.map(d=>d.sdLo), borderColor:'transparent', pointRadius:0, fill:false },
+    { label:'+1 SD', data:perDate.map(d=>d.sdHi), borderColor:'transparent', backgroundColor:'rgba(242,101,34,0.14)', pointRadius:0, fill:'-1' },
+    { label:'Median', data:perDate.map(d=>d.median), borderColor:'#94a3b8', borderDash:[5,4], pointRadius:2, borderWidth:1.5 },
+    { label:'Squad mean', data:perDate.map(d=>d.mean), borderColor:'#f26522', backgroundColor:'#f26522', tension:0.25, spanGaps:true, pointRadius:4, borderWidth:2.5 },
+  ] }, options:{responsive:true, plugins:{legend:{position:'bottom', labels:{filter:l=>l.text!=='−1 SD' && l.text!=='+1 SD'}}, tooltip:{callbacks:{afterBody:ctx=>{ const d=perDate[ctx[0].dataIndex]; return `n=${d.n}`; }}}}, scales:{y:{beginAtZero:false}}} });
+
+  // stat cards for the most recent test date
+  const statsEl = document.getElementById('teamTrendStats');
+  const last = perDate[perDate.length-1];
+  if (statsEl){
+    if (!last || last.n===0){
+      statsEl.innerHTML = '<div class="cat-card"><div class="cat-name">Latest session</div><div class="cat-status" style="color:#7a8290">No data yet</div></div>';
+    } else {
+      const sd = last.n>=2 ? (last.sdHi-last.mean) : null;
+      statsEl.innerHTML = `
+        <div class="cat-card"><div class="cat-name">Squad Mean</div><div class="cat-status">${fmt(last.mean)} ${m.unit}</div></div>
+        <div class="cat-card"><div class="cat-name">Median</div><div class="cat-status">${fmt(last.median)} ${m.unit}</div></div>
+        <div class="cat-card"><div class="cat-name">SD</div><div class="cat-status">${sd==null?'—':'± '+fmt(sd)+' '+m.unit}</div></div>
+        <div class="cat-card"><div class="cat-name">Squad n</div><div class="cat-status">${last.n} tested</div></div>`;
+    }
+  }
 }
 
 // ============================================================
@@ -1315,79 +1372,93 @@ function leaderboardData(){
   }).filter(x=>x!=null);
 }
 function drawLeaderboard(){
-  const canvas = document.getElementById('leaderboardChart'); if (!canvas) return;
-  const data = leaderboardData().sort((x,y)=>y.z-x.z);
+  const wrap = document.getElementById('leaderboardChart'); if (!wrap) return;
   const note = document.getElementById('lbNote');
-  if (data.length<3){
-    canvas.style.display='none';
-    if (note) note.innerHTML = 'Not enough players with this data yet (need at least 3) to build a leaderboard.';
-    if (leaderboardChartInstance){ leaderboardChartInstance.destroy(); leaderboardChartInstance=null; }
-    return;
+  try{
+    const data = leaderboardData().sort((x,y)=>y.z-x.z);
+    if (data.length<3){
+      wrap.innerHTML = '<div class="hint" style="padding:20px 4px;">Not enough players with this data yet (need at least 3) to build a leaderboard.</div>';
+      if (note) note.innerHTML = '';
+      return;
+    }
+    const n = data.length;
+    const zVals = data.map(x=>x.z);
+    const maxAbs = Math.max(1, ...zVals.map(z=>Math.abs(z)));
+    const zeroPct = 50; // center of the track = squad average (z=0)
+    wrap.innerHTML = `<div class="fade-redraw">${data.map((d,i)=>{
+      const third = n/3;
+      const tier = i<third ? 'green' : i<2*third ? 'amber' : 'red';
+      const col = tier==='green' ? '#16a34a' : tier==='amber' ? '#ca8a04' : '#dc2626';
+      const pct = Math.max(2, Math.min(98, 50 + (d.z/maxAbs)*48));
+      const barLeft = d.z>=0 ? zeroPct : pct;
+      const barWidth = Math.abs(pct-zeroPct);
+      const ini = (d.a.name||'?').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+      return `<div class="lb-row">
+        <div class="lb-avatar" style="background:${col}">${ini}</div>
+        <div class="lb-name" title="${d.a.name}">${d.a.name}</div>
+        <div class="lb-track">
+          <div class="lb-zero" style="left:${zeroPct}%"></div>
+          <div class="lb-fill" style="left:${barLeft}%; width:${barWidth}%; background:${col};" title="${d.label}: ${fmt(d.value)} ${d.unit==='composite Z'?'':d.unit} (Z=${fmt(d.z)})"></div>
+        </div>
+        <div class="lb-value" style="color:${col}">${d.z>=0?'+':''}${fmt(d.z)}</div>
+      </div>`;
+    }).join('')}</div>`;
+    if (note) note.innerHTML = `Green = top third of squad · Amber = middle third · Red = bottom third. ${lbMode==='composite' ? `Composite of ${lbCompositeKeys.size} test${lbCompositeKeys.size===1?'':'s'}.` : ''} Each player is standardized against their own gender's squad spread — bar fills from the center (squad average) toward the player's score.`;
+  }catch(e){
+    console.error('drawLeaderboard failed:', e);
+    wrap.innerHTML = '<div class="hint" style="padding:20px 4px;">Could not build the leaderboard — check the browser console for details.</div>';
   }
-  canvas.style.display='';
-  const n = data.length;
-  const colors = data.map((x,i)=>{
-    const third = n/3;
-    if (i < third) return '#16a34a';
-    if (i < 2*third) return '#ca8a04';
-    return '#dc2626';
-  });
-  const ctx = canvas.getContext('2d');
-  if (leaderboardChartInstance) leaderboardChartInstance.destroy();
-  canvas.parentElement.style.height = Math.max(220, n*26)+'px';
-  canvas.height = Math.max(220, n*26);
-  leaderboardChartInstance = new Chart(ctx, {
-    type:'bar',
-    data:{ labels:data.map(x=>x.a.name), datasets:[{ label:'Z-score', data:data.map(x=>+x.z.toFixed(2)), backgroundColor:colors }] },
-    options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false,
-      plugins:{ legend:{display:false}, tooltip:{ callbacks:{ label:ctx=>{ const d=data[ctx.dataIndex]; return `${d.label}: ${fmt(d.value)} ${d.unit==='composite Z'?'':d.unit} (Z=${fmt(d.z)})`; } } } },
-      scales:{ x:{ title:{display:true, text:'Standardized (Z) score — 0 = squad average'} } } }
-  });
-  if (note) note.innerHTML = `Green = top third of squad · Amber = middle third · Red = bottom third. ${lbMode==='composite' ? `Composite of ${lbCompositeKeys.size} test${lbCompositeKeys.size===1?'':'s'}.` : ''} Each player is standardized against their own gender's squad spread.`;
 }
 function drawBoxPlot(){
   const container = document.getElementById('boxPlotContainer'); if (!container) return;
-  const data = leaderboardData();
-  if (data.length<4){
-    container.innerHTML = '<div style="padding:30px;text-align:center;color:#7a8290">Not enough players yet (need at least 4) to plot a distribution.</div>';
-    return;
+  try{
+    const data = leaderboardData();
+    if (data.length<4){
+      container.innerHTML = '<div class="hint" style="padding:20px 4px;">Not enough players yet (need at least 4) to plot a distribution.</div>';
+      return;
+    }
+    const isComposite = lbMode==='composite';
+    const values = data.map(x=>isComposite ? x.z : x.value);
+    const q = quartiles(values);
+    const vMin = Math.min(...values), vMax = Math.max(...values);
+    const pad = (vMax-vMin)*0.15 || 1;
+    const dMin = vMin-pad, dMax = vMax+pad;
+    const W=760, H=190, ML=50, MR=40, CW=W-ML-MR;
+    const sx = v => ML + (v-dMin)/(dMax-dMin)*CW;
+    const boxY = 78, boxH = 40;
+    const axisLabel = isComposite ? 'Composite Z-score' : (metricByKey(document.getElementById('lbMetric').value).label+' ('+metricByKey(document.getElementById('lbMetric').value).unit+')');
+    let s = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;font-family:-apple-system,sans-serif" class="fade-redraw">`;
+    for (let i=0;i<=4;i++){
+      const v = dMin+(dMax-dMin)*i/4, px = sx(v);
+      s += `<line x1="${px}" y1="20" x2="${px}" y2="${boxY+boxH+22}" stroke="#f1f2f4" stroke-width="1"/>`;
+      s += `<text x="${px}" y="${H-16}" font-size="10" text-anchor="middle" fill="#7a8290">${fmt(v)}</text>`;
+    }
+    // whiskers
+    s += `<line x1="${sx(q.min)}" y1="${boxY+boxH/2}" x2="${sx(q.q1)}" y2="${boxY+boxH/2}" stroke="#b8c0cc" stroke-width="1.5"/>`;
+    s += `<line x1="${sx(q.q3)}" y1="${boxY+boxH/2}" x2="${sx(q.max)}" y2="${boxY+boxH/2}" stroke="#b8c0cc" stroke-width="1.5"/>`;
+    s += `<line x1="${sx(q.min)}" y1="${boxY+10}" x2="${sx(q.min)}" y2="${boxY+boxH-10}" stroke="#b8c0cc" stroke-width="1.5"/>`;
+    s += `<line x1="${sx(q.max)}" y1="${boxY+10}" x2="${sx(q.max)}" y2="${boxY+boxH-10}" stroke="#b8c0cc" stroke-width="1.5"/>`;
+    // box (IQR)
+    s += `<rect x="${sx(q.q1)}" y="${boxY}" width="${Math.max(2,sx(q.q3)-sx(q.q1))}" height="${boxH}" fill="rgba(242,101,34,0.12)" stroke="#f26522" stroke-width="1.5" rx="5"/>`;
+    s += `<line x1="${sx(q.median)}" y1="${boxY}" x2="${sx(q.median)}" y2="${boxY+boxH}" stroke="#f26522" stroke-width="2.5"/>`;
+    s += `<text x="${sx(q.median)}" y="${boxY-8}" font-size="10" text-anchor="middle" fill="#f26522" font-weight="700">median ${fmt(q.median)}</text>`;
+    // player dots (jittered, soft glow)
+    const jitter = [-14,12,-6,16,-16,6,-11,14,-3,3,-8,8,0,-19,19];
+    data.forEach((d,i)=>{
+      const v = isComposite ? d.z : d.value;
+      const cx = sx(v), cy = boxY+boxH/2 + jitter[i%jitter.length];
+      const col = d.z>=0.5 ? '#16a34a' : d.z<=-0.5 ? '#dc2626' : '#ca8a04';
+      s += `<circle cx="${cx}" cy="${cy}" r="8" fill="${col}" opacity="0.16"/>`;
+      s += `<circle cx="${cx}" cy="${cy}" r="4.5" fill="${col}" stroke="#fff" stroke-width="1.3"><title>${d.a.name}: ${fmt(d.value)} ${d.unit==='composite Z'?'':d.unit}</title></circle>`;
+    });
+    s += `<text x="${ML+CW/2}" y="${H-2}" font-size="11" text-anchor="middle" fill="#444c56" font-weight="500">${axisLabel}</text>`;
+    s += `<text x="${ML}" y="16" font-size="10.5" fill="#7a8290">n=${data.length} · squad spread</text>`;
+    s += '</svg>';
+    container.innerHTML = s;
+  }catch(e){
+    console.error('drawBoxPlot failed:', e);
+    container.innerHTML = '<div class="hint" style="padding:20px 4px;">Could not build the distribution plot — check the browser console for details.</div>';
   }
-  const isComposite = lbMode==='composite';
-  const values = data.map(x=>isComposite ? x.z : x.value);
-  const q = quartiles(values);
-  const vMin = Math.min(...values), vMax = Math.max(...values);
-  const pad = (vMax-vMin)*0.12 || 1;
-  const dMin = vMin-pad, dMax = vMax+pad;
-  const W=760, H=150, ML=60, MR=40, MT=30, MB=40, CW=W-ML-MR;
-  const sx = v => ML + (v-dMin)/(dMax-dMin)*CW;
-  const boxY = 55, boxH = 34;
-  let s = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;font-family:-apple-system,sans-serif">`;
-  // whiskers
-  s += `<line x1="${sx(q.min)}" y1="${boxY+boxH/2}" x2="${sx(q.q1)}" y2="${boxY+boxH/2}" stroke="#94a3b8" stroke-width="1.5"/>`;
-  s += `<line x1="${sx(q.q3)}" y1="${boxY+boxH/2}" x2="${sx(q.max)}" y2="${boxY+boxH/2}" stroke="#94a3b8" stroke-width="1.5"/>`;
-  s += `<line x1="${sx(q.min)}" y1="${boxY+8}" x2="${sx(q.min)}" y2="${boxY+boxH-8}" stroke="#94a3b8" stroke-width="1.5"/>`;
-  s += `<line x1="${sx(q.max)}" y1="${boxY+8}" x2="${sx(q.max)}" y2="${boxY+boxH-8}" stroke="#94a3b8" stroke-width="1.5"/>`;
-  // box (IQR)
-  s += `<rect x="${sx(q.q1)}" y="${boxY}" width="${sx(q.q3)-sx(q.q1)}" height="${boxH}" fill="rgba(242,101,34,0.15)" stroke="#f26522" stroke-width="1.5" rx="3"/>`;
-  s += `<line x1="${sx(q.median)}" y1="${boxY}" x2="${sx(q.median)}" y2="${boxY+boxH}" stroke="#f26522" stroke-width="2.5"/>`;
-  // player dots (jittered)
-  const jitter = [-11,9,-5,13,-13,5,-9,11,-3,3,-7,7,0];
-  data.forEach((d,i)=>{
-    const v = isComposite ? d.z : d.value;
-    const cx = sx(v), cy = boxY+boxH/2 + jitter[i%jitter.length];
-    const col = d.z>=0.5 ? '#16a34a' : d.z<=-0.5 ? '#dc2626' : '#ca8a04';
-    s += `<circle cx="${cx}" cy="${cy}" r="4.5" fill="${col}" stroke="#fff" stroke-width="1"><title>${d.a.name}: ${fmt(d.value)} ${d.unit==='composite Z'?'':d.unit}</title></circle>`;
-  });
-  // axis
-  for (let i=0;i<=4;i++){
-    const v = dMin+(dMax-dMin)*i/4, px = sx(v);
-    s += `<text x="${px}" y="${H-14}" font-size="10" text-anchor="middle" fill="#7a8290">${fmt(v)}</text>`;
-    s += `<line x1="${px}" y1="${boxY-6}" x2="${px}" y2="${boxY+boxH+6}" stroke="#f1f2f4" stroke-width="1"/>`;
-  }
-  s += `<text x="${ML+CW/2}" y="${H-2}" font-size="10.5" text-anchor="middle" fill="#444c56">${isComposite ? 'Composite Z-score' : (metricByKey(document.getElementById('lbMetric').value).label+' ('+metricByKey(document.getElementById('lbMetric').value).unit+')')}</text>`;
-  s += `<text x="${ML}" y="18" font-size="10" fill="#7a8290">n=${data.length} · median ${fmt(q.median)}</text>`;
-  s += '</svg>';
-  container.innerHTML = s;
 }
 
 // ============================================================
@@ -1398,8 +1469,10 @@ function buildScatterAxisOptions(){
   const xs=document.getElementById('scatterX'), ys=document.getElementById('scatterY');
   const opts = GROUPS.map(g=>`<optgroup label="${g}">${METRICS.filter(m=>m.group===g).map(m=>`<option value="${m.key}">${m.label}</option>`).join('')}</optgroup>`).join('');
   xs.innerHTML = opts; ys.innerHTML = opts;
-  if (!xs.value || xs.selectedIndex<0) xs.value = 'cmj_jumpHeight';
-  if (!ys.value || ys.selectedIndex<0) ys.value = 'cmj_peakPowerBW';
+  // Setting innerHTML auto-selects the first <option>, so both selects would
+  // otherwise start on the same metric — always force distinct defaults.
+  xs.value = 'cmj_jumpHeight';
+  ys.value = 'cmj_peakPowerBW';
   xs.onchange = drawTeamScatter; ys.onchange = drawTeamScatter;
 }
 function drawTeamScatter(){
@@ -1443,14 +1516,14 @@ function drawTeamScatter(){
     }
   }
 
-  let s = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-height:480px;font-family:-apple-system,sans-serif">`;
+  let s = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-height:480px;font-family:-apple-system,sans-serif" class="fade-redraw">`;
   if (xDiv!=null && yDiv!=null){
     const xDivPx=sx(xDiv), yDivPx=sy(yDiv);
-    [[ML,MT,xDivPx-ML,yDivPx-MT,'#fff8e1'],[xDivPx,MT,W-MR-xDivPx,yDivPx-MT,'#f0fdf4'],
-     [ML,yDivPx,xDivPx-ML,H-MB-yDivPx,'#fef2f2'],[xDivPx,yDivPx,W-MR-xDivPx,H-MB-yDivPx,'#eff6ff']]
-      .forEach(([x,y,w,h,fill])=>{ s+=`<rect x="${x}" y="${y}" width="${Math.max(0,w)}" height="${Math.max(0,h)}" fill="${fill}" opacity="0.6"/>`; });
-    s += `<line x1="${xDivPx}" y1="${MT}" x2="${xDivPx}" y2="${H-MB}" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6,3"/>`;
-    s += `<line x1="${ML}" y1="${yDivPx}" x2="${W-MR}" y2="${yDivPx}" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6,3"/>`;
+    [[ML,MT,xDivPx-ML,yDivPx-MT,'rgba(22,163,74,0.09)'],[xDivPx,MT,W-MR-xDivPx,yDivPx-MT,'rgba(202,138,4,0.07)'],
+     [ML,yDivPx,xDivPx-ML,H-MB-yDivPx,'rgba(202,138,4,0.07)'],[xDivPx,yDivPx,W-MR-xDivPx,H-MB-yDivPx,'rgba(220,38,38,0.08)']]
+      .forEach(([x,y,w,h,fill])=>{ s+=`<rect x="${x}" y="${y}" width="${Math.max(0,w)}" height="${Math.max(0,h)}" fill="${fill}"/>`; });
+    s += `<line x1="${xDivPx}" y1="${MT}" x2="${xDivPx}" y2="${H-MB}" stroke="#c7ccd3" stroke-width="1.5" stroke-dasharray="6,3"/>`;
+    s += `<line x1="${ML}" y1="${yDivPx}" x2="${W-MR}" y2="${yDivPx}" stroke="#c7ccd3" stroke-width="1.5" stroke-dasharray="6,3"/>`;
   }
   s += `<rect x="${ML}" y="${MT}" width="${CW}" height="${CH}" fill="none" stroke="#e4e6ea" stroke-width="1"/>`;
   for (let i=0;i<=4;i++){
@@ -1461,11 +1534,28 @@ function drawTeamScatter(){
   }
   s += `<text x="${ML+CW/2}" y="${H-6}" font-size="11" text-anchor="middle" fill="#444c56" font-weight="500">${mx.label} (${mx.unit})</text>`;
   s += `<text x="12" y="${MT+CH/2}" font-size="11" text-anchor="middle" fill="#444c56" font-weight="500" transform="rotate(-90,12,${MT+CH/2})">${my.label} (${my.unit})</text>`;
-  pts.forEach(p=>{
-    const cx=sx(p.x), cy=sy(p.y);
+  // simple pairwise separation so close/overlapping players don't fully hide one another
+  const pos = pts.map(p=>({p, cx:sx(p.x), cy:sy(p.y)}));
+  for (let iter=0; iter<6; iter++){
+    for (let i=0;i<pos.length;i++){
+      for (let j=i+1;j<pos.length;j++){
+        const dx=pos[j].cx-pos[i].cx, dy=pos[j].cy-pos[i].cy;
+        const dist=Math.sqrt(dx*dx+dy*dy);
+        const minDist = 20;
+        if (dist>0 && dist<minDist){
+          const push=(minDist-dist)/2, ux=dx/dist, uy=dy/dist;
+          pos[i].cx-=ux*push; pos[i].cy-=uy*push; pos[j].cx+=ux*push; pos[j].cy+=uy*push;
+        } else if (dist===0){
+          pos[j].cx+=8; pos[j].cy-=8;
+        }
+      }
+    }
+  }
+  pos.forEach(({p,cx,cy})=>{
     const ini=(p.a.name||'?').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
-    s += `<circle cx="${cx}" cy="${cy}" r="9" fill="${p.col}" stroke="#fff" stroke-width="1.5"><title>${p.a.name} — ${fmt(p.x)} ${mx.unit}, ${fmt(p.y)} ${my.unit}</title></circle>`;
-    s += `<text x="${cx}" y="${cy+3}" font-size="7.5" text-anchor="middle" fill="#fff" font-weight="700" style="pointer-events:none">${ini}</text>`;
+    s += `<circle cx="${cx}" cy="${cy}" r="15" fill="${p.col}" opacity="0.16"/>`;
+    s += `<circle cx="${cx}" cy="${cy}" r="10" fill="${p.col}" stroke="#fff" stroke-width="2"><title>${p.a.name} — ${fmt(p.x)} ${mx.unit}, ${fmt(p.y)} ${my.unit}</title></circle>`;
+    s += `<text x="${cx}" y="${cy+3.5}" font-size="8" text-anchor="middle" fill="#fff" font-weight="700" style="pointer-events:none">${ini}</text>`;
   });
   s += '</svg>';
   container.innerHTML = s;
