@@ -164,11 +164,15 @@
   .quad-legend { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:8px; font-size:11px; color:var(--text-muted); }
   .pq-heading { font-size:12px; font-weight:800; letter-spacing:.02em; color:var(--text-primary); margin-bottom:10px; }
   .pq-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:16px; }
+  .pq-card { min-width:0; overflow:hidden; }
+  .pq-card svg { display:block; width:100%; height:auto; }
   .pq-card { background:var(--surface); box-shadow:var(--shadow-sm); border-radius:var(--radius); padding:14px 16px; transition:box-shadow .22s var(--ease); }
   .pq-card:hover { box-shadow:var(--shadow-md); }
   .pq-title { font-size:12.5px; font-weight:800; color:var(--text-primary); }
   .pq-sub { font-size:10.5px; color:var(--text-muted); margin-bottom:8px; }
   .pq-note { font-size:10px; color:var(--text-muted); margin-top:4px; }
+  .pq-custom-axes { display:flex; gap:6px; margin-bottom:8px; }
+  .pq-custom-axes select { flex:1; min-width:0; font-size:10.5px; }
   .ql-dot { display:inline-block; width:9px; height:9px; border-radius:50%; }
   .hist-card { background:var(--surface); box-shadow:var(--shadow-sm); border-radius:var(--radius); padding:14px 16px; margin-bottom:10px; transition:box-shadow .2s var(--ease); }
   .hist-card:hover { box-shadow:var(--shadow-md); }
@@ -1057,15 +1061,16 @@ function renderIndividual(){
               <div class="pq-sub">${q.sub}</div>
               <div id="pq_${i}"></div>
             </div>`).join('')}
+          <div class="pq-card">
+            <div class="pq-title">Custom</div>
+            <div class="pq-sub">Pick any two tests to compare</div>
+            <div class="pq-custom-axes">
+              <select class="axis-select" id="quadX"></select>
+              <select class="axis-select" id="quadY"></select>
+            </div>
+            <div id="quadContainer"></div>
+          </div>
         </div>
-        <div class="pq-heading" style="margin-top:22px;">Custom Comparison</div>
-        <div class="quad-ctrl-row">
-          <span class="control-label">X axis</span>
-          <select class="axis-select" id="quadX"></select>
-          <span class="control-label">Y axis</span>
-          <select class="axis-select" id="quadY"></select>
-        </div>
-        <div id="quadContainer"></div>
         <div class="quad-legend">
           <span class="ql-dot" style="background:#f26522"></span><span>${a.name}</span>
           <span class="ql-dot" style="background:#cbd5e1"></span><span>Other ${genderLabel.toLowerCase()} players (anonymous)</span>
@@ -1261,6 +1266,7 @@ const PRIORITY_QUADRANTS = [
   { title:'Strength Profile', sub:'Dynamic vs isometric force application', xKey:'imtp_relForce', yKey:'cmj_peakPowerBW' },
   { title:'Hamstring Strain Risk', sub:'"Quadrant of Boom" — speed outrunning posterior-chain strength', xKey:'nordic_maxForce', yKey:'speed_maxVel' },
   { title:'Speed Reserve', sub:'Aerobic engine vs top-end speed', xKey:'aerobic_result', yKey:'speed_maxVel' },
+  { title:'Groin / Adductor Risk', sub:'Hip ADD:ABD ratio vs posterior-chain (Nordic) strength', xKey:'nordic_maxForce', yKey:'hipAnkle_ratio' },
 ];
 // Renders one quadrant chart for athlete `a` on the given axis keys.
 // Returns an SVG string, or an HTML string explaining why it couldn't.
@@ -1468,15 +1474,16 @@ function renderTeam(){
               <div id="tpq_${i}"></div>
               <div class="pq-note" id="tpqNote_${i}"></div>
             </div>`).join('')}
+          <div class="pq-card">
+            <div class="pq-title">Custom</div>
+            <div class="pq-sub">Pick any two tests to compare</div>
+            <div class="pq-custom-axes">
+              <select class="axis-select" id="scatterX"></select>
+              <select class="axis-select" id="scatterY"></select>
+            </div>
+            <div id="scatterContainer"></div>
+          </div>
         </div>
-        <div class="pq-heading" style="margin-top:22px;">Custom Comparison</div>
-        <div class="quad-ctrl-row">
-          <span class="control-label">X axis</span>
-          <select class="axis-select" id="scatterX"></select>
-          <span class="control-label">Y axis</span>
-          <select class="axis-select" id="scatterY"></select>
-        </div>
-        <div id="scatterContainer"></div>
         <div class="quad-legend" id="scatterLegend"></div>
       </div></div>
       <div class="team-tc tc" data-t="analysis"><div class="quad-body">
