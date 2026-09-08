@@ -162,6 +162,13 @@
   .control-label { font-size:11px; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:.06em; margin-right:2px; }
   .axis-select { border:1px solid var(--border); border-radius:6px; padding:6px 10px; font-size:12px; }
   .quad-legend { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:8px; font-size:11px; color:var(--text-muted); }
+  .pq-heading { font-size:12px; font-weight:800; letter-spacing:.02em; color:var(--text-primary); margin-bottom:10px; }
+  .pq-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:16px; }
+  .pq-card { background:var(--surface); box-shadow:var(--shadow-sm); border-radius:var(--radius); padding:14px 16px; transition:box-shadow .22s var(--ease); }
+  .pq-card:hover { box-shadow:var(--shadow-md); }
+  .pq-title { font-size:12.5px; font-weight:800; color:var(--text-primary); }
+  .pq-sub { font-size:10.5px; color:var(--text-muted); margin-bottom:8px; }
+  .pq-note { font-size:10px; color:var(--text-muted); margin-top:4px; }
   .ql-dot { display:inline-block; width:9px; height:9px; border-radius:50%; }
   .hist-card { background:var(--surface); box-shadow:var(--shadow-sm); border-radius:var(--radius); padding:14px 16px; margin-bottom:10px; transition:box-shadow .2s var(--ease); }
   .hist-card:hover { box-shadow:var(--shadow-md); }
@@ -849,7 +856,7 @@ function setRefFrame(scope, val){
     b.classList.toggle('active', b.dataset.r===val);
   });
   if (scope==='trends') drawAllTrendCharts();
-  if (scope==='scatter') drawTeamScatter();
+  if (scope==='scatter'){ drawTeamScatter(); drawPriorityTeamScatters(); }
   if (scope==='radar') drawRadar();
   if (scope==='heatmap') buildSquadTable();
 }
@@ -981,7 +988,7 @@ function switchTab(t){
   document.querySelectorAll('.tab').forEach(e=>e.classList.toggle('active', e.dataset.t===t));
   document.querySelectorAll('.tc').forEach(e=>{ const on=e.dataset.t===t; e.classList.toggle('active', on); if(on){ e.classList.remove('fade-redraw'); void e.offsetWidth; e.classList.add('fade-redraw'); } });
   if (t==='trends') setTimeout(drawAllTrendCharts,60);
-  if (t==='quadrants') setTimeout(()=>drawQuadrant(),60);
+  if (t==='quadrants') setTimeout(()=>{ drawPriorityQuadrants(); drawQuadrant(); },60);
   if (t==='profile') setTimeout(drawRadar,60);
   if (t==='history') setTimeout(renderHistory,60);
 }
@@ -989,7 +996,7 @@ function switchTeamTab(t){
   document.querySelectorAll('.team-tab').forEach(e=>e.classList.toggle('active', e.dataset.t===t));
   document.querySelectorAll('.team-tc').forEach(e=>{ const on=e.dataset.t===t; e.classList.toggle('active', on); if(on){ e.classList.remove('fade-redraw'); void e.offsetWidth; e.classList.add('fade-redraw'); } });
   if (t==='teamtrends') setTimeout(()=>{ buildTeamTrendMetricOptions(); drawTeamTrendChart(); },60);
-  if (t==='scatter') setTimeout(()=>{ buildScatterAxisOptions(); drawTeamScatter(); },60);
+  if (t==='scatter') setTimeout(()=>{ buildScatterAxisOptions(); drawTeamScatter(); drawPriorityTeamScatters(); },60);
   if (t==='analysis') setTimeout(initTeamAnalysis,60);
 }
 
@@ -1047,6 +1054,16 @@ function renderIndividual(){
         <div class="chart-note"><span>▪ League mode: shaded band = norm range for ${genderLabel.toLowerCase()} (25th–75th percentile, where set)</span><span>▪ Squad mode: shaded band = your own roster's mean ± 1 SD</span><span>▪ Paired tests show L and R separately</span></div>
       </div></div>
       <div class="tc" data-t="quadrants"><div class="quad-body">
+        <div class="pq-heading">Priority Quadrants</div>
+        <div class="pq-grid">
+          ${PRIORITY_QUADRANTS.map((q,i)=>`
+            <div class="pq-card">
+              <div class="pq-title">${q.title}</div>
+              <div class="pq-sub">${q.sub}</div>
+              <div id="pq_${i}"></div>
+            </div>`).join('')}
+        </div>
+        <div class="pq-heading" style="margin-top:22px;">Custom Comparison</div>
         <div class="quad-ctrl-row">
           <span class="control-label">X axis</span>
           <select class="axis-select" id="quadX"></select>
@@ -1245,39 +1262,37 @@ function cohortValues(key, gender){
     return { id:p.id, name:p.name, val: repVal(m,d) };
   }).filter(x=>x.val!=null);
 }
-function drawQuadrant(){
-  const a = athleteMap[selectedId]; if (!a) return;
-  const xKey = document.getElementById('quadX').value, yKey = document.getElementById('quadY').value;
+const PRIORITY_QUADRANTS = [
+  { title:'Strength Profile', sub:'Dynamic vs isometric force application', xKey:'imtp_relForce', yKey:'cmj_peakPowerBW' },
+  { title:'Hamstring Strain Risk', sub:'"Quadrant of Boom" — speed outrunning posterior-chain strength', xKey:'nordic_maxForce', yKey:'speed_maxVel' },
+  { title:'Speed Reserve', sub:'Aerobic engine vs top-end speed', xKey:'aerobic_result', yKey:'speed_maxVel' },
+];
+// Renders one quadrant chart for athlete `a` on the given axis keys.
+// Returns an SVG string, or an HTML string explaining why it couldn't.
+function renderQuadrantSvg(a, xKey, yKey){
   const mx = metricByKey(xKey), my = metricByKey(yKey);
   const xs = cohortValues(xKey, a.gender), ys = cohortValues(yKey, a.gender);
-  const container = document.getElementById('quadContainer');
   const dLatest = buildLatest(a.sessions);
   const myXVal = repVal(mx, dLatest), myYVal = repVal(my, dLatest);
   if (myXVal==null || myYVal==null){
-    container.innerHTML = `<div style="padding:40px;text-align:center;color:#7a8290">Missing data for ${myXVal==null?mx.label:my.label}. Pick different axes or add a session.</div>`;
-    return;
+    return `<div style="padding:40px;text-align:center;color:#7a8290">Missing data for ${myXVal==null?mx.label:my.label}. Add a session to see this quadrant.</div>`;
   }
   const xVals = xs.map(p=>p.val), yVals = ys.map(p=>p.val);
   const xBand = NORMS[xKey] && NORMS[xKey][a.gender], yBand = NORMS[yKey] && NORMS[yKey][a.gender];
   const median = arr => { const s=[...arr].sort((a,b)=>a-b); const mid=Math.floor(s.length/2); return s.length%2?s[mid]:(s[mid-1]+s[mid])/2; };
   const xDiv = (xBand && xBand.min!=null && xBand.max!=null) ? (xBand.min+xBand.max)/2 : median([myXVal,...xVals]);
   const yDiv = (yBand && yBand.min!=null && yBand.max!=null) ? (yBand.min+yBand.max)/2 : median([myYVal,...yVals]);
-  // Domain always includes the divider (a league norm can sit well outside
-  // the plotted data) so the divider and every point are guaranteed to fit.
   const xDom = robustDomain([myXVal,...xVals], xDiv), yDom = robustDomain([myYVal,...yVals], yDiv);
   const dxMin=xDom.min, dxMax=xDom.max, dyMin=yDom.min, dyMax=yDom.max;
 
   const W=700,H=440,ML=60,MR=20,MT=20,MB=40,CW=W-ML-MR,CH=H-MT-MB;
   const sx = v => ML + Math.max(0,Math.min(1,(v-dxMin)/(dxMax-dxMin)))*CW;
   const sy = v => MT + CH - Math.max(0,Math.min(1,(v-dyMin)/(dyMax-dyMin)))*CH;
-  // Belt-and-braces: clamp any plotted point to stay inside the plot rect.
   const clampX = px => Math.max(ML+3, Math.min(W-MR-3, px));
   const clampY = py => Math.max(MT+3, Math.min(H-MB-3, py));
   const xDivPx = sx(xDiv), yDivPx = sy(yDiv);
 
   let s = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-height:460px;font-family:-apple-system,sans-serif" class="fade-redraw">`;
-  // Density cloud (Quadrant of Boom style) — every plotted point including
-  // the current athlete, clipped to the plot rect.
   const cloudPts = [[myXVal,myYVal], ...xs.map(px=>{ const py=ys.find(y=>y.id===px.id); return py ? [px.val,py.val] : null; }).filter(Boolean)]
     .map(([vx,vy])=>[clampX(sx(vx))-ML, clampY(sy(vy))-MT]);
   const cloud = densityCloud(cloudPts, CW, CH, 55);
@@ -1314,7 +1329,20 @@ function drawQuadrant(){
   s += `<text x="${lx}" y="${ly}" font-size="11" text-anchor="${la}" fill="#0d1117" font-weight="600">${a.name}</text>`;
   s += `<text x="${lx}" y="${ly+13}" font-size="10" text-anchor="${la}" fill="#7a8290">${fmt(myXVal)} ${mx.unit} · ${fmt(myYVal)} ${my.unit}</text>`;
   s += '</svg>';
-  container.innerHTML = s;
+  return s;
+}
+function drawPriorityQuadrants(){
+  const a = athleteMap[selectedId]; if (!a) return;
+  PRIORITY_QUADRANTS.forEach((q,i)=>{
+    const el = document.getElementById('pq_'+i);
+    if (el) el.innerHTML = renderQuadrantSvg(a, q.xKey, q.yKey);
+  });
+}
+function drawQuadrant(){
+  const a = athleteMap[selectedId]; if (!a) return;
+  const xKey = document.getElementById('quadX').value, yKey = document.getElementById('quadY').value;
+  const container = document.getElementById('quadContainer');
+  container.innerHTML = renderQuadrantSvg(a, xKey, yKey);
 }
 
 // ============================================================
@@ -1434,12 +1462,23 @@ function renderTeam(){
         <div class="chart-note"><span>▪ Solid line = squad mean · shaded band = ±1 SD · dashed line = median</span><span>▪ Per test date${genderFilterVal!=='all'?' ('+(genderFilterVal==='W'?'Women':'Men')+' only)':''}</span></div>
       </div></div>
       <div class="team-tc tc" data-t="scatter"><div class="quad-body">
+        <div class="pq-heading">Priority Quadrants — Whole Squad</div>
+        <div class="quad-ctrl-row">${refToggleHtml('scatter', refFrame.scatter)}</div>
+        <div class="pq-grid">
+          ${PRIORITY_QUADRANTS.map((q,i)=>`
+            <div class="pq-card">
+              <div class="pq-title">${q.title}</div>
+              <div class="pq-sub">${q.sub}</div>
+              <div id="tpq_${i}"></div>
+              <div class="pq-note" id="tpqNote_${i}"></div>
+            </div>`).join('')}
+        </div>
+        <div class="pq-heading" style="margin-top:22px;">Custom Comparison</div>
         <div class="quad-ctrl-row">
           <span class="control-label">X axis</span>
           <select class="axis-select" id="scatterX"></select>
           <span class="control-label">Y axis</span>
           <select class="axis-select" id="scatterY"></select>
-          ${refToggleHtml('scatter', refFrame.scatter)}
         </div>
         <div id="scatterContainer"></div>
         <div class="quad-legend" id="scatterLegend"></div>
@@ -1730,30 +1769,19 @@ function buildScatterAxisOptions(){
   ys.value = 'cmj_peakPowerBW';
   xs.onchange = drawTeamScatter; ys.onchange = drawTeamScatter;
 }
-function drawTeamScatter(){
-  const xKey = document.getElementById('scatterX')?.value, yKey = document.getElementById('scatterY')?.value;
-  if (!xKey || !yKey) return;
+function renderTeamScatterSvg(xKey, yKey){
   const mx = metricByKey(xKey), my = metricByKey(yKey);
   const players = Object.values(athleteMap).filter(a=>(genderFilterVal==='all'||a.gender===genderFilterVal) && a.sessions.length);
   const pts = players.map(a=>{
     const d = buildLatest(a.sessions);
     return { a, x: repVal(mx,d), y: repVal(my,d), col: sidebarCol(d, a.gender) };
   }).filter(p=>p.x!=null && p.y!=null);
-  // Use the sidebar filter if it names a gender; otherwise auto-detect —
-  // if every player actually plotted happens to be the same gender, show
-  // reference dividers/bands for it rather than silently hiding them and
-  // making the coach click the filter first.
   const gendersPlotted = new Set(pts.map(p=>p.a.gender));
   const singleGender = genderFilterVal!=='all' ? genderFilterVal : (gendersPlotted.size===1 ? [...gendersPlotted][0] : null);
-  const container = document.getElementById('scatterContainer');
-  const legend = document.getElementById('scatterLegend');
   if (pts.length<2){
-    container.innerHTML = `<div style="padding:40px;text-align:center;color:#7a8290">Not enough players with both ${mx.label} and ${my.label} recorded yet.</div>`;
-    legend.innerHTML = '';
-    return;
+    return { svg: `<div style="padding:40px;text-align:center;color:#7a8290">Not enough players with both ${mx.label} and ${my.label} recorded yet.</div>`, note:'' };
   }
   const xVals = pts.map(p=>p.x), yVals = pts.map(p=>p.y);
-  // Squad average + SD for the metrics/players actually plotted here.
   const meanX = xVals.reduce((a,b)=>a+b,0)/xVals.length;
   const meanY = yVals.reduce((a,b)=>a+b,0)/yVals.length;
   const sdX = xVals.length<2?0:Math.sqrt(xVals.reduce((a,b)=>a+(b-meanX)**2,0)/(xVals.length-1));
@@ -1771,11 +1799,9 @@ function drawTeamScatter(){
       xBand = NORMS[xKey]&&NORMS[xKey][singleGender]; yBand = NORMS[yKey]&&NORMS[yKey][singleGender];
       if (xBand&&xBand.min!=null&&xBand.max!=null) xDiv=(xBand.min+xBand.max)/2;
       if (yBand&&yBand.min!=null&&yBand.max!=null) yDiv=(yBand.min+yBand.max)/2;
-      nNote = 'League mode — dividers at norm-band midpoint, shaded strip = full norm range (where set)';
+      nNote = 'League mode — dividers at norm-band midpoint (where set)';
     }
   }
-  // Domain always includes the divider so it (and the norm-band strip) are
-  // guaranteed to fit on-canvas, however far the squad sits from the norm.
   const xDom = robustDomain(xVals, xDiv), yDom = robustDomain(yVals, yDiv);
   const dxMin=xDom.min, dxMax=xDom.max, dyMin=yDom.min, dyMax=yDom.max;
   const W=760,H=460,ML=60,MR=20,MT=20,MB=40,CW=W-ML-MR,CH=H-MT-MB;
@@ -1786,7 +1812,6 @@ function drawTeamScatter(){
 
   let s = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-height:480px;font-family:-apple-system,sans-serif" class="fade-redraw">`;
   if (xDiv!=null && yDiv!=null){
-    const xDivPx=sx(xDiv), yDivPx=sy(yDiv);
     const lo_x2 = mx.lb ? 'Higher '+mx.label : 'Lower '+mx.label, hi_x2 = mx.lb ? 'Lower '+mx.label : 'Higher '+mx.label;
     const lo_y2 = my.lb ? 'Higher '+my.label : 'Lower '+my.label, hi_y2 = my.lb ? 'Lower '+my.label : 'Higher '+my.label;
     s += quadrantBadgeSvg(`${hi_y2} / ${lo_x2}`, ML+8, MT+8, 'start');
@@ -1794,9 +1819,6 @@ function drawTeamScatter(){
     s += quadrantBadgeSvg(`${lo_y2} / ${lo_x2}`, ML+8, H-MB-38, 'start');
     s += quadrantBadgeSvg(`${lo_y2} / ${hi_x2}`, W-MR-8, H-MB-38, 'end');
   }
-  // Norm-band range markers — small brackets on the axis instead of a
-  // full-plot color wash, so the reference range is visible without
-  // tinting the whole chart.
   if (xBand && xBand.min!=null && xBand.max!=null){
     const x1=sx(xBand.min), x2=sx(xBand.max);
     s += `<line x1="${x1}" y1="${H-MB}" x2="${x1}" y2="${H-MB+6}" stroke="#3a8d7a" stroke-width="2"/>`;
@@ -1809,14 +1831,12 @@ function drawTeamScatter(){
     s += `<line x1="${ML-6}" y1="${y2}" x2="${ML}" y2="${y2}" stroke="#3a8d7a" stroke-width="2"/>`;
     s += `<line x1="${ML-6}" y1="${y1}" x2="${ML-6}" y2="${y2}" stroke="#3a8d7a" stroke-width="2"/>`;
   }
-  // Density cloud (Quadrant of Boom style).
   const cloudPts = pts.map(p=>[clampX(sx(p.x))-ML, clampY(sy(p.y))-MT]);
   const cloud = densityCloud(cloudPts, CW, CH, 55);
   if (cloud){
     s += `<image href="${cloud.fillUrl}" x="${ML}" y="${MT}" width="${CW}" height="${CH}" preserveAspectRatio="none" style="mix-blend-mode:multiply"/>`;
     s += `<g transform="translate(${ML},${MT})">${cloud.contourSvg}</g>`;
   }
-  // Squad ±1SD ellipse around the average, independent of any norm reference.
   if (sdX>0 && sdY>0){
     const ecx=sx(meanX), ecy=sy(meanY);
     const erx=Math.max(3,Math.abs(sx(meanX+sdX)-ecx)), ery=Math.max(3,Math.abs(sy(meanY+sdY)-ecy));
@@ -1836,7 +1856,6 @@ function drawTeamScatter(){
   }
   s += `<text x="${ML+CW/2}" y="${H-6}" font-size="11" text-anchor="middle" fill="#444c56" font-weight="500">${mx.label} (${mx.unit})</text>`;
   s += `<text x="12" y="${MT+CH/2}" font-size="11" text-anchor="middle" fill="#444c56" font-weight="500" transform="rotate(-90,12,${MT+CH/2})">${my.label} (${my.unit})</text>`;
-  // simple pairwise separation so close/overlapping players don't fully hide one another
   const pos = pts.map(p=>({p, cx:clampX(sx(p.x)), cy:clampY(sy(p.y))}));
   for (let iter=0; iter<6; iter++){
     for (let i=0;i<pos.length;i++){
@@ -1860,7 +1879,6 @@ function drawTeamScatter(){
     s += `<circle cx="${ccx}" cy="${ccy}" r="10" fill="${p.col}" stroke="#fff" stroke-width="2"><title>${p.a.name} — ${fmt(p.x)} ${mx.unit}, ${fmt(p.y)} ${my.unit}</title></circle>`;
     s += `<text x="${ccx}" y="${ccy+3.5}" font-size="8" text-anchor="middle" fill="#fff" font-weight="700" style="pointer-events:none">${ini}</text>`;
   });
-  // Squad average marker — drawn last so it always sits on top.
   {
     const mcx=clampX(sx(meanX)), mcy=clampY(sy(meanY));
     const mla = mcx>W-MR-90 ? 'end' : 'start', mlx = mcx>W-MR-90 ? mcx-13 : mcx+13;
@@ -1869,7 +1887,26 @@ function drawTeamScatter(){
     s += `<text x="${mlx}" y="${mcy+7}" font-size="9" text-anchor="${mla}" fill="#7a8290">${fmt(meanX)} ${mx.unit}${sdX>0?' ±'+fmt(sdX):''} · ${fmt(meanY)} ${my.unit}${sdY>0?' ±'+fmt(sdY):''}</text>`;
   }
   s += '</svg>';
-  container.innerHTML = s;
+  const note = singleGender ? nNote : 'Showing both genders — select Women or Men in the sidebar filter to see reference dividers and norm bands.';
+  return { svg:s, note };
+}
+function drawPriorityTeamScatters(){
+  PRIORITY_QUADRANTS.forEach((q,i)=>{
+    const el = document.getElementById('tpq_'+i);
+    const noteEl = document.getElementById('tpqNote_'+i);
+    if (!el) return;
+    const { svg, note } = renderTeamScatterSvg(q.xKey, q.yKey);
+    el.innerHTML = svg;
+    if (noteEl) noteEl.textContent = note;
+  });
+}
+function drawTeamScatter(){
+  const xKey = document.getElementById('scatterX')?.value, yKey = document.getElementById('scatterY')?.value;
+  if (!xKey || !yKey) return;
+  const container = document.getElementById('scatterContainer');
+  const legend = document.getElementById('scatterLegend');
+  const { svg, note } = renderTeamScatterSvg(xKey, yKey);
+  container.innerHTML = svg;
   legend.innerHTML = `
     <span class="scatter-legend-dot" style="background:${SCORE_COLS[4]}"></span>Above Standard
     <span class="scatter-legend-dot" style="background:${SCORE_COLS[3]}"></span>At Standard
@@ -1877,7 +1914,7 @@ function drawTeamScatter(){
     <span class="scatter-legend-dot" style="background:${SCORE_COLS[0]}"></span>Primary Focus
     <span class="scatter-legend-dot" style="background:#c2c6cc"></span>No norm data
     <span>◆ Squad average · dashed ellipse = ±1 SD</span>
-    <span style="margin-left:auto">${singleGender ? nNote : 'Showing both genders — select Women or Men in the sidebar filter to see reference dividers and norm bands.'}</span>`;
+    <span style="margin-left:auto">${note}</span>`;
 }
 
 // ============================================================
