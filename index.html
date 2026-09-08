@@ -712,12 +712,27 @@ function fmt(n){ if(n==null||isNaN(n)) return '—'; return (Math.round(n*100)/1
 // squad mean can sit well outside the plotted data), with generous
 // padding so the divider is never pinned to the very edge, and no
 // division-by-zero when all values are identical.
+// Data-driven KDE bandwidth (Silverman's rule of thumb, tightened) instead
+// of a fixed constant — a fixed bandwidth is too wide for a handful of
+// points and bridges across gaps between separate clusters into unnatural
+// "ghost" tendrils; scaling to the actual spread keeps rings localized
+// around real clusters regardless of how spread out or tight the data is.
+function computeBandwidth(pointsPx, fallback){
+  const n = pointsPx.length;
+  if (n<2) return fallback;
+  const xs = pointsPx.map(p=>p[0]), ys = pointsPx.map(p=>p[1]);
+  const meanX = xs.reduce((a,b)=>a+b,0)/n, meanY = ys.reduce((a,b)=>a+b,0)/n;
+  const varX = xs.reduce((a,b)=>a+(b-meanX)**2,0)/n, varY = ys.reduce((a,b)=>a+(b-meanY)**2,0)/n;
+  const std = Math.sqrt((varX+varY)/2);
+  const silverman = 1.06 * std * Math.pow(n, -1/5);
+  return Math.max(18, Math.min(70, silverman * 0.55));
+}
 function robustDomain(vals, divVal){
   let lo = Math.min(...vals), hi = Math.max(...vals);
   if (divVal!=null){ lo = Math.min(lo, divVal); hi = Math.max(hi, divVal); }
   let span = hi - lo;
   if (span <= 0) span = Math.abs(hi) || 1;
-  const pad = span * 0.38;
+  const pad = span * 0.42;
   return { min: lo - pad, max: hi + pad };
 }
 // Soft "density cloud" background (the Quadrant of Boom style) built by
@@ -836,12 +851,12 @@ function densityCloud(pointsPx, w, h, bandwidth){
   // Oranges-style ramp, lightest (outer) to deepest (core) — drawn in this
   // order so each smaller nested region overlays the larger one beneath it.
   const bands = [
-    { t:0.05, c:'#feedde' },
-    { t:0.20, c:'#fdd0a2' },
-    { t:0.38, c:'#fdae6b' },
-    { t:0.55, c:'#fd8d3c' },
-    { t:0.70, c:'#f16913' },
-    { t:0.85, c:'#9a3403' },
+    { t:0.12, c:'#feedde' },
+    { t:0.28, c:'#fdd0a2' },
+    { t:0.44, c:'#fdae6b' },
+    { t:0.60, c:'#fd8d3c' },
+    { t:0.76, c:'#f16913' },
+    { t:0.90, c:'#9a3403' },
   ];
   let svg = '';
   bands.forEach(b=>{
@@ -1326,7 +1341,7 @@ function renderQuadrantSvg(a, xKey, yKey){
   }
   const cloudPts = [[myXVal,myYVal], ...xs.map(px=>{ const py=ys.find(y=>y.id===px.id); return py ? [px.val,py.val] : null; }).filter(Boolean)]
     .map(([vx,vy])=>[clampX(sx(vx))-ML, clampY(sy(vy))-MT]);
-  const cloudSvg = densityCloud(cloudPts, CW, CH, 55);
+  const cloudSvg = densityCloud(cloudPts, CW, CH, computeBandwidth(cloudPts, 55));
   if (cloudSvg) s += `<g transform="translate(${ML},${MT})">${cloudSvg}</g>`;
   s += `<line x1="${xDivPx}" y1="${MT}" x2="${xDivPx}" y2="${H-MB}" stroke="#f26522" stroke-width="2.5" stroke-linecap="round"/>`;
   s += `<line x1="${ML}" y1="${yDivPx}" x2="${W-MR}" y2="${yDivPx}" stroke="#f26522" stroke-width="2.5" stroke-linecap="round"/>`;
@@ -1871,7 +1886,7 @@ function renderTeamScatterSvg(xKey, yKey){
     s += `<line x1="${ML-6}" y1="${y1}" x2="${ML-6}" y2="${y2}" stroke="#3a8d7a" stroke-width="2"/>`;
   }
   const cloudPts = pts.map(p=>[clampX(sx(p.x))-ML, clampY(sy(p.y))-MT]);
-  const cloudSvg = densityCloud(cloudPts, CW, CH, 55);
+  const cloudSvg = densityCloud(cloudPts, CW, CH, computeBandwidth(cloudPts, 55));
   if (cloudSvg) s += `<g transform="translate(${ML},${MT})">${cloudSvg}</g>`;
   if (sdX>0 && sdY>0){
     const ecx=sx(meanX), ecy=sy(meanY);
