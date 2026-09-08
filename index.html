@@ -1220,9 +1220,6 @@ function drawQuadrant(){
   const xDivPx = sx(xDiv), yDivPx = sy(yDiv);
 
   let s = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-height:460px;font-family:-apple-system,sans-serif" class="fade-redraw">`;
-  [[ML,MT,xDivPx-ML,yDivPx-MT,'#fff8e1'],[xDivPx,MT,W-MR-xDivPx,yDivPx-MT,'#f0fdf4'],
-   [ML,yDivPx,xDivPx-ML,H-MB-yDivPx,'#fef2f2'],[xDivPx,yDivPx,W-MR-xDivPx,H-MB-yDivPx,'#eff6ff']]
-    .forEach(([x,y,w,h,fill])=>{ s+=`<rect x="${x}" y="${y}" width="${Math.max(0,w)}" height="${Math.max(0,h)}" fill="${fill}" opacity="0.7"/>`; });
   // Density cloud (Quadrant of Boom style) — every plotted point including
   // the current athlete, clipped to the plot rect.
   const cloudPts = [[myXVal,myYVal], ...xs.map(px=>{ const py=ys.find(y=>y.id===px.id); return py ? [px.val,py.val] : null; }).filter(Boolean)]
@@ -1731,9 +1728,6 @@ function drawTeamScatter(){
   let s = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-height:480px;font-family:-apple-system,sans-serif" class="fade-redraw">`;
   if (xDiv!=null && yDiv!=null){
     const xDivPx=sx(xDiv), yDivPx=sy(yDiv);
-    [[ML,MT,xDivPx-ML,yDivPx-MT,'rgba(22,163,74,0.09)'],[xDivPx,MT,W-MR-xDivPx,yDivPx-MT,'rgba(202,138,4,0.07)'],
-     [ML,yDivPx,xDivPx-ML,H-MB-yDivPx,'rgba(202,138,4,0.07)'],[xDivPx,yDivPx,W-MR-xDivPx,H-MB-yDivPx,'rgba(220,38,38,0.08)']]
-      .forEach(([x,y,w,h,fill])=>{ s+=`<rect x="${x}" y="${y}" width="${Math.max(0,w)}" height="${Math.max(0,h)}" fill="${fill}"/>`; });
     const lo_x2 = mx.lb ? 'Higher '+mx.label : 'Lower '+mx.label, hi_x2 = mx.lb ? 'Lower '+mx.label : 'Higher '+mx.label;
     const lo_y2 = my.lb ? 'Higher '+my.label : 'Lower '+my.label, hi_y2 = my.lb ? 'Lower '+my.label : 'Higher '+my.label;
     s += quadrantBadgeSvg(`${hi_y2} / ${lo_x2}`, ML+8, MT+8, 'start');
