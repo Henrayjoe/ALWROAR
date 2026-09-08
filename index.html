@@ -845,6 +845,9 @@ let refFrame = { trends:'league', scatter:'league', radar:'league', heatmap:'lea
 let teamTrendKeys = new Set(['cmj_jumpHeight','hop_meanJumpHeight','hipAnkle_ratio']);
 function setRefFrame(scope, val){
   refFrame[scope] = val;
+  document.querySelectorAll(`.ref-toggle[data-scope="${scope}"] button`).forEach(b=>{
+    b.classList.toggle('active', b.dataset.r===val);
+  });
   if (scope==='trends') drawAllTrendCharts();
   if (scope==='scatter') drawTeamScatter();
   if (scope==='radar') drawRadar();
