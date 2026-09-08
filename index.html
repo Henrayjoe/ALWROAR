@@ -127,7 +127,21 @@
   .tc { display:none; }
   .tc.active { display:block; }
   .results-body { padding:6px 0 18px; display:flex; flex-direction:column; }
-  .grp-heading { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.07em; color:var(--text-muted); background:var(--surface-alt); padding:8px 20px; border-top:1px solid var(--border); border-bottom:1px solid var(--border); }
+  .grp-heading { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.07em; color:var(--text-muted); background:var(--surface-alt); padding:8px 20px; border-top:1px solid var(--border); border-bottom:1px solid var(--border); cursor:pointer; display:flex; align-items:center; gap:6px; user-select:none; }
+  .grp-heading:hover { color:var(--text-secondary); }
+  .grp-chevron { font-size:9px; color:var(--text-muted); }
+  .squad-table-scroll { overflow-x:auto; }
+  .sticky-col { position:sticky; left:0; background:var(--surface); z-index:2; box-shadow:1px 0 0 var(--border); }
+  .sticky-col2 { position:sticky; left:0; background:var(--surface); z-index:2; }
+  .squad-table-scroll thead .sticky-col, .squad-table-scroll thead .sticky-col2 { background:var(--surface-alt); z-index:3; }
+  .squad-table-scroll table { min-width:max-content; }
+  .th-player { min-width:130px; }
+  .th-status { min-width:96px; box-shadow:1px 0 0 var(--border); }
+  tbody tr:nth-child(even) { background:#fafafb; }
+  tbody tr:nth-child(even) .sticky-col, tbody tr:nth-child(even) .sticky-col2 { background:#fafafb; }
+  tbody tr:hover .sticky-col, tbody tr:hover .sticky-col2 { background:#fafbfc; }
+  .ov-badge { display:inline-block; padding:3px 9px; border-radius:20px; font-size:10.5px; font-weight:700; white-space:nowrap; }
+  .ov-none { background:var(--surface-alt); color:var(--text-muted); }
   table { width:100%; border-collapse:collapse; font-size:12px; }
   thead th { padding:7px 14px; text-align:left; font-size:10px; font-weight:600; color:var(--text-muted); letter-spacing:.06em; text-transform:uppercase; background:var(--surface-alt); border-bottom:1px solid var(--border); cursor:pointer; }
   tbody td { padding:10px 14px; border-bottom:1px solid #f3f4f6; vertical-align:middle; }
@@ -887,6 +901,8 @@ let CONFIG = { athletesUrl: DEFAULT_ATHLETES_URL, resultsUrl: DEFAULT_RESULTS_UR
 let SETTINGS = { asymFlag: 10, stsThreshold: null };
 let athleteMap={}, nameIndex={}, selectedId=null, searchQ='', genderFilterVal='all', mode='individual';
 let refFrame = { trends:'league', scatter:'league', radar:'league', heatmap:'league' };
+let squadCollapsed = new Set();
+let squadSort = { group:null, key:null, dir:1 };
 let teamTrendKeys = new Set(['cmj_jumpHeight','hop_meanJumpHeight','hipAnkle_ratio']);
 function setRefFrame(scope, val){
   refFrame[scope] = val;
@@ -1557,15 +1573,51 @@ function renderTeam(){
   buildTeamTrendMetricOptions();
   document.getElementById('teamTrendMetric').onchange = drawTeamTrendChart;
 }
+function toggleSquadGroup(g){
+  if (squadCollapsed.has(g)) squadCollapsed.delete(g); else squadCollapsed.add(g);
+  buildSquadTable();
+}
+function setSquadSort(group, key){
+  if (squadSort.group===group && squadSort.key===key) squadSort.dir *= -1;
+  else squadSort = { group, key, dir:1 };
+  buildSquadTable();
+}
+function overallStatusBadge(a, d){
+  const scores = GROUPS.map(g=>groupScore(g,d,a.gender)).filter(s=>s!=null);
+  if (!a.sessions.length || !scores.length) return `<span class="ov-badge ov-none">No data</span>`;
+  const avg = scores.reduce((x,y)=>x+y,0)/scores.length;
+  const cl = catLabel(avg);
+  if (!cl) return `<span class="ov-badge ov-none">Tracked</span>`;
+  return `<span class="ov-badge" style="background:${cl.c}22; color:${cl.c};">${cl.l}</span>`;
+}
 function buildSquadTable(){
   const players = Object.values(athleteMap).filter(a=>genderFilterVal==='all'||a.gender===genderFilterVal);
   const useSquad = refFrame.heatmap==='squad';
   let html = '';
   GROUPS.forEach(g=>{
-    html += `<div class="grp-heading">${g}</div><table><thead><tr><th>Player</th>${METRICS.filter(m=>m.group===g).map(m=>`<th>${m.label}</th>`).join('')}</tr></thead><tbody>`;
-    players.forEach(a=>{
-      const d = a.sessions.length ? buildLatest(a.sessions) : {};
-      html += `<tr><td class="lbl">${a.name}</td>` + METRICS.filter(m=>m.group===g).map(m=>{
+    const collapsed = squadCollapsed.has(g);
+    const groupMetrics = METRICS.filter(m=>m.group===g);
+    let rows = players.map(a=>{ const d = a.sessions.length ? buildLatest(a.sessions) : {}; return {a, d}; });
+    if (squadSort.group===g && squadSort.key){
+      const sm = squadSort.key==='__player__' ? null : metricByKey(squadSort.key);
+      rows.sort((x,y)=>{
+        if (!sm) return squadSort.dir * x.a.name.localeCompare(y.a.name);
+        const vx = repVal(sm, x.d), vy = repVal(sm, y.d);
+        if (vx==null && vy==null) return 0;
+        if (vx==null) return 1; if (vy==null) return -1;
+        return squadSort.dir * (vx - vy);
+      });
+    }
+    const sortArrow = key => squadSort.group===g && squadSort.key===key ? (squadSort.dir>0?' ▲':' ▼') : '';
+    html += `<div class="grp-heading" onclick="toggleSquadGroup('${g}')"><span class="grp-chevron">${collapsed?'▸':'▾'}</span>${g}</div>`;
+    if (collapsed) return;
+    html += `<div class="squad-table-scroll"><table><thead><tr>
+      <th class="th-player sticky-col" onclick="setSquadSort('${g}','__player__')">Player${sortArrow('__player__')}</th>
+      <th class="th-status sticky-col2">Overall</th>
+      ${groupMetrics.map(m=>`<th onclick="setSquadSort('${g}','${m.key}')">${m.label}${sortArrow(m.key)}</th>`).join('')}
+    </tr></thead><tbody>`;
+    rows.forEach(({a,d})=>{
+      html += `<tr><td class="lbl sticky-col">${a.name}</td><td class="sticky-col2">${overallStatusBadge(a,d)}</td>` + groupMetrics.map(m=>{
         const v = repVal(m, d);
         if (v==null) return `<td style="text-align:right;"><span class="miss">—</span></td>`;
         let bg = 'transparent', bar = '';
@@ -1588,7 +1640,7 @@ function buildSquadTable(){
         return `<td style="text-align:right;"><span class="heat-cell" style="background:${bg}">${fmt(v)}</span>${bar}</td>`;
       }).join('') + `</tr>`;
     });
-    html += `</tbody></table>`;
+    html += `</tbody></table></div>`;
   });
   document.getElementById('squadBody').innerHTML = html ? `<div class="fade-redraw">${html}</div>` : '<p class="hint" style="padding:20px">No players match this filter.</p>';
 }
