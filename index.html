@@ -53,6 +53,9 @@
   .lb-mode-toggle button:active { transform:scale(0.96); }
   .lb-mode-toggle button.active { background:var(--accent); color:#fff; }
   .heat-cell { border-radius:5px; padding:3px 6px; display:inline-block; min-width:44px; text-align:center; font-weight:600; }
+  .mini-bar-wrap { position:relative; width:56px; height:6px; background:#eef0f2; border-radius:3px; margin:4px auto 0; }
+  .mini-bar-fill { position:absolute; top:0; bottom:0; left:0; border-radius:3px; }
+  .mini-bar-marker { position:absolute; top:-2px; width:2px; height:10px; background:#0d1117; border-radius:1px; }
   @keyframes fadeSlideIn { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:translateY(0); } }
   .fade-redraw { animation: fadeSlideIn 0.28s ease; }
   .pctl-bar-wrap { position:relative; width:120px; height:8px; background:#eef0f2; border-radius:4px; margin-top:4px; overflow:visible; }
@@ -566,6 +569,9 @@ function groupScore(group, d, gender){
   if (!scores.length) return null;
   return scores.reduce((a,b)=>a+b,0)/scores.length;
 }
+function groupHasAnyData(group, d){
+  return METRICS.filter(m=>m.group===group).some(m=>repVal(m,d)!=null);
+}
 function sidebarCol(d, gender){
   if (!d) return '#c2c6cc';
   const scores = METRICS.map(m=>metricScore(m,d,gender)).filter(s=>s!=null);
@@ -635,6 +641,52 @@ function buildLatest(sessions){
   return out;
 }
 function fmt(n){ if(n==null||isNaN(n)) return '—'; return (Math.round(n*100)/100).toLocaleString(undefined,{maximumFractionDigits:2}); }
+// ============================================================
+// SHARED QUADRANT-CHART HELPERS — used by both the individual
+// Quadrants tab and the Team Scatter tab.
+// ============================================================
+// Domain that always includes the divider value (a league norm or
+// squad mean can sit well outside the plotted data), with generous
+// padding so the divider is never pinned to the very edge, and no
+// division-by-zero when all values are identical.
+function robustDomain(vals, divVal){
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  if (divVal!=null){ lo = Math.min(lo, divVal); hi = Math.max(hi, divVal); }
+  let span = hi - lo;
+  if (span <= 0) span = Math.abs(hi) || 1;
+  const pad = span * 0.25;
+  return { min: lo - pad, max: hi + pad };
+}
+// Soft "density cloud" background (the Quadrant of Boom style) built by
+// stacking radial-gradient blobs on an offscreen canvas, then recoloring
+// the accumulated alpha to a single warm hue. pointsPx are [x,y] already
+// relative to the plot rect's own top-left (0,0), not the full SVG.
+function densityCloudDataUrl(pointsPx, w, h, radius){
+  try{
+    if (!pointsPx.length || !window.document || typeof document.createElement!=='function') return null;
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1,Math.round(w)); canvas.height = Math.max(1,Math.round(h));
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    pointsPx.forEach(([px,py])=>{
+      const grad = ctx.createRadialGradient(px,py,0,px,py,radius);
+      grad.addColorStop(0, 'rgba(0,0,0,0.55)');
+      grad.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath(); ctx.arc(px,py,radius,0,Math.PI*2); ctx.fill();
+    });
+    const img = ctx.getImageData(0,0,canvas.width,canvas.height);
+    const d = img.data;
+    for (let i=0;i<d.length;i+=4){
+      const a = d[i+3];
+      if (a<6){ d[i+3]=0; continue; }
+      d[i]=242; d[i+1]=101; d[i+2]=34; // brand orange, constant hue
+      d[i+3] = Math.min(190, a*0.8);
+    }
+    ctx.putImageData(img,0,0);
+    return canvas.toDataURL();
+  }catch(e){ console.error('densityCloudDataUrl failed:', e); return null; }
+}
 
 // ============================================================
 // PERSISTED CONFIG (window.storage — never localStorage)
@@ -649,6 +701,7 @@ let CONFIG = { athletesUrl: DEFAULT_ATHLETES_URL, resultsUrl: DEFAULT_RESULTS_UR
 let SETTINGS = { asymFlag: 10, stsThreshold: null };
 let athleteMap={}, nameIndex={}, selectedId=null, searchQ='', genderFilterVal='all', mode='individual';
 let refFrame = { trends:'league', scatter:'league', radar:'league', heatmap:'league' };
+let teamTrendKeys = new Set(['cmj_jumpHeight','hop_meanJumpHeight','hipAnkle_ratio']);
 function setRefFrame(scope, val){
   refFrame[scope] = val;
   if (scope==='trends') drawAllTrendCharts();
@@ -791,7 +844,7 @@ function switchTab(t){
 function switchTeamTab(t){
   document.querySelectorAll('.team-tab').forEach(e=>e.classList.toggle('active', e.dataset.t===t));
   document.querySelectorAll('.team-tc').forEach(e=>e.classList.toggle('active', e.dataset.t===t));
-  if (t==='teamtrends') setTimeout(drawTeamTrendChart,60);
+  if (t==='teamtrends') setTimeout(()=>{ buildTeamTrendMetricOptions(); drawTeamTrendChart(); },60);
   if (t==='scatter') setTimeout(()=>{ buildScatterAxisOptions(); drawTeamScatter(); },60);
   if (t==='analysis') setTimeout(initTeamAnalysis,60);
 }
@@ -825,9 +878,11 @@ function renderIndividual(){
     <div class="cat-status-heading">Performance Category Status</div>
     <div class="cat-grid">
       ${GROUPS.map(g=>{
-        const gs = a.sessions.length ? groupScore(g,d,a.gender) : null;
+        const hasData = a.sessions.length && groupHasAnyData(g,d);
+        const gs = hasData ? groupScore(g,d,a.gender) : null;
         const cl = catLabel(gs);
-        if (!cl) return `<div class="cat-card"><div class="cat-name">${g}</div><div class="cat-status" style="color:#7a8290">No data</div></div>`;
+        if (!hasData) return `<div class="cat-card"><div class="cat-name">${g}</div><div class="cat-status" style="color:#7a8290">No data</div></div>`;
+        if (!cl) return `<div class="cat-card" style="border-left:3px solid #94a3b8"><div class="cat-name">${g}</div><div class="cat-status" style="color:#475569">Tracked (no norm to grade)</div></div>`;
         return `<div class="cat-card" style="border-left:3px solid ${cl.c}"><div class="cat-name">${g}</div><div class="cat-status" style="color:${cl.c}">${cl.l}</div></div>`;
       }).join('')}
     </div>
@@ -926,6 +981,11 @@ function pctlBarHtml(val, band){
 function normCell(m, gender, val){
   const band = NORMS[m.key] && NORMS[m.key][gender];
   return `<div>${normText(m,gender)}</div>${pctlBarHtml(val, band)}`;
+}
+function miniBarHtml(val, lo, hi, color){
+  if (val==null || lo==null || hi==null || hi<=lo) return '';
+  const pct = Math.max(2, Math.min(98, ((val-lo)/(hi-lo))*100));
+  return `<div class="mini-bar-wrap"><div class="mini-bar-fill" style="width:${pct}%; background:${color};"></div></div>`;
 }
 function renderMetricRow(m, d, prevD, a){
   if (m.key==='aerobic_result'){
@@ -1040,23 +1100,32 @@ function drawQuadrant(){
   }
   const xVals = xs.map(p=>p.val), yVals = ys.map(p=>p.val);
   const xBand = NORMS[xKey] && NORMS[xKey][a.gender], yBand = NORMS[yKey] && NORMS[yKey][a.gender];
-  const xMin = Math.min(myXVal,...xVals), xMax = Math.max(myXVal,...xVals);
-  const yMin = Math.min(myYVal,...yVals), yMax = Math.max(myYVal,...yVals);
-  const xPad = (xMax-xMin)*0.15 || Math.abs(xMax)*0.1 || 1, yPad = (yMax-yMin)*0.15 || Math.abs(yMax)*0.1 || 1;
-  const dxMin=xMin-xPad, dxMax=xMax+xPad, dyMin=yMin-yPad, dyMax=yMax+yPad;
   const median = arr => { const s=[...arr].sort((a,b)=>a-b); const mid=Math.floor(s.length/2); return s.length%2?s[mid]:(s[mid-1]+s[mid])/2; };
   const xDiv = (xBand && xBand.min!=null && xBand.max!=null) ? (xBand.min+xBand.max)/2 : median([myXVal,...xVals]);
   const yDiv = (yBand && yBand.min!=null && yBand.max!=null) ? (yBand.min+yBand.max)/2 : median([myYVal,...yVals]);
+  // Domain always includes the divider (a league norm can sit well outside
+  // the plotted data) so the divider and every point are guaranteed to fit.
+  const xDom = robustDomain([myXVal,...xVals], xDiv), yDom = robustDomain([myYVal,...yVals], yDiv);
+  const dxMin=xDom.min, dxMax=xDom.max, dyMin=yDom.min, dyMax=yDom.max;
 
   const W=700,H=440,ML=60,MR=20,MT=20,MB=40,CW=W-ML-MR,CH=H-MT-MB;
-  const sx = v => ML + (v-dxMin)/(dxMax-dxMin)*CW;
-  const sy = v => MT + CH - (v-dyMin)/(dyMax-dyMin)*CH;
+  const sx = v => ML + Math.max(0,Math.min(1,(v-dxMin)/(dxMax-dxMin)))*CW;
+  const sy = v => MT + CH - Math.max(0,Math.min(1,(v-dyMin)/(dyMax-dyMin)))*CH;
+  // Belt-and-braces: clamp any plotted point to stay inside the plot rect.
+  const clampX = px => Math.max(ML+3, Math.min(W-MR-3, px));
+  const clampY = py => Math.max(MT+3, Math.min(H-MB-3, py));
   const xDivPx = sx(xDiv), yDivPx = sy(yDiv);
 
-  let s = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-height:460px;font-family:-apple-system,sans-serif">`;
+  let s = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-height:460px;font-family:-apple-system,sans-serif" class="fade-redraw">`;
   [[ML,MT,xDivPx-ML,yDivPx-MT,'#fff8e1'],[xDivPx,MT,W-MR-xDivPx,yDivPx-MT,'#f0fdf4'],
    [ML,yDivPx,xDivPx-ML,H-MB-yDivPx,'#fef2f2'],[xDivPx,yDivPx,W-MR-xDivPx,H-MB-yDivPx,'#eff6ff']]
     .forEach(([x,y,w,h,fill])=>{ s+=`<rect x="${x}" y="${y}" width="${Math.max(0,w)}" height="${Math.max(0,h)}" fill="${fill}" opacity="0.7"/>`; });
+  // Density cloud (Quadrant of Boom style) — every plotted point including
+  // the current athlete, clipped to the plot rect.
+  const cloudPts = [[myXVal,myYVal], ...xs.map(px=>{ const py=ys.find(y=>y.id===px.id); return py ? [px.val,py.val] : null; }).filter(Boolean)]
+    .map(([vx,vy])=>[clampX(sx(vx))-ML, clampY(sy(vy))-MT]);
+  const cloudUrl = densityCloudDataUrl(cloudPts, CW, CH, 42);
+  if (cloudUrl) s += `<image href="${cloudUrl}" x="${ML}" y="${MT}" width="${CW}" height="${CH}" preserveAspectRatio="none" style="mix-blend-mode:multiply"/>`;
   s += `<line x1="${xDivPx}" y1="${MT}" x2="${xDivPx}" y2="${H-MB}" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6,3"/>`;
   s += `<line x1="${ML}" y1="${yDivPx}" x2="${W-MR}" y2="${yDivPx}" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6,3"/>`;
   s += `<rect x="${ML}" y="${MT}" width="${CW}" height="${CH}" fill="none" stroke="#e4e6ea" stroke-width="1"/>`;
@@ -1075,9 +1144,9 @@ function drawQuadrant(){
   s += `<text x="12" y="${MT+CH/2}" font-size="11" text-anchor="middle" fill="#444c56" font-weight="500" transform="rotate(-90,12,${MT+CH/2})">${my.label} (${my.unit})</text>`;
   xs.forEach(px=>{
     const py = ys.find(y=>y.id===px.id);
-    if (px.id!==a.id && py) s += `<circle cx="${sx(px.val)}" cy="${sy(py.val)}" r="6" fill="#cbd5e1" stroke="#94a3b8" stroke-width="1" opacity="0.7"/>`;
+    if (px.id!==a.id && py) s += `<circle cx="${clampX(sx(px.val))}" cy="${clampY(sy(py.val))}" r="6" fill="#cbd5e1" stroke="#94a3b8" stroke-width="1" opacity="0.85"><title>${px.name} — ${fmt(px.val)} ${mx.unit}, ${fmt(py.val)} ${my.unit}</title></circle>`;
   });
-  const cx=sx(myXVal), cy=sy(myYVal);
+  const cx=clampX(sx(myXVal)), cy=clampY(sy(myYVal));
   s += `<circle cx="${cx}" cy="${cy}" r="12" fill="#f26522" stroke="#fff" stroke-width="2.5"/>`;
   const ini=(a.name||'?').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
   s += `<text x="${cx}" y="${cy+4}" font-size="9" text-anchor="middle" fill="#fff" font-weight="700">${ini}</text>`;
@@ -1197,11 +1266,11 @@ function renderTeam(){
       </div><div id="squadBody" style="padding:0"></div></div>
       <div class="team-tc tc" data-t="teamtrends"><div class="charts-body">
         <div class="quad-ctrl-row">
-          <span class="control-label">Metric</span>
-          <select class="axis-select" id="teamTrendMetric"></select>
+          <span class="control-label">Compare tests</span>
+          <span class="ref-note">Pick up to 5 — each gets its own chart with mean, median and SD.</span>
         </div>
-        <div class="cat-grid" id="teamTrendStats" style="margin:4px 0 14px;"></div>
-        <canvas id="teamTrendChart" height="110"></canvas>
+        <div id="teamTrendPicker" class="composite-picker"></div>
+        <div id="teamTrendGrid" class="chart-grid"></div>
         <div class="chart-note"><span>▪ Solid line = squad mean · shaded band = ±1 SD · dashed line = median</span><span>▪ Per test date${genderFilterVal!=='all'?' ('+(genderFilterVal==='W'?'Women':'Men')+' only)':''}</span></div>
       </div></div>
       <div class="team-tc tc" data-t="scatter"><div class="quad-body">
@@ -1248,17 +1317,24 @@ function buildSquadTable(){
       html += `<tr><td class="lbl">${a.name}</td>` + METRICS.filter(m=>m.group===g).map(m=>{
         const v = repVal(m, d);
         if (v==null) return `<td style="text-align:right;"><span class="miss">—</span></td>`;
-        let bg = 'transparent';
-        if (!a.sessions.length){ /* no data at all */ }
-        else if (useSquad){
+        let bg = 'transparent', bar = '';
+        if (useSquad){
           const stats = squadStats(m.key, a.gender, a.id);
           const z = squadZ(v, stats);
-          if (z!=null) bg = heatColor(0.5 + Math.max(-2,Math.min(2,z))/4);
+          if (z!=null){
+            bg = heatColor(0.5 + Math.max(-2,Math.min(2,z))/4);
+            bar = miniBarHtml(v, stats.mean-2*stats.sd, stats.mean+2*stats.sd, bg.replace('0.3','0.9'));
+          }
         } else {
           const s = metricScore(m,d,a.gender);
           if (s!=null) bg = heatColor(s/4);
+          const band = NORMS[m.key] && NORMS[m.key][a.gender];
+          if (band && band.min!=null && band.max!=null){
+            const pad = (band.max-band.min)*0.4 || Math.abs(band.max)*0.15 || 1;
+            bar = miniBarHtml(v, band.min-pad, band.max+pad, (s!=null?heatColor(s/4):'#94a3b8').replace('0.3','0.9'));
+          }
         }
-        return `<td style="text-align:right;"><span class="heat-cell" style="background:${bg}">${fmt(v)}</span></td>`;
+        return `<td style="text-align:right;"><span class="heat-cell" style="background:${bg}">${fmt(v)}</span>${bar}</td>`;
       }).join('') + `</tr>`;
     });
     html += `</tbody></table>`;
@@ -1266,53 +1342,66 @@ function buildSquadTable(){
   document.getElementById('squadBody').innerHTML = html ? `<div class="fade-redraw">${html}</div>` : '<p class="hint" style="padding:20px">No players match this filter.</p>';
 }
 function buildTeamTrendMetricOptions(){
-  const sel = document.getElementById('teamTrendMetric');
-  sel.innerHTML = GROUPS.map(g=>`<optgroup label="${g}">${METRICS.filter(m=>m.group===g).map(m=>`<option value="${m.key}">${m.label}</option>`).join('')}</optgroup>`).join('');
+  const picker = document.getElementById('teamTrendPicker');
+  picker.innerHTML = GROUPS.map(g=>METRICS.filter(m=>m.group===g).map(m=>
+    `<label><input type="checkbox" value="${m.key}" ${teamTrendKeys.has(m.key)?'checked':''} onchange="toggleTeamTrendKey('${m.key}',this.checked)">${m.label}</label>`
+  ).join('')).join('');
 }
-let teamTrendChartInstance=null;
+function toggleTeamTrendKey(key, checked){
+  if (checked){
+    if (teamTrendKeys.size>=5){ alert('Up to 5 tests at a time — untick one first.'); buildTeamTrendMetricOptions(); return; }
+    teamTrendKeys.add(key);
+  } else teamTrendKeys.delete(key);
+  buildTeamTrendMetricOptions();
+  drawTeamTrendChart();
+}
+let teamTrendCharts=[];
 function drawTeamTrendChart(){
-  const key = document.getElementById('teamTrendMetric').value;
-  const m = metricByKey(key);
+  teamTrendCharts.forEach(c=>c.destroy()); teamTrendCharts=[];
+  const grid = document.getElementById('teamTrendGrid');
+  const keys = [...teamTrendKeys];
+  if (!keys.length){ grid.innerHTML = '<p class="hint" style="padding:8px 4px;">Tick one or more tests above to see squad trends.</p>'; return; }
+  grid.innerHTML = keys.map(k=>`<div class="chart-wrap"><div class="chart-title">${metricByKey(k).label}</div><div class="cat-grid" id="tts_${k}" style="margin-bottom:10px;"></div><canvas id="ttc_${k}" height="140"></canvas></div>`).join('');
   const players = Object.values(athleteMap).filter(a=>(genderFilterVal==='all'||a.gender===genderFilterVal) && a.sessions.length);
   const dateSet = new Set();
   players.forEach(a=>a.sessions.forEach(s=>dateSet.add(s.test_date)));
   const dates = [...dateSet].sort((a,b)=>new Date(a)-new Date(b));
-  const perDate = dates.map(dt=>{
-    const vals = [];
-    players.forEach(a=>{
-      const s = a.sessions.find(s=>s.test_date===dt);
-      if (s){ const v = repVal(m,s); if (v!=null) vals.push(v); }
+  keys.forEach(key=>{
+    const m = metricByKey(key);
+    const perDate = dates.map(dt=>{
+      const vals = [];
+      players.forEach(a=>{
+        const s = a.sessions.find(s=>s.test_date===dt);
+        if (s){ const v = repVal(m,s); if (v!=null) vals.push(v); }
+      });
+      if (!vals.length) return { mean:null, median:null, sdLo:null, sdHi:null, n:0 };
+      const mn = vals.reduce((x,y)=>x+y,0)/vals.length;
+      const sd = vals.length<2 ? 0 : Math.sqrt(vals.reduce((x,y)=>x+(y-mn)**2,0)/(vals.length-1));
+      const q = quartiles(vals);
+      return { mean:mn, median:q.median, sdLo:mn-sd, sdHi:mn+sd, n:vals.length };
     });
-    if (!vals.length) return { mean:null, median:null, sdLo:null, sdHi:null, n:0 };
-    const mn = vals.reduce((x,y)=>x+y,0)/vals.length;
-    const sd = vals.length<2 ? 0 : Math.sqrt(vals.reduce((x,y)=>x+(y-mn)**2,0)/(vals.length-1));
-    const q = quartiles(vals);
-    return { mean:mn, median:q.median, sdLo:mn-sd, sdHi:mn+sd, n:vals.length };
-  });
-  const ctx = document.getElementById('teamTrendChart').getContext('2d');
-  if (teamTrendChartInstance) teamTrendChartInstance.destroy();
-  teamTrendChartInstance = new Chart(ctx, { type:'line', data:{ labels:dates, datasets:[
-    { label:'−1 SD', data:perDate.map(d=>d.sdLo), borderColor:'transparent', pointRadius:0, fill:false },
-    { label:'+1 SD', data:perDate.map(d=>d.sdHi), borderColor:'transparent', backgroundColor:'rgba(242,101,34,0.14)', pointRadius:0, fill:'-1' },
-    { label:'Median', data:perDate.map(d=>d.median), borderColor:'#94a3b8', borderDash:[5,4], pointRadius:2, borderWidth:1.5 },
-    { label:'Squad mean', data:perDate.map(d=>d.mean), borderColor:'#f26522', backgroundColor:'#f26522', tension:0.25, spanGaps:true, pointRadius:4, borderWidth:2.5 },
-  ] }, options:{responsive:true, plugins:{legend:{position:'bottom', labels:{filter:l=>l.text!=='−1 SD' && l.text!=='+1 SD'}}, tooltip:{callbacks:{afterBody:ctx=>{ const d=perDate[ctx[0].dataIndex]; return `n=${d.n}`; }}}}, scales:{y:{beginAtZero:false}}} });
+    const canvas = document.getElementById('ttc_'+key);
+    const ctx = canvas.getContext('2d');
+    teamTrendCharts.push(new Chart(ctx, { type:'line', data:{ labels:dates, datasets:[
+      { label:'−1 SD', data:perDate.map(d=>d.sdLo), borderColor:'transparent', pointRadius:0, fill:false },
+      { label:'+1 SD', data:perDate.map(d=>d.sdHi), borderColor:'transparent', backgroundColor:'rgba(242,101,34,0.14)', pointRadius:0, fill:'-1' },
+      { label:'Median', data:perDate.map(d=>d.median), borderColor:'#94a3b8', borderDash:[5,4], pointRadius:2, borderWidth:1.5 },
+      { label:'Squad mean', data:perDate.map(d=>d.mean), borderColor:'#f26522', backgroundColor:'#f26522', tension:0.25, spanGaps:true, pointRadius:3, borderWidth:2.5 },
+    ] }, options:{responsive:true, plugins:{legend:{position:'bottom', labels:{filter:l=>l.text!=='−1 SD' && l.text!=='+1 SD', boxWidth:10, font:{size:10}}}, tooltip:{callbacks:{afterBody:ctx=>{ const d=perDate[ctx[0].dataIndex]; return `n=${d.n}`; }}}}, scales:{y:{beginAtZero:false}}} }));
 
-  // stat cards for the most recent test date
-  const statsEl = document.getElementById('teamTrendStats');
-  const last = perDate[perDate.length-1];
-  if (statsEl){
+    const statsEl = document.getElementById('tts_'+key);
+    const last = perDate[perDate.length-1];
     if (!last || last.n===0){
-      statsEl.innerHTML = '<div class="cat-card"><div class="cat-name">Latest session</div><div class="cat-status" style="color:#7a8290">No data yet</div></div>';
+      statsEl.innerHTML = '<div class="cat-card"><div class="cat-name">Latest</div><div class="cat-status" style="color:#7a8290">No data yet</div></div>';
     } else {
       const sd = last.n>=2 ? (last.sdHi-last.mean) : null;
       statsEl.innerHTML = `
-        <div class="cat-card"><div class="cat-name">Squad Mean</div><div class="cat-status">${fmt(last.mean)} ${m.unit}</div></div>
+        <div class="cat-card"><div class="cat-name">Mean</div><div class="cat-status">${fmt(last.mean)} ${m.unit}</div></div>
         <div class="cat-card"><div class="cat-name">Median</div><div class="cat-status">${fmt(last.median)} ${m.unit}</div></div>
-        <div class="cat-card"><div class="cat-name">SD</div><div class="cat-status">${sd==null?'—':'± '+fmt(sd)+' '+m.unit}</div></div>
-        <div class="cat-card"><div class="cat-name">Squad n</div><div class="cat-status">${last.n} tested</div></div>`;
+        <div class="cat-card"><div class="cat-name">SD</div><div class="cat-status">${sd==null?'—':'± '+fmt(sd)}</div></div>
+        <div class="cat-card"><div class="cat-name">n</div><div class="cat-status">${last.n}</div></div>`;
     }
-  }
+  });
 }
 
 // ============================================================
@@ -1499,14 +1588,8 @@ function drawTeamScatter(){
     return;
   }
   const xVals = pts.map(p=>p.x), yVals = pts.map(p=>p.y);
-  const xMin=Math.min(...xVals), xMax=Math.max(...xVals), yMin=Math.min(...yVals), yMax=Math.max(...yVals);
-  const xPad=(xMax-xMin)*0.15||Math.abs(xMax)*0.1||1, yPad=(yMax-yMin)*0.15||Math.abs(yMax)*0.1||1;
-  const dxMin=xMin-xPad, dxMax=xMax+xPad, dyMin=yMin-yPad, dyMax=yMax+yPad;
-  const W=760,H=460,ML=60,MR=20,MT=20,MB=40,CW=W-ML-MR,CH=H-MT-MB;
-  const sx = v => ML + (v-dxMin)/(dxMax-dxMin)*CW;
-  const sy = v => MT + CH - (v-dyMin)/(dyMax-dyMin)*CH;
 
-  let xDiv=null, yDiv=null, nNote='';
+  let xDiv=null, yDiv=null, xBand=null, yBand=null, nNote='';
   if (singleGender){
     const useSquad = refFrame.scatter==='squad';
     if (useSquad){
@@ -1515,12 +1598,21 @@ function drawTeamScatter(){
       if (ys2.n>=2) yDiv = ys2.mean;
       nNote = `Squad mode — n=${xs2.n} (${mx.label}), n=${ys2.n} (${my.label})`;
     } else {
-      const xBand = NORMS[xKey]&&NORMS[xKey][singleGender], yBand = NORMS[yKey]&&NORMS[yKey][singleGender];
+      xBand = NORMS[xKey]&&NORMS[xKey][singleGender]; yBand = NORMS[yKey]&&NORMS[yKey][singleGender];
       if (xBand&&xBand.min!=null&&xBand.max!=null) xDiv=(xBand.min+xBand.max)/2;
       if (yBand&&yBand.min!=null&&yBand.max!=null) yDiv=(yBand.min+yBand.max)/2;
-      nNote = 'League mode — dividers at norm-band midpoint (where set)';
+      nNote = 'League mode — dividers at norm-band midpoint, shaded strip = full norm range (where set)';
     }
   }
+  // Domain always includes the divider so it (and the norm-band strip) are
+  // guaranteed to fit on-canvas, however far the squad sits from the norm.
+  const xDom = robustDomain(xVals, xDiv), yDom = robustDomain(yVals, yDiv);
+  const dxMin=xDom.min, dxMax=xDom.max, dyMin=yDom.min, dyMax=yDom.max;
+  const W=760,H=460,ML=60,MR=20,MT=20,MB=40,CW=W-ML-MR,CH=H-MT-MB;
+  const sx = v => ML + Math.max(0,Math.min(1,(v-dxMin)/(dxMax-dxMin)))*CW;
+  const sy = v => MT + CH - Math.max(0,Math.min(1,(v-dyMin)/(dyMax-dyMin)))*CH;
+  const clampX = px => Math.max(ML+3, Math.min(W-MR-3, px));
+  const clampY = py => Math.max(MT+3, Math.min(H-MB-3, py));
 
   let s = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-height:480px;font-family:-apple-system,sans-serif" class="fade-redraw">`;
   if (xDiv!=null && yDiv!=null){
@@ -1528,8 +1620,24 @@ function drawTeamScatter(){
     [[ML,MT,xDivPx-ML,yDivPx-MT,'rgba(22,163,74,0.09)'],[xDivPx,MT,W-MR-xDivPx,yDivPx-MT,'rgba(202,138,4,0.07)'],
      [ML,yDivPx,xDivPx-ML,H-MB-yDivPx,'rgba(202,138,4,0.07)'],[xDivPx,yDivPx,W-MR-xDivPx,H-MB-yDivPx,'rgba(220,38,38,0.08)']]
       .forEach(([x,y,w,h,fill])=>{ s+=`<rect x="${x}" y="${y}" width="${Math.max(0,w)}" height="${Math.max(0,h)}" fill="${fill}"/>`; });
-    s += `<line x1="${xDivPx}" y1="${MT}" x2="${xDivPx}" y2="${H-MB}" stroke="#c7ccd3" stroke-width="1.5" stroke-dasharray="6,3"/>`;
-    s += `<line x1="${ML}" y1="${yDivPx}" x2="${W-MR}" y2="${yDivPx}" stroke="#c7ccd3" stroke-width="1.5" stroke-dasharray="6,3"/>`;
+  }
+  // Norm-band shading strips — the full target range, not just its midpoint.
+  if (xBand && xBand.min!=null && xBand.max!=null){
+    const x1=sx(xBand.min), x2=sx(xBand.max);
+    s += `<rect x="${Math.min(x1,x2)}" y="${MT}" width="${Math.abs(x2-x1)}" height="${CH}" fill="rgba(58,141,122,0.10)"/>`;
+  }
+  if (yBand && yBand.min!=null && yBand.max!=null){
+    const y1=sy(yBand.min), y2=sy(yBand.max);
+    s += `<rect x="${ML}" y="${Math.min(y1,y2)}" width="${CW}" height="${Math.abs(y2-y1)}" fill="rgba(58,141,122,0.10)"/>`;
+  }
+  // Density cloud (Quadrant of Boom style).
+  const cloudPts = pts.map(p=>[clampX(sx(p.x))-ML, clampY(sy(p.y))-MT]);
+  const cloudUrl = densityCloudDataUrl(cloudPts, CW, CH, 40);
+  if (cloudUrl) s += `<image href="${cloudUrl}" x="${ML}" y="${MT}" width="${CW}" height="${CH}" preserveAspectRatio="none" style="mix-blend-mode:multiply"/>`;
+  if (xDiv!=null && yDiv!=null){
+    const xDivPx=sx(xDiv), yDivPx=sy(yDiv);
+    s += `<line x1="${xDivPx}" y1="${MT}" x2="${xDivPx}" y2="${H-MB}" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6,3"/>`;
+    s += `<line x1="${ML}" y1="${yDivPx}" x2="${W-MR}" y2="${yDivPx}" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6,3"/>`;
   }
   s += `<rect x="${ML}" y="${MT}" width="${CW}" height="${CH}" fill="none" stroke="#e4e6ea" stroke-width="1"/>`;
   for (let i=0;i<=4;i++){
@@ -1541,7 +1649,7 @@ function drawTeamScatter(){
   s += `<text x="${ML+CW/2}" y="${H-6}" font-size="11" text-anchor="middle" fill="#444c56" font-weight="500">${mx.label} (${mx.unit})</text>`;
   s += `<text x="12" y="${MT+CH/2}" font-size="11" text-anchor="middle" fill="#444c56" font-weight="500" transform="rotate(-90,12,${MT+CH/2})">${my.label} (${my.unit})</text>`;
   // simple pairwise separation so close/overlapping players don't fully hide one another
-  const pos = pts.map(p=>({p, cx:sx(p.x), cy:sy(p.y)}));
+  const pos = pts.map(p=>({p, cx:clampX(sx(p.x)), cy:clampY(sy(p.y))}));
   for (let iter=0; iter<6; iter++){
     for (let i=0;i<pos.length;i++){
       for (let j=i+1;j<pos.length;j++){
@@ -1559,9 +1667,10 @@ function drawTeamScatter(){
   }
   pos.forEach(({p,cx,cy})=>{
     const ini=(p.a.name||'?').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
-    s += `<circle cx="${cx}" cy="${cy}" r="15" fill="${p.col}" opacity="0.16"/>`;
-    s += `<circle cx="${cx}" cy="${cy}" r="10" fill="${p.col}" stroke="#fff" stroke-width="2"><title>${p.a.name} — ${fmt(p.x)} ${mx.unit}, ${fmt(p.y)} ${my.unit}</title></circle>`;
-    s += `<text x="${cx}" y="${cy+3.5}" font-size="8" text-anchor="middle" fill="#fff" font-weight="700" style="pointer-events:none">${ini}</text>`;
+    const ccx=clampX(cx), ccy=clampY(cy);
+    s += `<circle cx="${ccx}" cy="${ccy}" r="15" fill="${p.col}" opacity="0.16"/>`;
+    s += `<circle cx="${ccx}" cy="${ccy}" r="10" fill="${p.col}" stroke="#fff" stroke-width="2"><title>${p.a.name} — ${fmt(p.x)} ${mx.unit}, ${fmt(p.y)} ${my.unit}</title></circle>`;
+    s += `<text x="${ccx}" y="${ccy+3.5}" font-size="8" text-anchor="middle" fill="#fff" font-weight="700" style="pointer-events:none">${ini}</text>`;
   });
   s += '</svg>';
   container.innerHTML = s;
@@ -1571,7 +1680,7 @@ function drawTeamScatter(){
     <span class="scatter-legend-dot" style="background:${SCORE_COLS[1]}"></span>Building
     <span class="scatter-legend-dot" style="background:${SCORE_COLS[0]}"></span>Primary Focus
     <span class="scatter-legend-dot" style="background:#c2c6cc"></span>No norm data
-    <span style="margin-left:auto">${singleGender ? nNote : 'Showing both genders — select Women or Men in the sidebar filter to see reference dividers.'}</span>`;
+    <span style="margin-left:auto">${singleGender ? nNote : 'Showing both genders — select Women or Men in the sidebar filter to see reference dividers and norm bands.'}</span>`;
 }
 
 // ============================================================
