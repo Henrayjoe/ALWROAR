@@ -163,7 +163,7 @@
   .axis-select { border:1px solid var(--border); border-radius:6px; padding:6px 10px; font-size:12px; }
   .quad-legend { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:8px; font-size:11px; color:var(--text-muted); }
   .pq-heading { font-size:12px; font-weight:800; letter-spacing:.02em; color:var(--text-primary); margin-bottom:10px; }
-  .pq-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(440px,1fr)); gap:16px; }
+  .pq-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(600px,1fr)); gap:20px; }
   .pq-card { position:relative; min-width:0; overflow:hidden; background:var(--surface); box-shadow:var(--shadow-sm); border-radius:var(--radius); padding:14px 16px; transition:box-shadow .22s var(--ease); }
   .pq-card svg { display:block; width:100%; height:auto; max-width:100%; }
   .pq-card:hover { box-shadow:var(--shadow-md); }
@@ -698,7 +698,7 @@ function robustDomain(vals, divVal){
   if (divVal!=null){ lo = Math.min(lo, divVal); hi = Math.max(hi, divVal); }
   let span = hi - lo;
   if (span <= 0) span = Math.abs(hi) || 1;
-  const pad = span * 0.25;
+  const pad = span * 0.38;
   return { min: lo - pad, max: hi + pad };
 }
 // Soft "density cloud" background (the Quadrant of Boom style) built by
@@ -1298,7 +1298,7 @@ function renderQuadrantSvg(a, xKey, yKey){
   const clampY = py => Math.max(MT+3, Math.min(H-MB-3, py));
   const xDivPx = sx(xDiv), yDivPx = sy(yDiv);
 
-  let s = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-height:460px;font-family:-apple-system,sans-serif" class="fade-redraw">`;
+  let s = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-height:620px;font-family:-apple-system,sans-serif" class="fade-redraw">`;
   for (let i=1;i<4;i++){
     s += `<line x1="${ML+CW*i/4}" y1="${MT}" x2="${ML+CW*i/4}" y2="${H-MB}" stroke="#eef0f2" stroke-width="1"/>`;
     s += `<line x1="${ML}" y1="${MT+CH*i/4}" x2="${W-MR}" y2="${MT+CH*i/4}" stroke="#eef0f2" stroke-width="1"/>`;
@@ -1826,7 +1826,7 @@ function renderTeamScatterSvg(xKey, yKey){
   const clampX = px => Math.max(ML+3, Math.min(W-MR-3, px));
   const clampY = py => Math.max(MT+3, Math.min(H-MB-3, py));
 
-  let s = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-height:480px;font-family:-apple-system,sans-serif" class="fade-redraw">`;
+  let s = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-height:620px;font-family:-apple-system,sans-serif" class="fade-redraw">`;
   for (let i=1;i<4;i++){
     s += `<line x1="${ML+CW*i/4}" y1="${MT}" x2="${ML+CW*i/4}" y2="${H-MB}" stroke="#eef0f2" stroke-width="1"/>`;
     s += `<line x1="${ML}" y1="${MT+CH*i/4}" x2="${W-MR}" y2="${MT+CH*i/4}" stroke="#eef0f2" stroke-width="1"/>`;
