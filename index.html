@@ -343,6 +343,7 @@ const METRICS = [
   {key:'hipKnee_abdMean', label:'Hip Abd (knee) — Mean Force', unit:'N', noNorm:true, group:'Hip Strength', paired:true},
   {key:'hipKnee_ratio', label:'Hip ADD/ABD Ratio (knee)', unit:'', lb:false, group:'Hip Strength', paired:true, derived:true},
   {key:'imtp_relForce', label:'IMTP — Relative Peak Force', unit:'N/kg', lb:false, group:'Strength', paired:false},
+  {key:'nordic_maxForce', label:'Nordic Hamstring — Peak Force', unit:'N', lb:false, group:'Strength', paired:true},
   {key:'dsi', label:'DSI (CMJ force ÷ IMTP force)', unit:'', lb:false, group:'Strength', paired:false, derived:true},
   {key:'speed_5m', label:'Sprint — 5 m', unit:'s', lb:true, noNorm:true, group:'Speed & Aerobic', paired:false},
   {key:'speed_10m', label:'Sprint — 10 m', unit:'s', lb:true, group:'Speed & Aerobic', paired:false},
@@ -393,6 +394,7 @@ let NORMS = {
   hipKnee_abdPeak:       { W:{min:339, max:404} },
   hipKnee_ratio:         { W:{min:0.99, max:1.18} },
   imtp_relForce:         { W:{min:20.2, max:23.0}, M:{min:30, max:45} },
+  nordic_maxForce:       { W:{min:292, max:361},   M:{min:417, max:517} },
   dsi:                   { W:{min:0.60, max:0.80}, M:{min:0.69, max:0.90} },
   speed_10m:             { W:{min:1.90, max:2.05}, M:{min:1.65, max:1.80} },
   speed_20m:             { W:{min:3.25, max:3.55}, M:{min:2.85, max:3.05} },
@@ -425,6 +427,7 @@ const NORM_SOURCES = {
   hipKnee_abdPeak: 'VALD ForceFrame Hip ADD/ABD Supine (Knee) — WSL report only, no PL equivalent found. Well supported for women, no band set for men.',
   hipKnee_ratio:   'VALD ForceFrame Hip ADD:ABD ratio (knee) — WSL report only, no PL equivalent found. Well supported for women, no band set for men.',
   imtp_relForce:   'Men: Badby et al. 2025, professional soccer, well supported (median ~40 N/kg). Women: Seraphin & Edson et al., pro female club soccer, single study n=28, moderate confidence.',
+  nordic_maxForce: 'VALD NordBord Nordic hamstring curl, senior 25th–75th percentile. Women: VALD WSL 2025/26 report. Men: VALD Premier League 2025/26 report, in-season. Well supported (real, current-season league data for both).',
   dsi:             'Men: real VALD Premier League 2025/26 DSI distribution, 25th–75th, well supported. Women: Sheppard et al. 2011 "concurrent strength training" zone as cited in the VALD WSL report — a training-recommendation band, not a women\'s-specific population percentile. Moderate confidence.',
   speed_10m:       'Men: Haugen et al. 2019, well supported. Women: derived from Vescovi 2012 (FAiM study, female pro try-out sample) mean split speed ± SD, converted to time — moderate confidence, not a direct percentile table.',
   speed_20m:       'Men: Haugen et al. 2019, well supported. Women: derived from Vescovi 2012 (FAiM study) — moderate confidence.',
@@ -436,12 +439,16 @@ const NORM_SOURCES = {
 // ============================================================
 // CALCS
 // ============================================================
-function pf(v){ if(v==null || v==='') return null; const n=parseFloat(v); return isNaN(n)?null:n; }
+function pf(v){ if(v==null || v==='') return null; const n=parseFloat(String(v).replace(/,/g,'').trim()); return isNaN(n)?null:n; }
 function asymmetry(l,r){ l=pf(l); r=pf(r); if(l==null||r==null) return null; const mx=Math.max(Math.abs(l),Math.abs(r)); if(mx===0) return 0; return Math.abs(l-r)/mx*100; }
 function ratioOf(add,abd){ add=pf(add); abd=pf(abd); if(add==null||abd==null||abd===0) return null; return add/abd; }
 function aerobicResult(testType, vift, trialDist, trialTime){
-  if (testType==='Time Trial'){ const d=pf(trialDist), t=pf(trialTime); if(d==null||t==null||t===0) return null; return (d/1000)/(t/3600); }
-  if (testType==='30-15 IFT'){ return pf(vift); }
+  // Match leniently — spreadsheet entries vary in case/spacing/wording
+  // ("Time Trial", "time trial", "TT", "30-15 IFT", "30/15 ift", etc.)
+  // rather than requiring one exact string.
+  const t = (testType||'').toString().trim().toLowerCase();
+  if (t.includes('trial') || t==='tt'){ const d=pf(trialDist), tm=pf(trialTime); if(d==null||tm==null||tm===0) return null; return (d/1000)/(tm/3600); }
+  if (t.includes('ift') || t.includes('30-15') || t.includes('30/15')){ return pf(vift); }
   return null;
 }
 function computeAge(birthdate, fallbackAge){
@@ -485,7 +492,7 @@ function deriveSession(row){
 const TEST_NAMES = {
   cmj:'Countermovement Jump', slcmj:'Single Leg CMJ', hop:'Hop Test (10/5)', slhop:'SL Hop Test (10/5)',
   zigzag:'Zig Zag 5-Hop', sj:'Squat Jump', hipAnkle:'Hip ADD/ABD — Ankle', hipKnee:'Hip ADD/ABD — Knee',
-  imtp:'Isometric Mid-Thigh Pull (IMTP)',
+  imtp:'Isometric Mid-Thigh Pull (IMTP)', nordic:'Nordic Hamstring Curl',
   speed:'Sprint Splits', sts:'Single Leg Sit-to-Stand', hamstringBridge:'Single Leg Hamstring Bridge (to failure)',
   heelRaise:'Single Leg Heel Raise', copenhagen:'Copenhagen Plank', sidePlank:'Side Plank',
 };
@@ -676,30 +683,69 @@ function robustDomain(vals, divVal){
 // stacking radial-gradient blobs on an offscreen canvas, then recoloring
 // the accumulated alpha to a single warm hue. pointsPx are [x,y] already
 // relative to the plot rect's own top-left (0,0), not the full SVG.
-function densityCloudDataUrl(pointsPx, w, h, radius){
+function densityCloudDataUrl(pointsPx, w, h, bandwidth){
   try{
     if (!pointsPx.length || !window.document || typeof document.createElement!=='function') return null;
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.max(1,Math.round(w)); canvas.height = Math.max(1,Math.round(h));
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return null;
-    pointsPx.forEach(([px,py])=>{
-      const grad = ctx.createRadialGradient(px,py,0,px,py,radius);
-      grad.addColorStop(0, 'rgba(0,0,0,0.55)');
-      grad.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.fillStyle = grad;
-      ctx.beginPath(); ctx.arc(px,py,radius,0,Math.PI*2); ctx.fill();
-    });
-    const img = ctx.getImageData(0,0,canvas.width,canvas.height);
-    const d = img.data;
-    for (let i=0;i<d.length;i+=4){
-      const a = d[i+3];
-      if (a<6){ d[i+3]=0; continue; }
-      d[i]=242; d[i+1]=101; d[i+2]=34; // brand orange, constant hue
-      d[i+3] = Math.min(190, a*0.8);
+    // Evaluate a real 2D Gaussian KDE on a small internal grid (cheap —
+    // a few thousand cells), then let the canvas upscale it smoothly.
+    // That smooth upscale is what produces genuine contour-like bands
+    // instead of a ring of separate blobs.
+    const gw = 96, gh = Math.max(16, Math.round(gw * h / w));
+    const grid = new Float32Array(gw*gh);
+    const cellW = w/gw, cellH = h/gh;
+    const bw2 = 2*bandwidth*bandwidth;
+    let maxD = 0;
+    for (let gy=0; gy<gh; gy++){
+      const py = (gy+0.5)*cellH;
+      for (let gx=0; gx<gw; gx++){
+        const px = (gx+0.5)*cellW;
+        let dsum = 0;
+        for (let i=0;i<pointsPx.length;i++){
+          const dx = px-pointsPx[i][0], dy = py-pointsPx[i][1];
+          dsum += Math.exp(-(dx*dx+dy*dy)/bw2);
+        }
+        grid[gy*gw+gx] = dsum;
+        if (dsum>maxD) maxD = dsum;
+      }
     }
-    ctx.putImageData(img,0,0);
-    return canvas.toDataURL();
+    if (maxD<=0) return null;
+    // Warm, translucent color ramp — light peach at the fringes rising to
+    // a deep burnt orange at the core, matching the reference density plots.
+    const stops = [
+      [0.00, 255,255,255,0],
+      [0.10, 255,244,229,70],
+      [0.28, 254,221,181,120],
+      [0.48, 253,186,125,160],
+      [0.70, 244,140,64,195],
+      [1.00, 214,84,17,225],
+    ];
+    function colorAt(t){
+      for (let i=1;i<stops.length;i++){
+        if (t<=stops[i][0]){
+          const a0=stops[i-1], a1=stops[i];
+          const f = a1[0]>a0[0] ? (t-a0[0])/(a1[0]-a0[0]) : 0;
+          return [a0[1]+(a1[1]-a0[1])*f, a0[2]+(a1[2]-a0[2])*f, a0[3]+(a1[3]-a0[3])*f, a0[4]+(a1[4]-a0[4])*f];
+        }
+      }
+      return stops[stops.length-1].slice(1);
+    }
+    const gridCanvas = document.createElement('canvas');
+    gridCanvas.width = gw; gridCanvas.height = gh;
+    const gctx = gridCanvas.getContext('2d');
+    const img = gctx.createImageData(gw,gh);
+    for (let i=0;i<grid.length;i++){
+      const t = grid[i]/maxD;
+      const [r,g,b,a] = colorAt(t);
+      img.data[i*4]=r; img.data[i*4+1]=g; img.data[i*4+2]=b; img.data[i*4+3]=a;
+    }
+    gctx.putImageData(img,0,0);
+    const outCanvas = document.createElement('canvas');
+    outCanvas.width = Math.max(1,Math.round(w)); outCanvas.height = Math.max(1,Math.round(h));
+    const octx = outCanvas.getContext('2d');
+    octx.imageSmoothingEnabled = true;
+    if ('imageSmoothingQuality' in octx) octx.imageSmoothingQuality = 'high';
+    octx.drawImage(gridCanvas, 0,0,gw,gh, 0,0, outCanvas.width, outCanvas.height);
+    return outCanvas.toDataURL();
   }catch(e){ console.error('densityCloudDataUrl failed:', e); return null; }
 }
 
@@ -1042,6 +1088,19 @@ function renderMetricRow(m, d, prevD, a){
 // TREND CHARTS (small multiples grid, per athlete)
 // ============================================================
 let trendCharts=[];
+function squadStatsPerDate(m, gender, excludeId, date){
+  const vals = [];
+  Object.values(athleteMap).forEach(p=>{
+    if (p.gender!==gender || p.id===excludeId) return;
+    const s = p.sessions.find(s=>s.test_date===date);
+    if (s){ const v = repVal(m, s); if (v!=null) vals.push(v); }
+  });
+  const n = vals.length;
+  if (n===0) return {mean:null, sd:null, n:0};
+  const mn = vals.reduce((a,b)=>a+b,0)/n;
+  const sd = n<2 ? 0 : Math.sqrt(vals.reduce((a,b)=>a+(b-mn)**2,0)/(n-1));
+  return {mean:mn, sd, n};
+}
 function drawAllTrendCharts(){
   const a = athleteMap[selectedId]; if (!a) return;
   trendCharts.forEach(c=>c.destroy()); trendCharts=[];
@@ -1055,13 +1114,16 @@ function drawAllTrendCharts(){
     const ctx = document.getElementById('tc_'+m.key).getContext('2d');
     const datasets = [];
     if (useSquad){
-      const stats = squadStats(m.key, a.gender, a.id);
-      if (stats.n>0) minN = Math.min(minN, stats.n);
-      if (stats.n>=2 && stats.sd>0){
-        const lo = stats.mean - stats.sd, hi = stats.mean + stats.sd;
-        datasets.push({label:'min', data:labels.map(()=>lo), borderColor:'transparent', pointRadius:0, fill:false});
-        datasets.push({label:'Squad ±1SD', data:labels.map(()=>hi), borderColor:'transparent', backgroundColor:'rgba(58,141,122,0.22)', pointRadius:0, fill:'-1'});
-        datasets.push({label:'Squad mean', data:labels.map(()=>stats.mean), borderColor:'#3a8d7a', borderDash:[3,3], pointRadius:0});
+      // Per test-date squad stats — gathered from whoever else was actually
+      // tested on that exact date, so the band moves with the timeline
+      // instead of repeating one static snapshot across every point.
+      const perDate = labels.map(dt => squadStatsPerDate(m, a.gender, a.id, dt));
+      const anyN = perDate.filter(s=>s.n>0);
+      if (anyN.length){
+        minN = Math.min(minN, Math.min(...anyN.map(s=>s.n)));
+        datasets.push({label:'min', data:perDate.map(s=> s.n>=2 && s.sd>0 ? s.mean-s.sd : null), borderColor:'transparent', pointRadius:0, fill:false, spanGaps:false});
+        datasets.push({label:'Squad ±1SD', data:perDate.map(s=> s.n>=2 && s.sd>0 ? s.mean+s.sd : null), borderColor:'transparent', backgroundColor:'rgba(58,141,122,0.22)', pointRadius:0, fill:'-1', spanGaps:false});
+        datasets.push({label:'Squad mean', data:perDate.map(s=> s.n>0 ? s.mean : null), borderColor:'#3a8d7a', borderDash:[3,3], pointRadius:2, spanGaps:false});
       }
     } else {
       const band = NORMS[m.key] && NORMS[m.key][a.gender];
@@ -1078,7 +1140,7 @@ function drawAllTrendCharts(){
     } else {
       datasets.push({label:m.label, data:hist.map(s=>s[m.key]), borderColor:'#f26522', backgroundColor:'#f26522', tension:0.25, spanGaps:true, pointRadius:3});
     }
-    trendCharts.push(new Chart(ctx, { type:'line', data:{labels,datasets}, options:{responsive:true, plugins:{legend:{display:m.paired, position:'bottom', labels:{filter:l=>l.text==='Left'||l.text==='Right'}}}, scales:{y:{beginAtZero:false}} } }));
+    trendCharts.push(new Chart(ctx, { type:'line', data:{labels,datasets}, options:{responsive:true, plugins:{legend:{display:m.paired, position:'bottom', labels:{filter:l=>l.text==='Left'||l.text==='Right'}}}, scales:{ x:{title:{display:true, text:'Test date', font:{size:10}}}, y:{beginAtZero:false, title:{display:true, text:m.unit?`${m.label} (${m.unit})`:m.label, font:{size:10}}} } } }));
   });
   const note = document.getElementById('trendsRefNote');
   if (note) note.textContent = useSquad ? (minN===Infinity ? 'No squad data yet for this player\'s gender.' : `Squad n≈${minN} (min across metrics) — bands hidden where n<2.`) : '';
@@ -1138,7 +1200,7 @@ function drawQuadrant(){
   // the current athlete, clipped to the plot rect.
   const cloudPts = [[myXVal,myYVal], ...xs.map(px=>{ const py=ys.find(y=>y.id===px.id); return py ? [px.val,py.val] : null; }).filter(Boolean)]
     .map(([vx,vy])=>[clampX(sx(vx))-ML, clampY(sy(vy))-MT]);
-  const cloudUrl = densityCloudDataUrl(cloudPts, CW, CH, 42);
+  const cloudUrl = densityCloudDataUrl(cloudPts, CW, CH, 55);
   if (cloudUrl) s += `<image href="${cloudUrl}" x="${ML}" y="${MT}" width="${CW}" height="${CH}" preserveAspectRatio="none" style="mix-blend-mode:multiply"/>`;
   s += `<line x1="${xDivPx}" y1="${MT}" x2="${xDivPx}" y2="${H-MB}" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6,3"/>`;
   s += `<line x1="${ML}" y1="${yDivPx}" x2="${W-MR}" y2="${yDivPx}" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6,3"/>`;
@@ -1177,7 +1239,7 @@ function drawQuadrant(){
 const RADAR_METRIC_KEYS = [
   'cmj_jumpHeight','cmj_peakPowerBW','slcmj_jumpHeight','hop_meanJumpHeight','hop_rsi',
   'slhop_meanJumpHeight','sj_jumpHeight','eur','hipAnkle_ratio','hipKnee_ratio',
-  'imtp_relForce','dsi','speed_10m','speed_20m','speed_maxVel','aerobic_result',
+  'imtp_relForce','nordic_maxForce','dsi','speed_10m','speed_20m','speed_maxVel','aerobic_result',
 ];
 function squadRadarScore(m, val, gender, athleteId){
   const stats = squadStats(m.key, gender, athleteId);
@@ -1233,7 +1295,7 @@ function drawRadar(){
         { label:useSquad?'Squad mean':'At Standard', data:axisData.map(()=>benchmarkVal), borderColor:'#94a3b8', borderDash:[4,3], pointRadius:0, backgroundColor:'transparent' },
       ]
     },
-    options:{ responsive:true, scales:{ r:{ min:0, max:4, ticks:{stepSize:1, showLabelBackdrop:false} } }, plugins:{ legend:{position:'bottom'} } }
+    options:{ responsive:true, scales:{ r:{ min:0, max:4, ticks:{stepSize:1, showLabelBackdrop:false, font:{size:9}} } }, plugins:{ legend:{position:'bottom'}, title:{display:true, text:'Standardized score — 0 = Primary Focus, 4 = Above Standard', font:{size:10, weight:'normal'}, color:'#7a8290', padding:{bottom:8}} } }
   });
 
   listEl.innerHTML = axisData.map(x=>`<div class="radar-row"><span>${x.fullLabel}</span><b>${x.note}</b></div>`).join('');
@@ -1401,7 +1463,7 @@ function drawTeamTrendChart(){
       { label:'+1 SD', data:perDate.map(d=>d.sdHi), borderColor:'transparent', backgroundColor:'rgba(242,101,34,0.14)', pointRadius:0, fill:'-1' },
       { label:'Median', data:perDate.map(d=>d.median), borderColor:'#94a3b8', borderDash:[5,4], pointRadius:2, borderWidth:1.5 },
       { label:'Squad mean', data:perDate.map(d=>d.mean), borderColor:'#f26522', backgroundColor:'#f26522', tension:0.25, spanGaps:true, pointRadius:3, borderWidth:2.5 },
-    ] }, options:{responsive:true, plugins:{legend:{position:'bottom', labels:{filter:l=>l.text!=='−1 SD' && l.text!=='+1 SD', boxWidth:10, font:{size:10}}}, tooltip:{callbacks:{afterBody:ctx=>{ const d=perDate[ctx[0].dataIndex]; return `n=${d.n}`; }}}}, scales:{y:{beginAtZero:false}}} }));
+    ] }, options:{responsive:true, plugins:{legend:{position:'bottom', labels:{filter:l=>l.text!=='−1 SD' && l.text!=='+1 SD', boxWidth:10, font:{size:10}}}, tooltip:{callbacks:{afterBody:ctx=>{ const d=perDate[ctx[0].dataIndex]; return `n=${d.n}`; }}}}, scales:{ x:{title:{display:true, text:'Test date', font:{size:10}}}, y:{beginAtZero:false, title:{display:true, text:m.unit?`${m.label} (${m.unit})`:m.label, font:{size:10}}} }} }));
 
     const statsEl = document.getElementById('tts_'+key);
     const last = perDate[perDate.length-1];
@@ -1602,6 +1664,11 @@ function drawTeamScatter(){
     return;
   }
   const xVals = pts.map(p=>p.x), yVals = pts.map(p=>p.y);
+  // Squad average + SD for the metrics/players actually plotted here.
+  const meanX = xVals.reduce((a,b)=>a+b,0)/xVals.length;
+  const meanY = yVals.reduce((a,b)=>a+b,0)/yVals.length;
+  const sdX = xVals.length<2?0:Math.sqrt(xVals.reduce((a,b)=>a+(b-meanX)**2,0)/(xVals.length-1));
+  const sdY = yVals.length<2?0:Math.sqrt(yVals.reduce((a,b)=>a+(b-meanY)**2,0)/(yVals.length-1));
 
   let xDiv=null, yDiv=null, xBand=null, yBand=null, nNote='';
   if (singleGender){
@@ -1646,8 +1713,14 @@ function drawTeamScatter(){
   }
   // Density cloud (Quadrant of Boom style).
   const cloudPts = pts.map(p=>[clampX(sx(p.x))-ML, clampY(sy(p.y))-MT]);
-  const cloudUrl = densityCloudDataUrl(cloudPts, CW, CH, 40);
+  const cloudUrl = densityCloudDataUrl(cloudPts, CW, CH, 55);
   if (cloudUrl) s += `<image href="${cloudUrl}" x="${ML}" y="${MT}" width="${CW}" height="${CH}" preserveAspectRatio="none" style="mix-blend-mode:multiply"/>`;
+  // Squad ±1SD ellipse around the average, independent of any norm reference.
+  if (sdX>0 && sdY>0){
+    const ecx=sx(meanX), ecy=sy(meanY);
+    const erx=Math.max(3,Math.abs(sx(meanX+sdX)-ecx)), ery=Math.max(3,Math.abs(sy(meanY+sdY)-ecy));
+    s += `<ellipse cx="${ecx}" cy="${ecy}" rx="${erx}" ry="${ery}" fill="none" stroke="#0d1117" stroke-width="1.2" stroke-dasharray="4,3" opacity="0.3"/>`;
+  }
   if (xDiv!=null && yDiv!=null){
     const xDivPx=sx(xDiv), yDivPx=sy(yDiv);
     s += `<line x1="${xDivPx}" y1="${MT}" x2="${xDivPx}" y2="${H-MB}" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6,3"/>`;
@@ -1686,6 +1759,14 @@ function drawTeamScatter(){
     s += `<circle cx="${ccx}" cy="${ccy}" r="10" fill="${p.col}" stroke="#fff" stroke-width="2"><title>${p.a.name} — ${fmt(p.x)} ${mx.unit}, ${fmt(p.y)} ${my.unit}</title></circle>`;
     s += `<text x="${ccx}" y="${ccy+3.5}" font-size="8" text-anchor="middle" fill="#fff" font-weight="700" style="pointer-events:none">${ini}</text>`;
   });
+  // Squad average marker — drawn last so it always sits on top.
+  {
+    const mcx=clampX(sx(meanX)), mcy=clampY(sy(meanY));
+    const mla = mcx>W-MR-90 ? 'end' : 'start', mlx = mcx>W-MR-90 ? mcx-13 : mcx+13;
+    s += `<path d="M ${mcx} ${mcy-9} L ${mcx+9} ${mcy} L ${mcx} ${mcy+9} L ${mcx-9} ${mcy} Z" fill="#0d1117" stroke="#fff" stroke-width="1.6"><title>Squad average — ${fmt(meanX)} ${mx.unit}, ${fmt(meanY)} ${my.unit} (n=${pts.length})</title></path>`;
+    s += `<text x="${mlx}" y="${mcy-6}" font-size="9.5" text-anchor="${mla}" fill="#0d1117" font-weight="700">Squad avg</text>`;
+    s += `<text x="${mlx}" y="${mcy+7}" font-size="9" text-anchor="${mla}" fill="#7a8290">${fmt(meanX)} ${mx.unit}${sdX>0?' ±'+fmt(sdX):''} · ${fmt(meanY)} ${my.unit}${sdY>0?' ±'+fmt(sdY):''}</text>`;
+  }
   s += '</svg>';
   container.innerHTML = s;
   legend.innerHTML = `
@@ -1694,6 +1775,7 @@ function drawTeamScatter(){
     <span class="scatter-legend-dot" style="background:${SCORE_COLS[1]}"></span>Building
     <span class="scatter-legend-dot" style="background:${SCORE_COLS[0]}"></span>Primary Focus
     <span class="scatter-legend-dot" style="background:#c2c6cc"></span>No norm data
+    <span>◆ Squad average · dashed ellipse = ±1 SD</span>
     <span style="margin-left:auto">${singleGender ? nNote : 'Showing both genders — select Women or Men in the sidebar filter to see reference dividers and norm bands.'}</span>`;
 }
 
