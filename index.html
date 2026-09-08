@@ -343,7 +343,9 @@ const METRICS = [
   {key:'hipKnee_abdMean', label:'Hip Abd (knee) — Mean Force', unit:'N', noNorm:true, group:'Hip Strength', paired:true},
   {key:'hipKnee_ratio', label:'Hip ADD/ABD Ratio (knee)', unit:'', lb:false, group:'Hip Strength', paired:true, derived:true},
   {key:'imtp_relForce', label:'IMTP — Relative Peak Force', unit:'N/kg', lb:false, group:'Strength', paired:false},
+  {key:'imtp_absForce', label:'IMTP — Absolute Peak Force', unit:'N', lb:false, group:'Strength', paired:false},
   {key:'nordic_maxForce', label:'Nordic Hamstring — Peak Force', unit:'N', lb:false, group:'Strength', paired:true},
+  {key:'nordic_torque', label:'Nordic Hamstring — Torque', unit:'Nm', lb:false, group:'Strength', paired:true},
   {key:'dsi', label:'DSI (CMJ force ÷ IMTP force)', unit:'', lb:false, group:'Strength', paired:false, derived:true},
   {key:'speed_5m', label:'Sprint — 5 m', unit:'s', lb:true, noNorm:true, group:'Speed & Aerobic', paired:false},
   {key:'speed_10m', label:'Sprint — 10 m', unit:'s', lb:true, group:'Speed & Aerobic', paired:false},
@@ -393,8 +395,10 @@ let NORMS = {
   hipKnee_addPeak:       { W:{min:359, max:432} },
   hipKnee_abdPeak:       { W:{min:339, max:404} },
   hipKnee_ratio:         { W:{min:0.99, max:1.18} },
-  imtp_relForce:         { W:{min:20.2, max:23.0}, M:{min:30, max:45} },
+  imtp_relForce:         { W:{min:20.2, max:23.0}, M:{min:34.72, max:40.06} },
+  imtp_absForce:         { W:{min:1739, max:2272}, M:{min:2756, max:3305} },
   nordic_maxForce:       { W:{min:292, max:361},   M:{min:417, max:517} },
+  nordic_torque:         { W:{min:114, max:145},   M:{min:171, max:225} },
   dsi:                   { W:{min:0.60, max:0.80}, M:{min:0.69, max:0.90} },
   speed_10m:             { W:{min:1.90, max:2.05}, M:{min:1.65, max:1.80} },
   speed_20m:             { W:{min:3.25, max:3.55}, M:{min:2.85, max:3.05} },
@@ -426,8 +430,10 @@ const NORM_SOURCES = {
   hipKnee_addPeak: 'VALD ForceFrame Hip ADD/ABD Supine (Knee) — WSL report only, no PL equivalent found. Well supported for women, no band set for men.',
   hipKnee_abdPeak: 'VALD ForceFrame Hip ADD/ABD Supine (Knee) — WSL report only, no PL equivalent found. Well supported for women, no band set for men.',
   hipKnee_ratio:   'VALD ForceFrame Hip ADD:ABD ratio (knee) — WSL report only, no PL equivalent found. Well supported for women, no band set for men.',
-  imtp_relForce:   'Men: Badby et al. 2025, professional soccer, well supported (median ~40 N/kg). Women: Seraphin & Edson et al., pro female club soccer, single study n=28, moderate confidence.',
+  imtp_relForce:   'Men: Badby et al. 2025 (EFL professional/youth force-plate benchmarks, J Sports Sci), exact "Below Average"–"Above Average" benchmark tiers, well supported. Women: Seraphin & Edson et al., pro female club soccer, single study n=28, moderate confidence.',
+  imtp_absForce:   'Men: Badby et al. 2025 (EFL professional 1st-team benchmarks), well supported. Women: VALD WSL 2025/26 report, senior 25th–75th percentile, well supported.',
   nordic_maxForce: 'VALD NordBord Nordic hamstring curl, senior 25th–75th percentile. Women: VALD WSL 2025/26 report. Men: VALD Premier League 2025/26 report, in-season. Well supported (real, current-season league data for both).',
+  nordic_torque:   'VALD NordBord Nordic hamstring curl torque, senior 25th–75th percentile. Women: VALD WSL 2025/26 report. Men: VALD Premier League 2025/26 report, in-season. Well supported.',
   dsi:             'Men: real VALD Premier League 2025/26 DSI distribution, 25th–75th, well supported. Women: Sheppard et al. 2011 "concurrent strength training" zone as cited in the VALD WSL report — a training-recommendation band, not a women\'s-specific population percentile. Moderate confidence.',
   speed_10m:       'Men: Haugen et al. 2019, well supported. Women: derived from Vescovi 2012 (FAiM study, female pro try-out sample) mean split speed ± SD, converted to time — moderate confidence, not a direct percentile table.',
   speed_20m:       'Men: Haugen et al. 2019, well supported. Women: derived from Vescovi 2012 (FAiM study) — moderate confidence.',
@@ -683,14 +689,30 @@ function robustDomain(vals, divVal){
 // stacking radial-gradient blobs on an offscreen canvas, then recoloring
 // the accumulated alpha to a single warm hue. pointsPx are [x,y] already
 // relative to the plot rect's own top-left (0,0), not the full SVG.
+// Small white rounded-corner badge for quadrant labels — matches VALD's
+// boxed corner-label style instead of bare floating text.
+function quadrantBadgeSvg(text, xEdge, yTop, anchor){
+  const parts = text.split(' / ');
+  const maxLen = Math.max(...parts.map(p=>p.length));
+  const w = Math.min(230, Math.max(74, maxLen*5.4+16));
+  const h = 10 + parts.length*14;
+  const rx = anchor==='start' ? xEdge : xEdge - w;
+  let out = `<rect x="${rx}" y="${yTop}" width="${w}" height="${h}" rx="7" fill="#ffffff" fill-opacity="0.94" stroke="#e4e6ea" stroke-width="1"/>`;
+  parts.forEach((p,i)=>{
+    const tx = anchor==='start' ? rx+9 : rx+w-9;
+    const ty = yTop+17+i*14;
+    out += `<text x="${tx}" y="${ty}" font-size="9.5" font-weight="700" fill="#444c56" text-anchor="${anchor}">${p}</text>`;
+  });
+  return out;
+}
 function densityCloudDataUrl(pointsPx, w, h, bandwidth){
   try{
     if (!pointsPx.length || !window.document || typeof document.createElement!=='function') return null;
-    // Evaluate a real 2D Gaussian KDE on a small internal grid (cheap —
-    // a few thousand cells), then let the canvas upscale it smoothly.
-    // That smooth upscale is what produces genuine contour-like bands
-    // instead of a ring of separate blobs.
-    const gw = 96, gh = Math.max(16, Math.round(gw * h / w));
+    // Real 2D Gaussian KDE, evaluated at near-final resolution so the
+    // discrete contour bands below get smooth-looking curved edges
+    // without needing a heavy blur/upscale that would smear them back
+    // into a gradient (that smear was the "poo stain" problem).
+    const gw = 150, gh = Math.max(18, Math.round(gw * h / w));
     const grid = new Float32Array(gw*gh);
     const cellW = w/gw, cellH = h/gh;
     const bw2 = 2*bandwidth*bandwidth;
@@ -709,25 +731,23 @@ function densityCloudDataUrl(pointsPx, w, h, bandwidth){
       }
     }
     if (maxD<=0) return null;
-    // Warm, translucent color ramp — light peach at the fringes rising to
-    // a deep burnt orange at the core, matching the reference density plots.
-    const stops = [
-      [0.00, 255,255,255,0],
-      [0.10, 255,244,229,70],
-      [0.28, 254,221,181,120],
-      [0.48, 253,186,125,160],
-      [0.70, 244,140,64,195],
-      [1.00, 214,84,17,225],
+    // Discrete percentile-style contour bands (Oranges colormap), matching
+    // VALD's concentric-ring style — flat color per band, hard edges, and
+    // a thresh cutoff below which nothing renders (an actual boundary,
+    // not a fade to infinity).
+    const THRESH = 0.05;
+    const bands = [
+      { max:0.20, c:[254,237,222] },
+      { max:0.38, c:[253,208,162] },
+      { max:0.55, c:[253,174,107] },
+      { max:0.70, c:[253,141,60]  },
+      { max:0.85, c:[241,105,19]  },
+      { max:1.01, c:[153,52,4]    },
     ];
-    function colorAt(t){
-      for (let i=1;i<stops.length;i++){
-        if (t<=stops[i][0]){
-          const a0=stops[i-1], a1=stops[i];
-          const f = a1[0]>a0[0] ? (t-a0[0])/(a1[0]-a0[0]) : 0;
-          return [a0[1]+(a1[1]-a0[1])*f, a0[2]+(a1[2]-a0[2])*f, a0[3]+(a1[3]-a0[3])*f, a0[4]+(a1[4]-a0[4])*f];
-        }
-      }
-      return stops[stops.length-1].slice(1);
+    function bandColor(t){
+      if (t<THRESH) return null;
+      for (const b of bands){ if (t<=b.max) return b.c; }
+      return bands[bands.length-1].c;
     }
     const gridCanvas = document.createElement('canvas');
     gridCanvas.width = gw; gridCanvas.height = gh;
@@ -735,8 +755,9 @@ function densityCloudDataUrl(pointsPx, w, h, bandwidth){
     const img = gctx.createImageData(gw,gh);
     for (let i=0;i<grid.length;i++){
       const t = grid[i]/maxD;
-      const [r,g,b,a] = colorAt(t);
-      img.data[i*4]=r; img.data[i*4+1]=g; img.data[i*4+2]=b; img.data[i*4+3]=a;
+      const col = bandColor(t);
+      if (!col){ img.data[i*4+3]=0; continue; }
+      img.data[i*4]=col[0]; img.data[i*4+1]=col[1]; img.data[i*4+2]=col[2]; img.data[i*4+3]=232;
     }
     gctx.putImageData(img,0,0);
     const outCanvas = document.createElement('canvas');
@@ -1202,14 +1223,15 @@ function drawQuadrant(){
     .map(([vx,vy])=>[clampX(sx(vx))-ML, clampY(sy(vy))-MT]);
   const cloudUrl = densityCloudDataUrl(cloudPts, CW, CH, 55);
   if (cloudUrl) s += `<image href="${cloudUrl}" x="${ML}" y="${MT}" width="${CW}" height="${CH}" preserveAspectRatio="none" style="mix-blend-mode:multiply"/>`;
-  s += `<line x1="${xDivPx}" y1="${MT}" x2="${xDivPx}" y2="${H-MB}" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6,3"/>`;
-  s += `<line x1="${ML}" y1="${yDivPx}" x2="${W-MR}" y2="${yDivPx}" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6,3"/>`;
+  s += `<line x1="${xDivPx}" y1="${MT}" x2="${xDivPx}" y2="${H-MB}" stroke="#f26522" stroke-width="2.5" stroke-linecap="round"/>`;
+  s += `<line x1="${ML}" y1="${yDivPx}" x2="${W-MR}" y2="${yDivPx}" stroke="#f26522" stroke-width="2.5" stroke-linecap="round"/>`;
   s += `<rect x="${ML}" y="${MT}" width="${CW}" height="${CH}" fill="none" stroke="#e4e6ea" stroke-width="1"/>`;
   const lo_x = mx.lb ? 'Higher '+mx.label : 'Lower '+mx.label, hi_x = mx.lb ? 'Lower '+mx.label : 'Higher '+mx.label;
   const lo_y = my.lb ? 'Higher '+my.label : 'Lower '+my.label, hi_y = my.lb ? 'Lower '+my.label : 'Higher '+my.label;
-  [[`${hi_y} / ${lo_x}`, ML+8, MT+14,'start'],[`${hi_y} / ${hi_x}`, W-MR-8, MT+14,'end'],
-   [`${lo_y} / ${lo_x}`, ML+8, H-MB-8,'start'],[`${lo_y} / ${hi_x}`, W-MR-8, H-MB-8,'end']]
-    .forEach(([label,x,y,anchor])=>{ s+=`<text x="${x}" y="${y}" font-size="9.5" font-weight="600" fill="#64748b" text-anchor="${anchor}">${label}</text>`; });
+  s += quadrantBadgeSvg(`${hi_y} / ${lo_x}`, ML+8, MT+8, 'start');
+  s += quadrantBadgeSvg(`${hi_y} / ${hi_x}`, W-MR-8, MT+8, 'end');
+  s += quadrantBadgeSvg(`${lo_y} / ${lo_x}`, ML+8, H-MB-38, 'start');
+  s += quadrantBadgeSvg(`${lo_y} / ${hi_x}`, W-MR-8, H-MB-38, 'end');
   for (let i=0;i<=4;i++){
     const vx = dxMin+(dxMax-dxMin)*i/4, px = sx(vx);
     s += `<text x="${px}" y="${H-MB+15}" font-size="9" text-anchor="middle" fill="#7a8290">${fmt(vx)}</text>`;
@@ -1701,6 +1723,12 @@ function drawTeamScatter(){
     [[ML,MT,xDivPx-ML,yDivPx-MT,'rgba(22,163,74,0.09)'],[xDivPx,MT,W-MR-xDivPx,yDivPx-MT,'rgba(202,138,4,0.07)'],
      [ML,yDivPx,xDivPx-ML,H-MB-yDivPx,'rgba(202,138,4,0.07)'],[xDivPx,yDivPx,W-MR-xDivPx,H-MB-yDivPx,'rgba(220,38,38,0.08)']]
       .forEach(([x,y,w,h,fill])=>{ s+=`<rect x="${x}" y="${y}" width="${Math.max(0,w)}" height="${Math.max(0,h)}" fill="${fill}"/>`; });
+    const lo_x2 = mx.lb ? 'Higher '+mx.label : 'Lower '+mx.label, hi_x2 = mx.lb ? 'Lower '+mx.label : 'Higher '+mx.label;
+    const lo_y2 = my.lb ? 'Higher '+my.label : 'Lower '+my.label, hi_y2 = my.lb ? 'Lower '+my.label : 'Higher '+my.label;
+    s += quadrantBadgeSvg(`${hi_y2} / ${lo_x2}`, ML+8, MT+8, 'start');
+    s += quadrantBadgeSvg(`${hi_y2} / ${hi_x2}`, W-MR-8, MT+8, 'end');
+    s += quadrantBadgeSvg(`${lo_y2} / ${lo_x2}`, ML+8, H-MB-38, 'start');
+    s += quadrantBadgeSvg(`${lo_y2} / ${hi_x2}`, W-MR-8, H-MB-38, 'end');
   }
   // Norm-band shading strips — the full target range, not just its midpoint.
   if (xBand && xBand.min!=null && xBand.max!=null){
@@ -1723,8 +1751,8 @@ function drawTeamScatter(){
   }
   if (xDiv!=null && yDiv!=null){
     const xDivPx=sx(xDiv), yDivPx=sy(yDiv);
-    s += `<line x1="${xDivPx}" y1="${MT}" x2="${xDivPx}" y2="${H-MB}" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6,3"/>`;
-    s += `<line x1="${ML}" y1="${yDivPx}" x2="${W-MR}" y2="${yDivPx}" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6,3"/>`;
+    s += `<line x1="${xDivPx}" y1="${MT}" x2="${xDivPx}" y2="${H-MB}" stroke="#f26522" stroke-width="2.5" stroke-linecap="round"/>`;
+    s += `<line x1="${ML}" y1="${yDivPx}" x2="${W-MR}" y2="${yDivPx}" stroke="#f26522" stroke-width="2.5" stroke-linecap="round"/>`;
   }
   s += `<rect x="${ML}" y="${MT}" width="${CW}" height="${CH}" fill="none" stroke="#e4e6ea" stroke-width="1"/>`;
   for (let i=0;i<=4;i++){
