@@ -712,7 +712,7 @@ function densityCloudDataUrl(pointsPx, w, h, bandwidth){
     // discrete contour bands below get smooth-looking curved edges
     // without needing a heavy blur/upscale that would smear them back
     // into a gradient (that smear was the "poo stain" problem).
-    const gw = 150, gh = Math.max(18, Math.round(gw * h / w));
+    const gw = 260, gh = Math.max(24, Math.round(gw * h / w));
     const grid = new Float32Array(gw*gh);
     const cellW = w/gw, cellH = h/gh;
     const bw2 = 2*bandwidth*bandwidth;
@@ -760,11 +760,17 @@ function densityCloudDataUrl(pointsPx, w, h, bandwidth){
       img.data[i*4]=col[0]; img.data[i*4+1]=col[1]; img.data[i*4+2]=col[2]; img.data[i*4+3]=232;
     }
     gctx.putImageData(img,0,0);
+    // Render at 2x the plot's own pixel size (browsers then downscale
+    // slightly for display, which anti-aliases far better than upscaling
+    // a small raster does) plus a light blur pass to soften cell-level
+    // jaggies without eroding the discrete band edges.
+    const scale = 2;
     const outCanvas = document.createElement('canvas');
-    outCanvas.width = Math.max(1,Math.round(w)); outCanvas.height = Math.max(1,Math.round(h));
+    outCanvas.width = Math.max(1,Math.round(w*scale)); outCanvas.height = Math.max(1,Math.round(h*scale));
     const octx = outCanvas.getContext('2d');
     octx.imageSmoothingEnabled = true;
     if ('imageSmoothingQuality' in octx) octx.imageSmoothingQuality = 'high';
+    if ('filter' in octx) octx.filter = 'blur(1.4px)';
     octx.drawImage(gridCanvas, 0,0,gw,gh, 0,0, outCanvas.width, outCanvas.height);
     return outCanvas.toDataURL();
   }catch(e){ console.error('densityCloudDataUrl failed:', e); return null; }
@@ -1672,12 +1678,17 @@ function drawTeamScatter(){
   const xKey = document.getElementById('scatterX')?.value, yKey = document.getElementById('scatterY')?.value;
   if (!xKey || !yKey) return;
   const mx = metricByKey(xKey), my = metricByKey(yKey);
-  const singleGender = genderFilterVal!=='all' ? genderFilterVal : null;
   const players = Object.values(athleteMap).filter(a=>(genderFilterVal==='all'||a.gender===genderFilterVal) && a.sessions.length);
   const pts = players.map(a=>{
     const d = buildLatest(a.sessions);
     return { a, x: repVal(mx,d), y: repVal(my,d), col: sidebarCol(d, a.gender) };
   }).filter(p=>p.x!=null && p.y!=null);
+  // Use the sidebar filter if it names a gender; otherwise auto-detect —
+  // if every player actually plotted happens to be the same gender, show
+  // reference dividers/bands for it rather than silently hiding them and
+  // making the coach click the filter first.
+  const gendersPlotted = new Set(pts.map(p=>p.a.gender));
+  const singleGender = genderFilterVal!=='all' ? genderFilterVal : (gendersPlotted.size===1 ? [...gendersPlotted][0] : null);
   const container = document.getElementById('scatterContainer');
   const legend = document.getElementById('scatterLegend');
   if (pts.length<2){
