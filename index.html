@@ -555,14 +555,30 @@ function upsertPlayer(fields, existingId){
   return id;
 }
 function mergeAthletesFromSheet(athleteRows){
-  let added=0, updated=0;
+  let added=0, updated=0, skipped=0;
   athleteRows.forEach(a=>{
     const key = normalizeName(a.name);
+    if (!key){ skipped++; return; } // blank/malformed row (e.g. a stray empty row in
+    // the sheet) — skip it rather than creating a phantom "undefined" player.
     const existed = !!nameIndex[key];
     upsertPlayer(a, nameIndex[key]);
     existed ? updated++ : added++;
   });
-  return {added, updated};
+  return {added, updated, skipped};
+}
+// One-time cleanup: remove any athlete that has no usable name — covers
+// ghost entries created by a previous version of the importer before the
+// blank-row guard above existed, so they don't linger forever even after
+// being manually deleted (the old code would just recreate them on the
+// next sheet sync).
+function purgeNamelessAthletes(){
+  let removed = 0;
+  Object.keys(athleteMap).forEach(id=>{
+    const nm = normalizeName(athleteMap[id].name);
+    if (!nm){ delete athleteMap[id]; delete nameIndex[nm]; removed++; }
+  });
+  if (removed>0) persistData();
+  return removed;
 }
 function mergeResultsFromSheet(resultRows){
   let matched=0, unmatched=0;
@@ -905,6 +921,7 @@ async function loadPersisted(){
       });
     }
   }catch(e){ /* nothing saved yet */ }
+  purgeNamelessAthletes();
 }
 
 // ============================================================
@@ -941,6 +958,7 @@ async function importFromSheet(silent){
     const athletes=parseCSV(aText), results=parseCSV(rText);
     const {added,updated} = mergeAthletesFromSheet(athletes);
     const {matched,unmatched} = mergeResultsFromSheet(results);
+    purgeNamelessAthletes();
     persistData(); persist();
     const stamp = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
     if (statusEl) statusEl.textContent = `${Object.keys(athleteMap).length} players · synced ${stamp}`;
