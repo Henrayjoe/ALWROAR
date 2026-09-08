@@ -170,6 +170,12 @@
   .pq-title { font-size:12.5px; font-weight:800; color:var(--text-primary); }
   .pq-sub { font-size:10.5px; color:var(--text-muted); margin-bottom:8px; }
   .pq-note { font-size:10px; color:var(--text-muted); margin-top:4px; }
+  .quad-chart-wrap { position:relative; }
+  .quad-badge { position:absolute; background:#ffffff; border:1px solid var(--border); border-radius:6px; padding:4px 7px; font-size:9px; font-weight:700; color:var(--text-secondary); line-height:1.35; box-shadow:var(--shadow-sm); pointer-events:none; z-index:2; max-width:40%; }
+  .quad-badge.qb-tl { top:4%; left:9%; text-align:left; }
+  .quad-badge.qb-tr { top:4%; right:2%; text-align:right; }
+  .quad-badge.qb-bl { bottom:12%; left:9%; text-align:left; }
+  .quad-badge.qb-br { bottom:12%; right:2%; text-align:right; }
   .pq-custom-axes { display:flex; gap:6px; margin-bottom:8px; }
   .pq-custom-axes select { flex:1; min-width:0; font-size:10.5px; }
   .ql-dot { display:inline-block; width:9px; height:9px; border-radius:50%; }
@@ -1275,7 +1281,7 @@ function renderQuadrantSvg(a, xKey, yKey){
   const dLatest = buildLatest(a.sessions);
   const myXVal = repVal(mx, dLatest), myYVal = repVal(my, dLatest);
   if (myXVal==null || myYVal==null){
-    return `<div style="padding:40px;text-align:center;color:#7a8290">Missing data for ${myXVal==null?mx.label:my.label}. Add a session to see this quadrant.</div>`;
+    return { svg: `<div style="padding:40px;text-align:center;color:#7a8290">Missing data for ${myXVal==null?mx.label:my.label}. Add a session to see this quadrant.</div>`, labels:null };
   }
   const xVals = xs.map(p=>p.val), yVals = ys.map(p=>p.val);
   const xBand = NORMS[xKey] && NORMS[xKey][a.gender], yBand = NORMS[yKey] && NORMS[yKey][a.gender];
@@ -1306,10 +1312,6 @@ function renderQuadrantSvg(a, xKey, yKey){
   s += `<rect x="${ML}" y="${MT}" width="${CW}" height="${CH}" fill="none" stroke="#e4e6ea" stroke-width="1"/>`;
   const lo_x = mx.lb ? 'Higher '+mx.label : 'Lower '+mx.label, hi_x = mx.lb ? 'Lower '+mx.label : 'Higher '+mx.label;
   const lo_y = my.lb ? 'Higher '+my.label : 'Lower '+my.label, hi_y = my.lb ? 'Lower '+my.label : 'Higher '+my.label;
-  s += quadrantBadgeSvg(`${hi_y} / ${lo_x}`, ML+8, MT+8, 'start');
-  s += quadrantBadgeSvg(`${hi_y} / ${hi_x}`, W-MR-8, MT+8, 'end');
-  s += quadrantBadgeSvg(`${lo_y} / ${lo_x}`, ML+8, H-MB-38, 'start');
-  s += quadrantBadgeSvg(`${lo_y} / ${hi_x}`, W-MR-8, H-MB-38, 'end');
   for (let i=0;i<=4;i++){
     const vx = dxMin+(dxMax-dxMin)*i/4, px = sx(vx);
     s += `<text x="${px}" y="${H-MB+15}" font-size="9" text-anchor="middle" fill="#7a8290">${fmt(vx)}</text>`;
@@ -1330,20 +1332,32 @@ function renderQuadrantSvg(a, xKey, yKey){
   s += `<text x="${lx}" y="${ly}" font-size="11" text-anchor="${la}" fill="#0d1117" font-weight="600">${a.name}</text>`;
   s += `<text x="${lx}" y="${ly+13}" font-size="10" text-anchor="${la}" fill="#7a8290">${fmt(myXVal)} ${mx.unit} · ${fmt(myYVal)} ${my.unit}</text>`;
   s += '</svg>';
-  return s;
+  return { svg: s, labels: { tl:`${hi_y} / ${lo_x}`, tr:`${hi_y} / ${hi_x}`, bl:`${lo_y} / ${lo_x}`, br:`${lo_y} / ${hi_x}` } };
+}
+// Builds the HTML badge overlay for a quadrant chart's four corners.
+// Real HTML text (with genuine browser wrapping/measurement) instead of
+// SVG text with a guessed width — the guess was the actual source of
+// the text overflowing its box.
+function badgeOverlayHtml(labels){
+  if (!labels) return '';
+  const corner = (cls, text) => `<div class="quad-badge ${cls}">${text.split(' / ').join('<br>')}</div>`;
+  return corner('qb-tl', labels.tl) + corner('qb-tr', labels.tr) + corner('qb-bl', labels.bl) + corner('qb-br', labels.br);
 }
 function drawPriorityQuadrants(){
   const a = athleteMap[selectedId]; if (!a) return;
   PRIORITY_QUADRANTS.forEach((q,i)=>{
     const el = document.getElementById('pq_'+i);
-    if (el) el.innerHTML = renderQuadrantSvg(a, q.xKey, q.yKey);
+    if (!el) return;
+    const { svg, labels } = renderQuadrantSvg(a, q.xKey, q.yKey);
+    el.innerHTML = `<div class="quad-chart-wrap">${svg}${badgeOverlayHtml(labels)}</div>`;
   });
 }
 function drawQuadrant(){
   const a = athleteMap[selectedId]; if (!a) return;
   const xKey = document.getElementById('quadX').value, yKey = document.getElementById('quadY').value;
   const container = document.getElementById('quadContainer');
-  container.innerHTML = renderQuadrantSvg(a, xKey, yKey);
+  const { svg, labels } = renderQuadrantSvg(a, xKey, yKey);
+  container.innerHTML = `<div class="quad-chart-wrap">${svg}${badgeOverlayHtml(labels)}</div>`;
 }
 
 // ============================================================
@@ -1781,7 +1795,7 @@ function renderTeamScatterSvg(xKey, yKey){
   const gendersPlotted = new Set(pts.map(p=>p.a.gender));
   const singleGender = genderFilterVal!=='all' ? genderFilterVal : (gendersPlotted.size===1 ? [...gendersPlotted][0] : null);
   if (pts.length<2){
-    return { svg: `<div style="padding:40px;text-align:center;color:#7a8290">Not enough players with both ${mx.label} and ${my.label} recorded yet.</div>`, note:'' };
+    return { svg: `<div style="padding:40px;text-align:center;color:#7a8290">Not enough players with both ${mx.label} and ${my.label} recorded yet.</div>`, note:'', labels:null };
   }
   const xVals = pts.map(p=>p.x), yVals = pts.map(p=>p.y);
   const meanX = xVals.reduce((a,b)=>a+b,0)/xVals.length;
@@ -1817,13 +1831,11 @@ function renderTeamScatterSvg(xKey, yKey){
     s += `<line x1="${ML+CW*i/4}" y1="${MT}" x2="${ML+CW*i/4}" y2="${H-MB}" stroke="#eef0f2" stroke-width="1"/>`;
     s += `<line x1="${ML}" y1="${MT+CH*i/4}" x2="${W-MR}" y2="${MT+CH*i/4}" stroke="#eef0f2" stroke-width="1"/>`;
   }
+  let quadLabels = null;
   if (xDiv!=null && yDiv!=null){
     const lo_x2 = mx.lb ? 'Higher '+mx.label : 'Lower '+mx.label, hi_x2 = mx.lb ? 'Lower '+mx.label : 'Higher '+mx.label;
     const lo_y2 = my.lb ? 'Higher '+my.label : 'Lower '+my.label, hi_y2 = my.lb ? 'Lower '+my.label : 'Higher '+my.label;
-    s += quadrantBadgeSvg(`${hi_y2} / ${lo_x2}`, ML+8, MT+8, 'start');
-    s += quadrantBadgeSvg(`${hi_y2} / ${hi_x2}`, W-MR-8, MT+8, 'end');
-    s += quadrantBadgeSvg(`${lo_y2} / ${lo_x2}`, ML+8, H-MB-38, 'start');
-    s += quadrantBadgeSvg(`${lo_y2} / ${hi_x2}`, W-MR-8, H-MB-38, 'end');
+    quadLabels = { tl:`${hi_y2} / ${lo_x2}`, tr:`${hi_y2} / ${hi_x2}`, bl:`${lo_y2} / ${lo_x2}`, br:`${lo_y2} / ${hi_x2}` };
   }
   if (xBand && xBand.min!=null && xBand.max!=null){
     const x1=sx(xBand.min), x2=sx(xBand.max);
@@ -1891,15 +1903,15 @@ function renderTeamScatterSvg(xKey, yKey){
   }
   s += '</svg>';
   const note = singleGender ? nNote : 'Showing both genders — select Women or Men in the sidebar filter to see reference dividers and norm bands.';
-  return { svg:s, note };
+  return { svg:s, note, labels:quadLabels };
 }
 function drawPriorityTeamScatters(){
   PRIORITY_QUADRANTS.forEach((q,i)=>{
     const el = document.getElementById('tpq_'+i);
     const noteEl = document.getElementById('tpqNote_'+i);
     if (!el) return;
-    const { svg, note } = renderTeamScatterSvg(q.xKey, q.yKey);
-    el.innerHTML = svg;
+    const { svg, note, labels } = renderTeamScatterSvg(q.xKey, q.yKey);
+    el.innerHTML = `<div class="quad-chart-wrap">${svg}${badgeOverlayHtml(labels)}</div>`;
     if (noteEl) noteEl.textContent = note;
   });
 }
@@ -1908,8 +1920,8 @@ function drawTeamScatter(){
   if (!xKey || !yKey) return;
   const container = document.getElementById('scatterContainer');
   const legend = document.getElementById('scatterLegend');
-  const { svg, note } = renderTeamScatterSvg(xKey, yKey);
-  container.innerHTML = svg;
+  const { svg, note, labels } = renderTeamScatterSvg(xKey, yKey);
+  container.innerHTML = `<div class="quad-chart-wrap">${svg}${badgeOverlayHtml(labels)}</div>`;
   legend.innerHTML = `
     <span class="scatter-legend-dot" style="background:${SCORE_COLS[4]}"></span>Above Standard
     <span class="scatter-legend-dot" style="background:${SCORE_COLS[3]}"></span>At Standard
