@@ -705,36 +705,65 @@ function quadrantBadgeSvg(text, xEdge, yTop, anchor){
   });
   return out;
 }
-function densityCloudDataUrl(pointsPx, w, h, bandwidth){
+// Raw marching-squares line segments (not chained into polygons -- adjacent
+// cells share exact endpoints, so drawing all segments together already
+// renders as one seamless stroked curve; chaining into closed loops is
+// unnecessary complexity that isn't worth the bug surface here).
+function marchingSquaresSegments(values, gw, gh, threshold){
+  const at = (x,y) => values[y*(gw+1)+x];
+  const lerp = (a,b,va,vb) => (vb===va) ? (a+b)/2 : a + (threshold-va)/(vb-va)*(b-a);
+  const segs = [];
+  for (let cy=0; cy<gh; cy++){
+    for (let cx=0; cx<gw; cx++){
+      const tl=at(cx,cy), tr=at(cx+1,cy), br=at(cx+1,cy+1), bl=at(cx,cy+1);
+      let idx=0;
+      if (tl>threshold) idx|=8;
+      if (tr>threshold) idx|=4;
+      if (br>threshold) idx|=2;
+      if (bl>threshold) idx|=1;
+      if (idx===0 || idx===15) continue;
+      const top    = [cx+lerp(0,1,tl,tr), cy];
+      const right  = [cx+1, cy+lerp(0,1,tr,br)];
+      const bottom = [cx+lerp(0,1,bl,br), cy+1];
+      const left   = [cx, cy+lerp(0,1,tl,bl)];
+      const table = {
+        1:[[left,bottom]], 2:[[bottom,right]], 3:[[left,right]],
+        4:[[top,right]], 5:[[top,right],[left,bottom]], 6:[[top,bottom]],
+        7:[[top,left]], 8:[[top,left]], 9:[[top,bottom]],
+        10:[[top,left],[bottom,right]], 11:[[top,right]],
+        12:[[left,right]], 13:[[bottom,right]], 14:[[left,bottom]],
+      };
+      (table[idx]||[]).forEach(seg=>segs.push(seg));
+    }
+  }
+  return segs;
+}
+// Returns { fillUrl, contourSvg } — fillUrl is a raster data: URL for the
+// banded color fill, contourSvg is a string of crisp vector <path>
+// elements (one per band boundary) to draw on top for genuinely sharp
+// edges, since a raster alone always shows some pixel-level softness at
+// typical chart display sizes.
+function densityCloud(pointsPx, w, h, bandwidth){
   try{
     if (!pointsPx.length || !window.document || typeof document.createElement!=='function') return null;
-    // Real 2D Gaussian KDE, evaluated at near-final resolution so the
-    // discrete contour bands below get smooth-looking curved edges
-    // without needing a heavy blur/upscale that would smear them back
-    // into a gradient (that smear was the "poo stain" problem).
-    const gw = 260, gh = Math.max(24, Math.round(gw * h / w));
-    const grid = new Float32Array(gw*gh);
+    const gw = 160, gh = Math.max(20, Math.round(gw * h / w));
     const cellW = w/gw, cellH = h/gh;
     const bw2 = 2*bandwidth*bandwidth;
+    const kde = (px,py) => { let d=0; for (let i=0;i<pointsPx.length;i++){ const dx=px-pointsPx[i][0], dy=py-pointsPx[i][1]; d+=Math.exp(-(dx*dx+dy*dy)/bw2); } return d; };
+
+    // Cell-center grid, for the flat-color raster fill.
+    const centerGrid = new Float32Array(gw*gh);
     let maxD = 0;
     for (let gy=0; gy<gh; gy++){
-      const py = (gy+0.5)*cellH;
+      const py=(gy+0.5)*cellH;
       for (let gx=0; gx<gw; gx++){
-        const px = (gx+0.5)*cellW;
-        let dsum = 0;
-        for (let i=0;i<pointsPx.length;i++){
-          const dx = px-pointsPx[i][0], dy = py-pointsPx[i][1];
-          dsum += Math.exp(-(dx*dx+dy*dy)/bw2);
-        }
-        grid[gy*gw+gx] = dsum;
-        if (dsum>maxD) maxD = dsum;
+        const d = kde((gx+0.5)*cellW, py);
+        centerGrid[gy*gw+gx] = d;
+        if (d>maxD) maxD = d;
       }
     }
     if (maxD<=0) return null;
-    // Discrete percentile-style contour bands (Oranges colormap), matching
-    // VALD's concentric-ring style — flat color per band, hard edges, and
-    // a thresh cutoff below which nothing renders (an actual boundary,
-    // not a fade to infinity).
+
     const THRESH = 0.05;
     const bands = [
       { max:0.20, c:[254,237,222] },
@@ -753,28 +782,52 @@ function densityCloudDataUrl(pointsPx, w, h, bandwidth){
     gridCanvas.width = gw; gridCanvas.height = gh;
     const gctx = gridCanvas.getContext('2d');
     const img = gctx.createImageData(gw,gh);
-    for (let i=0;i<grid.length;i++){
-      const t = grid[i]/maxD;
+    for (let i=0;i<centerGrid.length;i++){
+      const t = centerGrid[i]/maxD;
       const col = bandColor(t);
       if (!col){ img.data[i*4+3]=0; continue; }
-      img.data[i*4]=col[0]; img.data[i*4+1]=col[1]; img.data[i*4+2]=col[2]; img.data[i*4+3]=232;
+      img.data[i*4]=col[0]; img.data[i*4+1]=col[1]; img.data[i*4+2]=col[2]; img.data[i*4+3]=222;
     }
     gctx.putImageData(img,0,0);
-    // Render at 2x the plot's own pixel size (browsers then downscale
-    // slightly for display, which anti-aliases far better than upscaling
-    // a small raster does) plus a light blur pass to soften cell-level
-    // jaggies without eroding the discrete band edges.
     const scale = 2;
     const outCanvas = document.createElement('canvas');
     outCanvas.width = Math.max(1,Math.round(w*scale)); outCanvas.height = Math.max(1,Math.round(h*scale));
     const octx = outCanvas.getContext('2d');
     octx.imageSmoothingEnabled = true;
     if ('imageSmoothingQuality' in octx) octx.imageSmoothingQuality = 'high';
-    if ('filter' in octx) octx.filter = 'blur(1.4px)';
     octx.drawImage(gridCanvas, 0,0,gw,gh, 0,0, outCanvas.width, outCanvas.height);
-    return outCanvas.toDataURL();
-  }catch(e){ console.error('densityCloudDataUrl failed:', e); return null; }
+    const fillUrl = outCanvas.toDataURL();
+
+    // Corner (lattice) grid, for marching-squares contour extraction --
+    // these are the actual sharp vector outlines.
+    const cornerGrid = new Float32Array((gw+1)*(gh+1));
+    for (let gy=0; gy<=gh; gy++){
+      const py = gy*cellH;
+      for (let gx=0; gx<=gw; gx++){
+        cornerGrid[gy*(gw+1)+gx] = kde(gx*cellW, py);
+      }
+    }
+    let contourSvg = '';
+    bands.forEach((b,i)=>{
+      if (i===0) return; // don't outline the outer thresh cutoff itself, just the band steps
+      const t = b.max===1.01 ? bands[i-1].max : bands[i-1].max; // outline at each band's lower edge
+      const segs = marchingSquaresSegments(cornerGrid, gw, gh, t*maxD);
+      if (!segs.length) return;
+      const d = segs.map(([p1,p2])=>`M${(p1[0]*cellW).toFixed(2)},${(p1[1]*cellH).toFixed(2)} L${(p2[0]*cellW).toFixed(2)},${(p2[1]*cellH).toFixed(2)}`).join(' ');
+      contourSvg += `<path d="${d}" fill="none" stroke="rgba(120,45,4,0.45)" stroke-width="1"/>`;
+    });
+    // Outer boundary of the whole cloud (the thresh cutoff) drawn a touch
+    // bolder, since that's the edge that most defines the shape.
+    const outerSegs = marchingSquaresSegments(cornerGrid, gw, gh, THRESH*maxD);
+    if (outerSegs.length){
+      const d = outerSegs.map(([p1,p2])=>`M${(p1[0]*cellW).toFixed(2)},${(p1[1]*cellH).toFixed(2)} L${(p2[0]*cellW).toFixed(2)},${(p2[1]*cellH).toFixed(2)}`).join(' ');
+      contourSvg = `<path d="${d}" fill="none" stroke="rgba(153,52,4,0.35)" stroke-width="1"/>` + contourSvg;
+    }
+
+    return { fillUrl, contourSvg };
+  }catch(e){ console.error('densityCloud failed:', e); return null; }
 }
+
 
 // ============================================================
 // PERSISTED CONFIG (window.storage — never localStorage)
@@ -1224,8 +1277,11 @@ function drawQuadrant(){
   // the current athlete, clipped to the plot rect.
   const cloudPts = [[myXVal,myYVal], ...xs.map(px=>{ const py=ys.find(y=>y.id===px.id); return py ? [px.val,py.val] : null; }).filter(Boolean)]
     .map(([vx,vy])=>[clampX(sx(vx))-ML, clampY(sy(vy))-MT]);
-  const cloudUrl = densityCloudDataUrl(cloudPts, CW, CH, 55);
-  if (cloudUrl) s += `<image href="${cloudUrl}" x="${ML}" y="${MT}" width="${CW}" height="${CH}" preserveAspectRatio="none" style="mix-blend-mode:multiply"/>`;
+  const cloud = densityCloud(cloudPts, CW, CH, 55);
+  if (cloud){
+    s += `<image href="${cloud.fillUrl}" x="${ML}" y="${MT}" width="${CW}" height="${CH}" preserveAspectRatio="none" style="mix-blend-mode:multiply"/>`;
+    s += `<g transform="translate(${ML},${MT})">${cloud.contourSvg}</g>`;
+  }
   s += `<line x1="${xDivPx}" y1="${MT}" x2="${xDivPx}" y2="${H-MB}" stroke="#f26522" stroke-width="2.5" stroke-linecap="round"/>`;
   s += `<line x1="${ML}" y1="${yDivPx}" x2="${W-MR}" y2="${yDivPx}" stroke="#f26522" stroke-width="2.5" stroke-linecap="round"/>`;
   s += `<rect x="${ML}" y="${MT}" width="${CW}" height="${CH}" fill="none" stroke="#e4e6ea" stroke-width="1"/>`;
@@ -1735,19 +1791,28 @@ function drawTeamScatter(){
     s += quadrantBadgeSvg(`${lo_y2} / ${lo_x2}`, ML+8, H-MB-38, 'start');
     s += quadrantBadgeSvg(`${lo_y2} / ${hi_x2}`, W-MR-8, H-MB-38, 'end');
   }
-  // Norm-band shading strips — the full target range, not just its midpoint.
+  // Norm-band range markers — small brackets on the axis instead of a
+  // full-plot color wash, so the reference range is visible without
+  // tinting the whole chart.
   if (xBand && xBand.min!=null && xBand.max!=null){
     const x1=sx(xBand.min), x2=sx(xBand.max);
-    s += `<rect x="${Math.min(x1,x2)}" y="${MT}" width="${Math.abs(x2-x1)}" height="${CH}" fill="rgba(58,141,122,0.10)"/>`;
+    s += `<line x1="${x1}" y1="${H-MB}" x2="${x1}" y2="${H-MB+6}" stroke="#3a8d7a" stroke-width="2"/>`;
+    s += `<line x1="${x2}" y1="${H-MB}" x2="${x2}" y2="${H-MB+6}" stroke="#3a8d7a" stroke-width="2"/>`;
+    s += `<line x1="${x1}" y1="${H-MB+6}" x2="${x2}" y2="${H-MB+6}" stroke="#3a8d7a" stroke-width="2"/>`;
   }
   if (yBand && yBand.min!=null && yBand.max!=null){
     const y1=sy(yBand.min), y2=sy(yBand.max);
-    s += `<rect x="${ML}" y="${Math.min(y1,y2)}" width="${CW}" height="${Math.abs(y2-y1)}" fill="rgba(58,141,122,0.10)"/>`;
+    s += `<line x1="${ML-6}" y1="${y1}" x2="${ML}" y2="${y1}" stroke="#3a8d7a" stroke-width="2"/>`;
+    s += `<line x1="${ML-6}" y1="${y2}" x2="${ML}" y2="${y2}" stroke="#3a8d7a" stroke-width="2"/>`;
+    s += `<line x1="${ML-6}" y1="${y1}" x2="${ML-6}" y2="${y2}" stroke="#3a8d7a" stroke-width="2"/>`;
   }
   // Density cloud (Quadrant of Boom style).
   const cloudPts = pts.map(p=>[clampX(sx(p.x))-ML, clampY(sy(p.y))-MT]);
-  const cloudUrl = densityCloudDataUrl(cloudPts, CW, CH, 55);
-  if (cloudUrl) s += `<image href="${cloudUrl}" x="${ML}" y="${MT}" width="${CW}" height="${CH}" preserveAspectRatio="none" style="mix-blend-mode:multiply"/>`;
+  const cloud = densityCloud(cloudPts, CW, CH, 55);
+  if (cloud){
+    s += `<image href="${cloud.fillUrl}" x="${ML}" y="${MT}" width="${CW}" height="${CH}" preserveAspectRatio="none" style="mix-blend-mode:multiply"/>`;
+    s += `<g transform="translate(${ML},${MT})">${cloud.contourSvg}</g>`;
+  }
   // Squad ±1SD ellipse around the average, independent of any norm reference.
   if (sdX>0 && sdY>0){
     const ecx=sx(meanX), ecy=sy(meanY);
