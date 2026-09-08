@@ -362,6 +362,7 @@ const METRICS = [
   {key:'imtp_absForce', label:'IMTP — Absolute Peak Force', unit:'N', lb:false, group:'Strength', paired:false},
   {key:'nordic_maxForce', label:'Nordic Hamstring — Peak Force', unit:'N', lb:false, group:'Strength', paired:true},
   {key:'nordic_torque', label:'Nordic Hamstring — Torque', unit:'Nm', lb:false, group:'Strength', paired:true},
+  {key:'kneeExtIso_maxForce', label:'Knee Extension ISO (60°) — Peak Force', unit:'N', lb:false, group:'Strength', paired:true},
   {key:'dsi', label:'DSI (CMJ force ÷ IMTP force)', unit:'', lb:false, group:'Strength', paired:false, derived:true},
   {key:'speed_5m', label:'Sprint — 5 m', unit:'s', lb:true, noNorm:true, group:'Speed & Aerobic', paired:false},
   {key:'speed_10m', label:'Sprint — 10 m', unit:'s', lb:true, group:'Speed & Aerobic', paired:false},
@@ -415,6 +416,7 @@ let NORMS = {
   imtp_absForce:         { W:{min:1739, max:2272}, M:{min:2756, max:3305} },
   nordic_maxForce:       { W:{min:292, max:361},   M:{min:417, max:517} },
   nordic_torque:         { W:{min:114, max:145},   M:{min:171, max:225} },
+  kneeExtIso_maxForce:   { W:{min:373, max:567} },
   dsi:                   { W:{min:0.60, max:0.80}, M:{min:0.69, max:0.90} },
   speed_10m:             { W:{min:1.90, max:2.05}, M:{min:1.65, max:1.80} },
   speed_20m:             { W:{min:3.25, max:3.55}, M:{min:2.85, max:3.05} },
@@ -450,6 +452,7 @@ const NORM_SOURCES = {
   imtp_absForce:   'Men: Badby et al. 2025 (EFL professional 1st-team benchmarks), well supported. Women: VALD WSL 2025/26 report, senior 25th–75th percentile, well supported.',
   nordic_maxForce: 'VALD NordBord Nordic hamstring curl, senior 25th–75th percentile. Women: VALD WSL 2025/26 report. Men: VALD Premier League 2025/26 report, in-season. Well supported (real, current-season league data for both).',
   nordic_torque:   'VALD NordBord Nordic hamstring curl torque, senior 25th–75th percentile. Women: VALD WSL 2025/26 report. Men: VALD Premier League 2025/26 report, in-season. Well supported.',
+  kneeExtIso_maxForce: 'VALD DynaMo Knee Extension (Seated), senior 25th–75th percentile, VALD WSL 2025/26 report. No equivalent test in the Premier League report, so no men\'s band — the report doesn\'t confirm the exact test angle was 60°, so treat as the closest available reference rather than an exact match to your protocol.',
   dsi:             'Men: real VALD Premier League 2025/26 DSI distribution, 25th–75th, well supported. Women: Sheppard et al. 2011 "concurrent strength training" zone as cited in the VALD WSL report — a training-recommendation band, not a women\'s-specific population percentile. Moderate confidence.',
   speed_10m:       'Men: Haugen et al. 2019, well supported. Women: derived from Vescovi 2012 (FAiM study, female pro try-out sample) mean split speed ± SD, converted to time — moderate confidence, not a direct percentile table.',
   speed_20m:       'Men: Haugen et al. 2019, well supported. Women: derived from Vescovi 2012 (FAiM study) — moderate confidence.',
@@ -514,7 +517,7 @@ function deriveSession(row){
 const TEST_NAMES = {
   cmj:'Countermovement Jump', slcmj:'Single Leg CMJ', hop:'Hop Test (10/5)', slhop:'SL Hop Test (10/5)',
   zigzag:'Zig Zag 5-Hop', sj:'Squat Jump', hipAnkle:'Hip ADD/ABD — Ankle', hipKnee:'Hip ADD/ABD — Knee',
-  imtp:'Isometric Mid-Thigh Pull (IMTP)', nordic:'Nordic Hamstring Curl',
+  imtp:'Isometric Mid-Thigh Pull (IMTP)', nordic:'Nordic Hamstring Curl', kneeExtIso:'Knee Extension ISO (60°)',
   speed:'Sprint Splits', sts:'Single Leg Sit-to-Stand', hamstringBridge:'Single Leg Hamstring Bridge (to failure)',
   heelRaise:'Single Leg Heel Raise', copenhagen:'Copenhagen Plank', sidePlank:'Side Plank',
 };
