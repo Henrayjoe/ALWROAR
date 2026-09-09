@@ -146,6 +146,11 @@
   .tp-bucket-badge { display:inline-block; background:var(--accent); color:#fff; font-size:12px; font-weight:800; padding:5px 14px; border-radius:20px; margin-bottom:8px; }
   .tp-bucket-sub { font-size:11.5px; color:var(--text-muted); margin-bottom:6px; }
   .tp-bucket-focus { font-size:13px; color:var(--text-secondary); line-height:1.5; max-width:720px; }
+  .tp-context { margin-top:10px; padding-top:10px; border-top:1px solid rgba(242,101,34,0.18); font-size:12px; color:var(--text-secondary); line-height:1.6; }
+  .tp-context b { color:var(--text-primary); }
+  .tp-reasoning-heading { font-size:10.5px; font-weight:800; text-transform:uppercase; letter-spacing:.06em; color:var(--text-muted); margin-bottom:8px; }
+  .tp-reasoning-item { background:var(--surface); box-shadow:var(--shadow-sm); border-radius:var(--radius); padding:12px 14px; margin-bottom:8px; font-size:12.5px; line-height:1.55; color:var(--text-secondary); border-left:3px solid var(--accent); }
+  .tp-reasoning-item b { color:var(--text-primary); }
   .tp-sw-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px; }
   .tp-sw-heading { font-size:10.5px; font-weight:800; text-transform:uppercase; letter-spacing:.06em; color:var(--text-muted); margin-bottom:8px; }
   .tp-sw-row { display:flex; justify-content:space-between; font-size:13px; padding:7px 10px; border-radius:8px; background:var(--surface-alt); margin-bottom:6px; }
@@ -238,7 +243,7 @@
   .settings-pane{display:none; max-height:65vh; overflow:auto;} .settings-pane.active{display:block;}
   .field{display:flex;flex-direction:column;gap:5px;margin-bottom:12px;}
   .field label{font-size:12px;font-weight:600;color:var(--text-muted);}
-  .field input, .field select{border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:13px;width:100%;}
+  .field input, .field select, .field textarea{border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:13px;width:100%;font-family:inherit;resize:vertical;}
   .field-2col{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
   .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:6px;}
   .add-row{display:flex;gap:6px;padding:10px 12px;border-bottom:1px solid var(--border);}
@@ -306,7 +311,11 @@
         <div class="field"><label>Leg length (cm)</label><input type="number" step="any" id="pLegLength"></div>
       </div>
       <div class="field"><label>Weight (kg)</label><input type="number" step="any" id="pWeight"></div>
-      <div class="field"><label>Injury history (optional)</label><input type="text" id="pInjury" placeholder="e.g. R ACL 2024"></div>
+      <div class="field-2col">
+        <div class="field"><label>Training age (years, optional)</label><input type="number" step="any" id="pTrainingAge" placeholder="e.g. 4"></div>
+        <div class="field"><label>Injury history (optional)</label><input type="text" id="pInjury" placeholder="e.g. R ACL 2024"></div>
+      </div>
+      <div class="field"><label>Training history / background notes (optional)</label><textarea id="pTrainingNotes" rows="2" placeholder="e.g. Late specialiser, 2 seasons senior football, strong gym background from athletics"></textarea></div>
       <div class="modal-actions">
         <button class="btn-sm" data-close>Cancel</button>
         <button class="btn" onclick="saveAddPlayer()">Save player</button>
@@ -680,9 +689,21 @@ function groupHasAnyData(group, d){
 // ============================================================
 function trainingGroup(a){
   if (a.age==null) return null;
+  if (a.age>=30) return 'experienced'; // chronological age dominates here regardless of training age
   if (a.age<=21) return 'development';
-  if (a.age>=30) return 'experienced';
+  // 22-29 normally lands in Main, but a genuinely low training age (still
+  // building a foundation, whatever their chronological age) keeps the
+  // Development-group emphasis appropriate.
+  const ta = a.training_age!=null ? parseFloat(a.training_age) : null;
+  if (ta!=null && !isNaN(ta) && ta<3) return 'development';
   return 'main';
+}
+function trainingGroupReason(a, bucket){
+  const ta = a.training_age!=null ? parseFloat(a.training_age) : null;
+  if (bucket==='development' && a.age>21 && ta!=null && !isNaN(ta) && ta<3) return `age ${a.age}, but training age of ${ta} ${ta===1?'year':'years'} keeps Development-group emphasis appropriate`;
+  if (bucket==='development') return `age ${a.age} (21 or under)`;
+  if (bucket==='experienced') return `age ${a.age} (30 or over)`;
+  return `age ${a.age} (22–29)${ta!=null?`, training age ${ta} ${ta===1?'year':'years'}`:''}`;
 }
 const TRAINING_GROUP_INFO = {
   development: { label:'Development Group', rationale:'21 or under', focus:'Strength, stability, muscle mass, hip-to-knee control, and general movement quality — building the physical foundation football will later demand. Greater investment in gym-based development alongside football work is appropriate here.' },
@@ -817,6 +838,62 @@ function bucketPhaseDurations(bucket){
   if (bucket==='experienced') return [2,2,2];
   return [2,3,3]; // main
 }
+// Rule-based clinical/S&C reasoning — each rule only fires when its
+// underlying metrics actually exist, and each is grounded in a specific,
+// named construct (SSC utilisation, force-velocity balance, eccentric
+// hamstring deficit, adductor:abductor imbalance, asymmetry, acceleration
+// vs top-speed) rather than generic commentary.
+function generateClinicalReasoning(a, d){
+  const items = [];
+  const score = key => { const m = metricByKey(key); return m ? metricScore(m, d, a.gender) : null; };
+
+  // 1. Eccentric Utilisation Ratio — stretch-shortening cycle use
+  if (d.eur!=null){
+    if (d.eur < 0.95) items.push(`<b>Eccentric Utilisation Ratio of ${fmt(d.eur)}</b> (CMJ ÷ SJ) sits below 0.95 — concentric force production (Squat Jump) isn't being matched by the countermovement (CMJ). This points to underdeveloped stretch-shortening cycle utilisation rather than a raw force deficit: reactive/plyometric work should take priority over further maximal-strength volume.`);
+    else if (d.eur > 1.15) items.push(`<b>Eccentric Utilisation Ratio of ${fmt(d.eur)}</b> is well above 1.0 — strong stretch-shortening cycle utilisation, a genuine elastic/reactive quality worth leveraging in plyometric-based conditioning.`);
+  }
+
+  // 2. DSI — force-velocity balance
+  if (d.dsi!=null){
+    if (d.dsi < 0.60) items.push(`<b>DSI of ${fmt(d.dsi)}</b> is below 0.60 — dynamic (CMJ) force output is low relative to maximal isometric force (IMTP). More raw strength exists than is currently being expressed quickly; ballistic/contrast training (e.g. jump squats paired with heavy squats) should be prioritised over further maximal-strength accumulation.`);
+    else if (d.dsi > 0.80) items.push(`<b>DSI of ${fmt(d.dsi)}</b> is above 0.80 — force is already being expressed rapidly relative to their strength ceiling. A maximal-strength block is likely to translate more directly into dynamic output now than further ballistic work.`);
+  }
+
+  // 3. Nordic hamstring force relative to general lower-body power
+  const nordicScore = score('nordic_maxForce'), powerScore = score('cmj_peakPowerBW');
+  if (nordicScore!=null && powerScore!=null && nordicScore <= powerScore-1.5){
+    items.push(`<b>Nordic hamstring force sits notably below general lower-body power</b> (CMJ peak power) — an eccentric hamstring deficit relative to overall power output, a recognised hamstring strain risk pattern in the literature. Eccentric-focused hamstring loading (Nordic progression) is indicated ahead of further general power work.`);
+  }
+
+  // 4. Hip ADD:ABD ratio — adductor relative to abductor strength
+  const hipRatio = repVal(metricByKey('hipAnkle_ratio'), d);
+  if (hipRatio!=null){
+    const band = NORMS.hipAnkle_ratio && NORMS.hipAnkle_ratio[a.gender];
+    if (band && band.min!=null && hipRatio < band.min){
+      items.push(`<b>Hip ADD:ABD ratio of ${fmt(hipRatio)}</b> sits below the expected range (${band.min}–${band.max}) — adductor strength relative to abductor strength is a well-established groin/adductor strain risk marker in football. Direct adductor loading (Copenhagen plank progression) is indicated.`);
+    }
+  }
+
+  // 5. Asymmetry — worst flagged paired metric
+  if (SETTINGS.asymFlag!=null){
+    let worst = null;
+    METRICS.filter(m=>m.paired).forEach(m=>{
+      const l=d[m.key+'_L'], r=d[m.key+'_R'];
+      const asym = asymmetry(l,r);
+      if (asym!=null && asym>SETTINGS.asymFlag && (!worst || asym>worst.asym)) worst = {m, asym};
+    });
+    if (worst) items.push(`<b>${fmt(worst.asym)}% L/R asymmetry on ${worst.m.label}</b> exceeds the flagged threshold (${SETTINGS.asymFlag}%). Unilateral remedial work on the weaker side is warranted before progressing further bilateral loading.`);
+  }
+
+  // 6. Acceleration vs top-end speed — different training targets
+  const accelScore = score('speed_10m'), maxVelScore = score('speed_maxVel');
+  if (accelScore!=null && maxVelScore!=null){
+    if (accelScore <= maxVelScore-1.5) items.push(`<b>Acceleration (10m) lags behind top-end speed</b> — this suggests a horizontal force-application/strength-speed deficit in the drive phase rather than a maximal-velocity limiter. Resisted sprint work and horizontal force development should be prioritised over further top-speed exposure.`);
+    else if (maxVelScore <= accelScore-1.5) items.push(`<b>Top-end speed lags behind acceleration</b> — early drive-phase qualities are ahead of maximal-velocity mechanics. Flying sprints and upright sprint mechanics work are the higher-value target here.`);
+  }
+
+  return items;
+}
 function resolveGroupTemplate(a, d, group){
   if (group==='Speed & Aerobic'){
     const sub = speedAerobicSubtype(a, d);
@@ -842,8 +919,12 @@ function buildTrainingPlanHtml(a){
   if (bucketInfo){
     html += `<div class="tp-bucket">
       <div class="tp-bucket-badge">${bucketInfo.label}</div>
-      <div class="tp-bucket-sub">Age ${a.age} — falls in the ${bucketInfo.rationale} band</div>
+      <div class="tp-bucket-sub">${trainingGroupReason(a, bucket)}</div>
       <div class="tp-bucket-focus">${bucketInfo.focus}</div>
+      ${(a.training_notes || a.injury_hx) ? `<div class="tp-context">
+        ${a.training_notes ? `<div><b>Training background:</b> ${a.training_notes}</div>` : ''}
+        ${a.injury_hx ? `<div><b>Injury history:</b> ${a.injury_hx}</div>` : ''}
+      </div>` : ''}
     </div>`;
   } else {
     html += `<div class="hint" style="padding:10px 4px;">No birthdate/age on file — add one in Manage Players to get a training-group categorisation.</div>`;
@@ -863,6 +944,13 @@ function buildTrainingPlanHtml(a){
         ${weaknesses.length ? weaknesses.map(s=>`<div class="tp-sw-row"><span>${s.group}</span><b style="color:${catLabel(s.score).c}">${catLabel(s.score).l}</b></div>`).join('') : '<div class="hint" style="font-size:12px;">No category is currently a clear weak point.</div>'}
       </div>
     </div>`;
+  }
+
+  // Clinical/S&C reasoning — the "why" behind the prescription below
+  const reasoning = generateClinicalReasoning(a, d);
+  if (reasoning.length){
+    html += `<div class="tp-reasoning-heading">Current Status — Reasoning</div>`;
+    reasoning.forEach(r=>{ html += `<div class="tp-reasoning-item">${r}</div>`; });
   }
 
   // Phase-based programming for each weakness (up to 2)
@@ -2297,7 +2385,7 @@ function buildPaneSheet(){
       <button class="btn" id="btnImportSheet" onclick="importFromSheet()">Import now</button>
     </div>
     <p class="hint">Importing merges into your dashboard data — players are matched by name (existing players get their profile fields updated, new names are added), and sessions are matched by player + date. Nothing is duplicated, and nothing already entered in the dashboard is overwritten unless the sheet has a value for that same field.</p>
-    <p class="hint"><b>Athletes tab:</b> athlete_id, name, position, birthdate (YYYY-MM-DD), age, height_cm, leg_length_cm, weight_kg, injury_hx, gender (W/M)</p>
+    <p class="hint"><b>Athletes tab:</b> athlete_id, name, position, birthdate (YYYY-MM-DD), age, height_cm, leg_length_cm, weight_kg, training_age, injury_hx, training_notes, gender (W/M)</p>
     <p class="hint"><b>Results tab:</b> name (matched to Athletes tab), test_date, weight_kg, notes, then one column per metric:</p>
     <p class="hint" style="font-family:monospace;font-size:10.5px;line-height:1.8;">${resultsColumns().join(', ')}</p>`;
 }
@@ -2374,7 +2462,7 @@ function downloadFile(filename, text, mime){
 }
 function todayStamp(){ return new Date().toISOString().slice(0,10); }
 function exportAthletesCSV(){
-  const cols = ['athlete_id','name','position','birthdate','age','height_cm','leg_length_cm','weight_kg','injury_hx','gender'];
+  const cols = ['athlete_id','name','position','birthdate','age','height_cm','leg_length_cm','weight_kg','training_age','injury_hx','training_notes','gender'];
   const rows = [cols.join(',')];
   Object.values(athleteMap).forEach(a=>{
     rows.push(cols.map(c=> csvEscape(c==='athlete_id' ? a.id : a[c])).join(','));
@@ -2447,7 +2535,9 @@ function openAddPlayer(editId){
   document.getElementById('pHeight').value = a?.height_cm||'';
   document.getElementById('pLegLength').value = a?.leg_length_cm||'';
   document.getElementById('pWeight').value = a?.weight_kg||'';
+  document.getElementById('pTrainingAge').value = a?.training_age||'';
   document.getElementById('pInjury').value = a?.injury_hx||'';
+  document.getElementById('pTrainingNotes').value = a?.training_notes||'';
   document.getElementById('overlayPlayer').classList.add('show');
 }
 function saveAddPlayer(){
@@ -2463,7 +2553,9 @@ function saveAddPlayer(){
     height_cm: document.getElementById('pHeight').value,
     leg_length_cm: document.getElementById('pLegLength').value,
     weight_kg: document.getElementById('pWeight').value,
+    training_age: document.getElementById('pTrainingAge').value,
     injury_hx: document.getElementById('pInjury').value,
+    training_notes: document.getElementById('pTrainingNotes').value,
   };
   const id = upsertPlayer(fields, editId);
   persistData();
