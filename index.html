@@ -142,6 +142,29 @@
   tbody tr:hover .sticky-col, tbody tr:hover .sticky-col2 { background:#fafbfc; }
   .ov-badge { display:inline-block; padding:3px 9px; border-radius:20px; font-size:10.5px; font-weight:700; white-space:nowrap; }
   .ov-none { background:var(--surface-alt); color:var(--text-muted); }
+  .tp-bucket { background:linear-gradient(135deg,#fff,var(--accent-light)); border-radius:var(--radius-lg); padding:16px 20px; margin-bottom:18px; box-shadow:var(--shadow-sm); }
+  .tp-bucket-badge { display:inline-block; background:var(--accent); color:#fff; font-size:12px; font-weight:800; padding:5px 14px; border-radius:20px; margin-bottom:8px; }
+  .tp-bucket-sub { font-size:11.5px; color:var(--text-muted); margin-bottom:6px; }
+  .tp-bucket-focus { font-size:13px; color:var(--text-secondary); line-height:1.5; max-width:720px; }
+  .tp-sw-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px; }
+  .tp-sw-heading { font-size:10.5px; font-weight:800; text-transform:uppercase; letter-spacing:.06em; color:var(--text-muted); margin-bottom:8px; }
+  .tp-sw-row { display:flex; justify-content:space-between; font-size:13px; padding:7px 10px; border-radius:8px; background:var(--surface-alt); margin-bottom:6px; }
+  .tp-block { margin-bottom:24px; }
+  .tp-block-title { font-size:14px; font-weight:800; margin-bottom:4px; }
+  .tp-block-reason { font-size:12px; font-weight:500; color:var(--text-muted); }
+  .tp-phase-row { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:14px; margin-top:10px; }
+  .tp-phase { background:var(--surface); box-shadow:var(--shadow-sm); border-radius:var(--radius); padding:13px 15px; }
+  .tp-phase-head { display:flex; justify-content:space-between; align-items:baseline; font-size:12.5px; font-weight:800; margin-bottom:4px; }
+  .tp-phase-wk { font-size:10.5px; font-weight:700; color:var(--accent); background:var(--accent-light); padding:2px 8px; border-radius:10px; }
+  .tp-phase-focus { font-size:11px; color:var(--text-muted); margin-bottom:10px; line-height:1.4; }
+  .tp-ex-table { width:100%; font-size:11.5px; }
+  .tp-ex-table td { padding:6px 0; border-bottom:1px solid #f1f2f4; vertical-align:top; }
+  .tp-ex-table tr:last-child td { border-bottom:none; }
+  .tp-ex-name { font-weight:700; color:var(--text-primary); width:42%; }
+  .tp-ex-note { font-weight:400; color:var(--text-muted); font-size:10.5px; margin-top:2px; }
+  .tp-ex-sr { color:var(--text-secondary); white-space:nowrap; width:24%; }
+  .tp-ex-i { color:var(--text-muted); font-size:11px; }
+  .tp-disclaimer { font-size:11px; color:var(--text-muted); border-top:1px solid var(--border); padding-top:12px; margin-top:6px; line-height:1.5; }
   table { width:100%; border-collapse:collapse; font-size:12px; }
   thead th { padding:7px 14px; text-align:left; font-size:10px; font-weight:600; color:var(--text-muted); letter-spacing:.06em; text-transform:uppercase; background:var(--surface-alt); border-bottom:1px solid var(--border); cursor:pointer; }
   tbody td { padding:10px 14px; border-bottom:1px solid #f3f4f6; vertical-align:middle; }
@@ -649,6 +672,229 @@ function groupScore(group, d, gender){
 function groupHasAnyData(group, d){
   return METRICS.filter(m=>m.group===group).some(m=>repVal(m,d)!=null);
 }
+// ============================================================
+// TRAINING RECOMMENDATIONS — categorization, strengths/weaknesses,
+// and a block-periodized programming outline built from real
+// sports-science structure (accumulation → intensification → realization),
+// tailored to whichever category actually scores weakest for this athlete.
+// ============================================================
+function trainingGroup(a){
+  if (a.age==null) return null;
+  if (a.age<=21) return 'development';
+  if (a.age>=30) return 'experienced';
+  return 'main';
+}
+const TRAINING_GROUP_INFO = {
+  development: { label:'Development Group', rationale:'21 or under', focus:'Strength, stability, muscle mass, hip-to-knee control, and general movement quality — building the physical foundation football will later demand. Greater investment in gym-based development alongside football work is appropriate here.' },
+  main:        { label:'Main Training Group', rationale:'22–29', focus:'The most robust, physical-prime players in the squad — highest tolerance for combined football and gym load. This is where conditioning and physical training volume can be pushed hardest.' },
+  experienced: { label:'Experienced / Individualised Group', rationale:'30 or over', focus:'Still trained hard, but not necessarily exposed to the same total volume as the main group. More individualisation around football load, gym volume and recovery — the focus is maintaining physical qualities and maximising availability.' },
+};
+function identifyStrengthsWeaknesses(a, d){
+  const scored = GROUPS.map(g=>({ group:g, score: groupHasAnyData(g,d) ? groupScore(g,d,a.gender) : null }))
+    .filter(x=>x.score!=null);
+  const ranked = [...scored].sort((x,y)=>y.score-x.score);
+  const strengths = ranked.filter(x=>x.score>=2.5).slice(0,2);
+  const weaknesses = [...ranked].reverse().filter(x=>x.score<2.5).slice(0,2);
+  return { strengths, weaknesses, hasEnoughData: scored.length>=2 };
+}
+// Within "Speed & Aerobic", decide whether the low score is really a speed
+// problem, an aerobic problem, or both — they need very different work.
+function speedAerobicSubtype(a, d){
+  const speedKeys = ['speed_10m','speed_20m','speed_maxVel'];
+  const speedScores = speedKeys.map(k=>metricScore(metricByKey(k), d, a.gender)).filter(s=>s!=null);
+  const aerobicScore = metricScore(metricByKey('aerobic_result'), d, a.gender);
+  const speedAvg = speedScores.length ? speedScores.reduce((x,y)=>x+y,0)/speedScores.length : null;
+  if (speedAvg!=null && aerobicScore!=null){
+    if (speedAvg<=aerobicScore-0.75) return 'speed';
+    if (aerobicScore<=speedAvg-0.75) return 'aerobic';
+    return 'both';
+  }
+  if (speedAvg!=null) return 'speed';
+  if (aerobicScore!=null) return 'aerobic';
+  return 'both';
+}
+const GROUP_TEMPLATES = {
+  'Jump': { label:'Power & Reactive Strength', phases:[
+    { name:'Foundation', focus:'Landing mechanics and general jump capacity', ex:[
+      {n:'Pogo hops', sr:'3 × 15–20s', i:'Low load, fast ground contact', note:'Builds elastic/tendon tolerance before loading power work'},
+      {n:'Box step-offs to stick', sr:'3 × 5/side', i:'Bodyweight', note:'Landing control and deceleration competency'},
+      {n:'Squat jumps', sr:'3 × 5', i:'Bodyweight', note:'Concentric-only power, no stretch-shortening demand yet'},
+    ]},
+    { name:'Accumulation', focus:'Loaded power and unilateral jump strength', ex:[
+      {n:'Loaded jump squats', sr:'4 × 5', i:'20–30% BW, max intent', note:'Bar-speed emphasis, not fatigue'},
+      {n:'Box jumps', sr:'4 × 3', i:'Moderate height, full reset between reps', note:'Concentric-dominant power'},
+      {n:'Single-leg bounds', sr:'3 × 5/side', i:'Submaximal, quality over distance', note:'Horizontal power transfer'},
+    ]},
+    { name:'Intensification', focus:'Reactive strength and on-field transfer', ex:[
+      {n:'Depth jumps', sr:'3 × 4', i:'30–40cm box, minimal ground contact time', note:'Reactive Strength Index development'},
+      {n:'Single-leg depth drops', sr:'3 × 3/side', i:'Low box, controlled landing', note:'Unilateral reactive strength'},
+      {n:'Bounding series', sr:'3 × 20m', i:'90%+ effort, full recovery between reps', note:'Speed-power transfer to sprinting'},
+    ]},
+  ]},
+  'Hip Strength': { label:'Adductor/Abductor Strength & Groin Resilience', phases:[
+    { name:'Foundation', focus:'Isometric capacity and movement control', ex:[
+      {n:'Copenhagen plank (bent-knee)', sr:'2–3 × 15–20s/side', i:'Bodyweight, short lever', note:'Build baseline adductor tolerance before progressing lever length'},
+      {n:'Side-lying hip abduction', sr:'3 × 12/side', i:'Bodyweight or light band', note:'Controlled tempo, no momentum'},
+      {n:'Standing band hip adduction/abduction', sr:'3 × 12/side', i:'Light–moderate band', note:'General hip strength foundation'},
+    ]},
+    { name:'Accumulation', focus:'Progressive loading and eccentric control', ex:[
+      {n:'Copenhagen plank (long-lever)', sr:'3 × 15–20s/side', i:'Bodyweight, straight-leg', note:'Standard progression once short-lever is comfortable'},
+      {n:'Cable hip adduction', sr:'3 × 10/side', i:'Moderate load', note:'External resistance progression'},
+      {n:'Lateral lunges', sr:'3 × 8/side', i:'Bodyweight → light load', note:'Adductor strength through dynamic range'},
+    ]},
+    { name:'Intensification', focus:'High-force, sport-specific hip strength', ex:[
+      {n:'Copenhagen plank with hold + reach', sr:'3 × max hold/side', i:'Bodyweight, long-lever', note:'Near-maximal isometric capacity'},
+      {n:'Resisted lateral shuffles', sr:'4 × 10m', i:'Band or sled', note:'Change-of-direction specific hip loading'},
+      {n:'Single-leg cable adduction (standing)', sr:'3 × 8/side', i:'Heavier load, controlled', note:'Peak strength expression'},
+    ]},
+  ]},
+  'Strength': { label:'Maximal Strength & Force Application', phases:[
+    { name:'Foundation', focus:'Technical competency and base strength', ex:[
+      {n:'Trap bar deadlift', sr:'3 × 5', i:'70–75% 1RM', note:'Groove the pattern before loading heavier'},
+      {n:'Nordic curl (assisted/eccentric)', sr:'2–3 × 6', i:'Bodyweight, band-assisted if needed', note:'Build hamstring eccentric capacity progressively'},
+      {n:'Split squat', sr:'3 × 8/side', i:'Light–moderate load', note:'Unilateral strength foundation'},
+    ]},
+    { name:'Accumulation', focus:'Progressive overload toward true maximal strength', ex:[
+      {n:'Back squat or trap bar deadlift', sr:'4 × 4–5', i:'80–85% 1RM', note:'Primary strength driver'},
+      {n:'Nordic curl', sr:'3 × 6–8', i:'Bodyweight, minimal assistance', note:'Progressing toward unassisted control'},
+      {n:'Tempo eccentric squat', sr:'3 × 5', i:'3–4s lowering phase, moderate load', note:'Builds control under load, supports IMTP transfer'},
+    ]},
+    { name:'Intensification', focus:'Peak force expression, low volume', ex:[
+      {n:'Trap bar deadlift or squat', sr:'3–5 × 2–3', i:'88–93% 1RM', note:'Low volume, full recovery between sets (3–5 min)'},
+      {n:'Nordic curl', sr:'2–3 × 5–6', i:'Unassisted, near-maximal eccentric', note:'Building toward retest-ready hamstring force'},
+      {n:'Isometric mid-thigh pull (submax)', sr:'3 × 3–5s', i:'~90% effort', note:'Neural priming, not a fatigue driver'},
+    ]},
+  ]},
+  'Speed & Aerobic-speed': { label:'Sprint Speed & Mechanics', phases:[
+    { name:'Foundation', focus:'Acceleration mechanics and general speed exposure', ex:[
+      {n:'A-skips / wall drills', sr:'3 × 15–20m', i:'Technical focus, submax', note:'Posture and mechanics before loading speed'},
+      {n:'Acceleration sprints', sr:'4–5 × 10–15m', i:'90%+ effort, full recovery', note:'Low total volume, high quality'},
+      {n:'Med-ball rotational throws', sr:'3 × 5/side', i:'Moderate load', note:'General power transfer'},
+    ]},
+    { name:'Accumulation', focus:'Max velocity exposure and resisted work', ex:[
+      {n:'Flying sprints (20m build + 20m fly)', sr:'4–6 reps', i:'95%+ effort, 3–5 min recovery', note:'True max-velocity development'},
+      {n:'Light sled sprints', sr:'4 × 20m', i:'<10% velocity decrement load', note:'Overload without compromising mechanics'},
+      {n:'Bounding', sr:'3 × 20m', i:'High intent', note:'Horizontal power transfer to top speed'},
+    ]},
+    { name:'Intensification', focus:'Competition-speed expression', ex:[
+      {n:'Flying sprints', sr:'4–5 × 20–30m fly', i:'Maximal effort, full recovery (walk-back)', note:'Peak velocity, minimal total volume'},
+      {n:'Sprint-specific plyometrics (bounds, hops)', sr:'2–3 × 15m', i:'Maximal intent', note:'Neural readiness, not conditioning'},
+    ]},
+  ]},
+  'Speed & Aerobic-aerobic': { label:'Aerobic Capacity (Engine)', phases:[
+    { name:'Foundation', focus:'Aerobic base development', ex:[
+      {n:'Extensive tempo runs', sr:'6–8 × 200m', i:'70–75% MAS, short recovery', note:'Low-intensity volume to build the base'},
+      {n:'Small-sided games (large pitch)', sr:'4 × 6min', i:'Moderate intensity', note:'Aerobic stimulus with football context'},
+    ]},
+    { name:'Accumulation', focus:'Extensive interval work', ex:[
+      {n:'Long intervals', sr:'4 × 4min', i:'85–90% MAS, 2–3min recovery', note:'Classic aerobic power development block'},
+      {n:'Small-sided games (reduced pitch)', sr:'5 × 4min', i:'Higher intensity', note:'Aerobic-anaerobic overlap, match-realistic'},
+    ]},
+    { name:'Intensification', focus:'High-intensity aerobic power and repeat efforts', ex:[
+      {n:'Short intervals', sr:'8–10 × 30s', i:'95–100% MAS, 30s recovery', note:'Aerobic power ceiling, MAS-retest preparation'},
+      {n:'Repeated sprint ability sets', sr:'6 × 15m sprint / 15s recovery', i:'Maximal effort', note:'Match-specific repeat-effort capacity'},
+    ]},
+  ]},
+  'Capacity': { label:'General Strength-Endurance & Control', phases:[
+    { name:'Foundation', focus:'Baseline muscular endurance and control', ex:[
+      {n:'Single leg sit-to-stand', sr:'2–3 × 8–10/side', i:'Bodyweight, controlled tempo', note:'Builds toward the sit-to-stand threshold benchmark'},
+      {n:'Single leg heel raise', sr:'3 × 12–15/side', i:'Bodyweight', note:'Calf-ankle endurance foundation'},
+      {n:'Side plank', sr:'3 × 20–30s/side', i:'Bodyweight', note:'Lateral trunk control'},
+    ]},
+    { name:'Accumulation', focus:'Progressive endurance loading', ex:[
+      {n:'Single leg hamstring bridge', sr:'3 sets to near-failure/side', i:'Bodyweight', note:'Track reps to failure as the progress marker'},
+      {n:'Weighted step-ups', sr:'3 × 10/side', i:'Light–moderate load', note:'Loaded single-leg endurance'},
+      {n:'Side plank with reach', sr:'3 × 15/side', i:'Bodyweight', note:'Dynamic trunk control'},
+    ]},
+    { name:'Intensification', focus:'High-rep capacity and match-readiness', ex:[
+      {n:'Single leg sit-to-stand', sr:'3 × max reps/side', i:'Bodyweight', note:'Direct retest-style benchmark check'},
+      {n:'Single leg heel raise', sr:'3 × max reps/side', i:'Bodyweight', note:'Calf endurance ceiling'},
+    ]},
+  ]},
+};
+function bucketPhaseDurations(bucket){
+  if (bucket==='development') return [3,3,2];
+  if (bucket==='experienced') return [2,2,2];
+  return [2,3,3]; // main
+}
+function resolveGroupTemplate(a, d, group){
+  if (group==='Speed & Aerobic'){
+    const sub = speedAerobicSubtype(a, d);
+    const key = sub==='speed' ? 'Speed & Aerobic-speed' : 'Speed & Aerobic-aerobic';
+    const tmpl = GROUP_TEMPLATES[key];
+    return { tmpl, note: sub==='both' ? 'Both sprint speed and aerobic capacity are limiting factors here — aerobic work is prioritised below since it underpins repeat-sprint ability, but sprint mechanics work should run in parallel.' : null };
+  }
+  return { tmpl: GROUP_TEMPLATES[group], note:null };
+}
+function buildTrainingPlanHtml(a){
+  const d = buildLatest(a.sessions);
+  if (!a.sessions.length){
+    return `<div class="hint" style="padding:20px 4px;">No sessions recorded yet — a training recommendation needs at least one test session to work from.</div>`;
+  }
+  const bucket = trainingGroup(a);
+  const bucketInfo = bucket ? TRAINING_GROUP_INFO[bucket] : null;
+  const { strengths, weaknesses, hasEnoughData } = identifyStrengthsWeaknesses(a, d);
+  const durations = bucket ? bucketPhaseDurations(bucket) : [2,3,3];
+
+  let html = '';
+
+  // Bucket badge
+  if (bucketInfo){
+    html += `<div class="tp-bucket">
+      <div class="tp-bucket-badge">${bucketInfo.label}</div>
+      <div class="tp-bucket-sub">Age ${a.age} — falls in the ${bucketInfo.rationale} band</div>
+      <div class="tp-bucket-focus">${bucketInfo.focus}</div>
+    </div>`;
+  } else {
+    html += `<div class="hint" style="padding:10px 4px;">No birthdate/age on file — add one in Manage Players to get a training-group categorisation.</div>`;
+  }
+
+  // Strengths & weaknesses
+  if (!hasEnoughData){
+    html += `<div class="hint" style="padding:10px 4px;">Only one test category has data so far — strengths/weaknesses need at least two categories to compare meaningfully. Add more sessions to unlock this.</div>`;
+  } else {
+    html += `<div class="tp-sw-grid">
+      <div>
+        <div class="tp-sw-heading">Strengths</div>
+        ${strengths.length ? strengths.map(s=>`<div class="tp-sw-row"><span>${s.group}</span><b style="color:${catLabel(s.score).c}">${catLabel(s.score).l}</b></div>`).join('') : '<div class="hint" style="font-size:12px;">Nothing yet clearly above standard.</div>'}
+      </div>
+      <div>
+        <div class="tp-sw-heading">Weaknesses</div>
+        ${weaknesses.length ? weaknesses.map(s=>`<div class="tp-sw-row"><span>${s.group}</span><b style="color:${catLabel(s.score).c}">${catLabel(s.score).l}</b></div>`).join('') : '<div class="hint" style="font-size:12px;">No category is currently a clear weak point.</div>'}
+      </div>
+    </div>`;
+  }
+
+  // Phase-based programming for each weakness (up to 2)
+  if (weaknesses.length){
+    weaknesses.forEach(w=>{
+      const { tmpl, note } = resolveGroupTemplate(a, d, w.group);
+      if (!tmpl) return;
+      html += `<div class="tp-block">
+        <div class="tp-block-title">${tmpl.label} <span class="tp-block-reason">— addressing ${w.group} (${catLabel(w.score).l})</span></div>
+        ${note ? `<div class="hint" style="font-size:11.5px;margin-bottom:8px;">${note}</div>` : ''}
+        <div class="tp-phase-row">
+          ${tmpl.phases.map((ph,i)=>`
+            <div class="tp-phase">
+              <div class="tp-phase-head"><span>${ph.name}</span><span class="tp-phase-wk">${durations[i]} wk</span></div>
+              <div class="tp-phase-focus">${ph.focus}</div>
+              <table class="tp-ex-table"><tbody>
+                ${ph.ex.map(e=>`<tr><td class="tp-ex-name">${e.n}<div class="tp-ex-note">${e.note}</div></td><td class="tp-ex-sr">${e.sr}</td><td class="tp-ex-i">${e.i}</td></tr>`).join('')}
+              </tbody></table>
+            </div>`).join('')}
+        </div>
+      </div>`;
+    });
+  } else if (hasEnoughData) {
+    html += `<div class="tp-block"><div class="tp-block-title">No clear weak category right now</div>
+      <div class="hint" style="font-size:12px;">Testing is even across categories — focus on maintaining current qualities rather than a targeted remediation block. Re-check after the next testing cycle.</div></div>`;
+  }
+
+  html += `<div class="tp-disclaimer">This is a data-informed starting template, generated from ${a.name.split(' ')[0]}'s latest test results against ${genderPossessive(a.gender)} norms — not a replacement for your own judgement. It doesn't account for training age, injury history, or current load, none of which this dashboard tracks. Adjust freely.</div>`;
+
+  return html;
+}
+function genderPossessive(g){ return g==='M' ? "men's" : "women's"; }
 function sidebarCol(d, gender){
   if (!d) return '#c2c6cc';
   const scores = METRICS.map(m=>metricScore(m,d,gender)).filter(s=>s!=null);
@@ -1046,6 +1292,7 @@ function switchTab(t){
   if (t==='trends') setTimeout(drawAllTrendCharts,60);
   if (t==='quadrants') setTimeout(()=>{ drawPriorityQuadrants(); drawQuadrant(); },60);
   if (t==='profile') setTimeout(drawRadar,60);
+  if (t==='training') setTimeout(drawTrainingPlan,60);
   if (t==='history') setTimeout(renderHistory,60);
 }
 function switchTeamTab(t){
@@ -1098,6 +1345,7 @@ function renderIndividual(){
         <div class="tab" data-t="trends" onclick="switchTab('trends')">Trend Charts</div>
         <div class="tab" data-t="quadrants" onclick="switchTab('quadrants')">Quadrants</div>
         <div class="tab" data-t="profile" onclick="switchTab('profile')">Profile</div>
+        <div class="tab" data-t="training" onclick="switchTab('training')">Training Plan</div>
         <div class="tab" data-t="history" onclick="switchTab('history')">History</div>
       </div>
       <div class="tc active" data-t="results"><div class="results-body" id="resultsBody"></div></div>
@@ -1144,6 +1392,7 @@ function renderIndividual(){
           <div class="radar-list" id="radarList"></div>
         </div>
       </div></div>
+      <div class="tc" data-t="training"><div class="quad-body" id="trainingPlanBody" style="padding:16px 20px;"></div></div>
       <div class="tc" data-t="history"><div id="historyBody" style="padding:14px 20px"></div></div>
     </div>`;
 
@@ -1427,6 +1676,11 @@ function squadRadarScore(m, val, gender, athleteId){
   return Math.max(0, Math.min(4, 2 + z)); // squad mean -> 2, ±1SD -> ±1
 }
 let radarChartInstance = null;
+function drawTrainingPlan(){
+  const a = athleteMap[selectedId]; if (!a) return;
+  const el = document.getElementById('trainingPlanBody');
+  if (el) el.innerHTML = `<div class="fade-redraw">${buildTrainingPlanHtml(a)}</div>`;
+}
 function drawRadar(){
   const a = athleteMap[selectedId]; if (!a) return;
   const d = buildLatest(a.sessions);
