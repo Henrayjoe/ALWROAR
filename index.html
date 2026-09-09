@@ -1296,21 +1296,42 @@ async function loadPersisted(){
 // ============================================================
 async function fetchSheet(url){ const r=await fetch(url); if(!r.ok) throw new Error(`HTTP ${r.status} — check the URL`); return r.text(); }
 function parseCSV(text){
-  const rows = text.trim().split('\n').map(l=>{
-    const cols=[]; let cur='', inQ=false;
-    for (const ch of l){ if(ch==='"'){inQ=!inQ} else if(ch===','&&!inQ){cols.push(cur.trim());cur=''} else {cur+=ch} }
-    cols.push(cur.trim()); return cols;
-  });
+  // Single-pass, quote-aware parse -- a naive split on '\n' before
+  // checking for quotes (the old approach) fractures any cell that
+  // legitimately spans multiple lines (e.g. a multi-line notes field)
+  // into extra fake rows, which is exactly what created the "ghost
+  // athlete" rows named after fragments of a training_notes paragraph.
+  const rows = [];
+  let row = [], field = '', inQ = false;
+  const s = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  for (let i=0; i<s.length; i++){
+    const ch = s[i];
+    if (inQ){
+      if (ch === '"'){
+        if (s[i+1] === '"'){ field += '"'; i++; } // escaped "" -> literal "
+        else inQ = false;
+      } else {
+        field += ch;
+      }
+    } else {
+      if (ch === '"'){ inQ = true; }
+      else if (ch === ','){ row.push(field); field=''; }
+      else if (ch === '\n'){ row.push(field); field=''; rows.push(row); row=[]; }
+      else { field += ch; }
+    }
+  }
+  if (field.length>0 || row.length>0){ row.push(field); rows.push(row); }
+  const trimmedRows = rows.map(r=>r.map(c=>c.trim()));
   // Find the real header row: scan the first few rows for one containing a
   // 'name' cell. Handles an extra title/grouping row above the actual
   // column keys (e.g. row 1 = test names like "Countermovement Jump",
   // row 2 = the real column keys like cmj_jumpHeight).
   let headerIdx = 0;
-  for (let i=0; i<Math.min(5, rows.length); i++){
-    if (rows[i].some(c=>c.trim().toLowerCase()==='name')){ headerIdx = i; break; }
+  for (let i=0; i<Math.min(5, trimmedRows.length); i++){
+    if (trimmedRows[i].some(c=>c.toLowerCase()==='name')){ headerIdx = i; break; }
   }
-  const headers = rows[headerIdx].map(h=>h.trim());
-  return rows.slice(headerIdx+1).filter(r=>r.some(c=>c)).map(r=>{ const obj={}; headers.forEach((h,i)=>obj[h]=(r[i]||'').trim()); return obj; });
+  const headers = trimmedRows[headerIdx];
+  return trimmedRows.slice(headerIdx+1).filter(r=>r.some(c=>c)).map(r=>{ const obj={}; headers.forEach((h,i)=>obj[h]=(r[i]||'').trim()); return obj; });
 }
 async function importFromSheet(silent){
   if (!CONFIG.athletesUrl || !CONFIG.resultsUrl){ if(!silent) alert('Add both sheet URLs first.'); return; }
