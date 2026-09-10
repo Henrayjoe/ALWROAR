@@ -673,10 +673,54 @@ function mergeResultsFromSheet(resultRows){
 // deduped by a composite key so re-syncing the same sheet never creates
 // duplicate rows.
 // ============================================================
-function trainingGpsKey(r){ return [r.date, r.session_label||'', r.drill_name||''].join('|'); }
+function trainingGpsKey(r){ return [r.date, r.session_label||'', r.drill_name||'', r.drill_start_time||''].join('|'); }
 function gameGpsKey(r){ return [r.date, r.opponent||''].join('|'); }
+// Detects a real Sonra/Apex export by its signature columns and maps its
+// rows into our internal schema. Sonra's "Entire Session" row becomes our
+// whole-session marker (drill_name:''); every other drillTitle keeps its
+// real name. Date converts from Sonra's DD/MM/YYYY to YYYY-MM-DD.
+function isSonraFormat(row){ return row && ('distanceTotal' in row) && ('playerName' in row); }
+function sonraDateToISO(d){
+  if (!d) return null;
+  const parts = d.split('/');
+  if (parts.length!==3) return d;
+  const [dd,mm,yyyy] = parts;
+  return `${yyyy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`;
+}
+function mapSonraTrainingRow(row){
+  const practice = row.drillPractice && row.drillPractice!==row.drillTitle ? ` (${row.drillPractice})` : '';
+  return {
+    date: sonraDateToISO(row.sessionDate),
+    session_label: row.sessionType || '',
+    player_name: row.playerName,
+    drill_name: (row.drillTitle==='Entire Session') ? '' : ((row.drillTitle||'')+practice),
+    drill_start_time: row.drillStartTime || '',
+    duration_min: row.totaltimeinMinutes, total_distance_m: row.distanceTotal,
+    hsr_distance_m: row.highSpeedRunningAbs, sprint_distance_m: row.sprintDistance,
+    accel_decel_count: (pf(row.accelerationsRel)||0) + (pf(row.decelerationsRel)||0),
+    max_velocity_kmh: row.maxSpeed,
+  };
+}
+// Rows safe to SUM for totals/load calculations: if a whole-session row
+// (drill_name blank, e.g. Sonra's "Entire Session") exists for a given
+// date+session_label group, use ONLY that row — it's already authoritative
+// and summing it together with its own constituent drills would silently
+// double (or more) count everything. Falls back to summing drills when no
+// such row exists (our original simple-schema behavior, unchanged).
+function gpsLoadRows(trainingGps){
+  const byKey = {};
+  (trainingGps||[]).forEach(e=>{
+    const key = e.date+'|'+(e.session_label||'');
+    if (!byKey[key]) byKey[key] = { whole:null, drills:[] };
+    if (!e.drill_name) byKey[key].whole = e; else byKey[key].drills.push(e);
+  });
+  const out = [];
+  Object.values(byKey).forEach(g=>{ if (g.whole) out.push(g.whole); else out.push(...g.drills); });
+  return out;
+}
 function mergeTrainingGpsFromSheet(rows){
   let added=0, updated=0, skipped=0;
+  if (rows.length && isSonraFormat(rows[0])) rows = rows.map(mapSonraTrainingRow);
   rows.forEach(r=>{
     const key = normalizeName(r.player_name);
     const id = key ? nameIndex[key] : null;
@@ -685,7 +729,7 @@ function mergeTrainingGpsFromSheet(rows){
     if (!a.trainingGps) a.trainingGps = [];
     const rowKey = trainingGpsKey(r);
     const entry = {
-      date: r.date, session_label: r.session_label||'', drill_name: r.drill_name||'',
+      date: r.date, session_label: r.session_label||'', drill_name: r.drill_name||'', drill_start_time: r.drill_start_time||'',
       duration_min: pf(r.duration_min), total_distance_m: pf(r.total_distance_m),
       hsr_distance_m: pf(r.hsr_distance_m), sprint_distance_m: pf(r.sprint_distance_m),
       accel_decel_count: pf(r.accel_decel_count), max_velocity_kmh: pf(r.max_velocity_kmh),
@@ -734,7 +778,7 @@ function maxVelPctOfBest(a, maxVel){
 // high injury risk (Gabbett et al.).
 function gpsDailyLoads(a){
   const byDate = {};
-  [...(a.trainingGps||[]), ...(a.gameGps||[])].forEach(e=>{
+  [...gpsLoadRows(a.trainingGps), ...(a.gameGps||[])].forEach(e=>{
     if (e.total_distance_m==null) return;
     byDate[e.date] = (byDate[e.date]||0) + e.total_distance_m;
   });
@@ -1942,7 +1986,7 @@ function drawTrainingPlan(){
 // every individual drill.
 function aggregateTrainingSessions(a){
   const byKey = {};
-  (a.trainingGps||[]).forEach(e=>{
+  gpsLoadRows(a.trainingGps).forEach(e=>{
     const key = e.date+'|'+(e.session_label||'');
     if (!byKey[key]) byKey[key] = { date:e.date, session_label:e.session_label, duration_min:0, total_distance_m:0, hsr_distance_m:0, sprint_distance_m:0, accel_decel_count:0, max_velocity_kmh:null, drillCount:0 };
     const s = byKey[key];
@@ -2236,7 +2280,7 @@ function matchDemandReference(players){
 function weeklyLoad(a, asOfDate){
   const asOf = new Date(asOfDate);
   let distance=0, hsr=0, sprint=0, accelDecel=0, sessionCount=0;
-  (a.trainingGps||[]).forEach(e=>{
+  gpsLoadRows(a.trainingGps).forEach(e=>{
     const daysAgo = Math.round((asOf-new Date(e.date))/86400000);
     if (daysAgo>=0 && daysAgo<7){
       distance+=e.total_distance_m||0; hsr+=e.hsr_distance_m||0;
@@ -2264,22 +2308,29 @@ function daySquadBreakdown(players, dateStr){
   players.forEach(a=>{
     const rowsToday = (a.trainingGps||[]).filter(e=>e.date===dateStr);
     if (!rowsToday.length) return;
+    // Player totals: use gpsLoadRows so a whole-session row (if present)
+    // is used alone rather than summed on top of its own constituent drills.
+    const safeToday = gpsLoadRows(rowsToday);
     const t = { id:a.id, name:a.name, duration:0, distance:0, hsr:0, sprint:0, accelDecel:0, maxVel:null };
-    rowsToday.forEach(e=>{
+    safeToday.forEach(e=>{
       t.duration += e.duration_min||0; t.distance += e.total_distance_m||0;
       t.hsr += e.hsr_distance_m||0; t.sprint += e.sprint_distance_m||0; t.accelDecel += e.accel_decel_count||0;
       if (e.max_velocity_kmh!=null) t.maxVel = Math.max(t.maxVel||0, e.max_velocity_kmh);
-      const dn = e.drill_name || '(Whole session)';
+    });
+    playerTotals.push(t);
+    // Drill breakdown: always the real named drills only, never the
+    // whole-session row itself (that would show as a fake pseudo-drill).
+    rowsToday.filter(e=>e.drill_name).forEach(e=>{
+      const dn = e.drill_name;
       if (!drillTotals[dn]) drillTotals[dn] = { duration:0, distance:0, hsr:0 };
       drillTotals[dn].duration += e.duration_min||0; drillTotals[dn].distance += e.total_distance_m||0; drillTotals[dn].hsr += e.hsr_distance_m||0;
     });
-    playerTotals.push(t);
   });
   return { playerTotals, drillTotals };
 }
 function findReferenceSession(a, todayDate, label){
   if (!label) return null;
-  const candidates = (a.trainingGps||[]).filter(e=>e.session_label===label && e.date<todayDate);
+  const candidates = gpsLoadRows(a.trainingGps).filter(e=>e.session_label===label && e.date<todayDate);
   if (!candidates.length) return null;
   const byDate = {};
   candidates.forEach(e=>{
