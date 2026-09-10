@@ -254,6 +254,22 @@
   .row-item:hover{box-shadow:var(--shadow-md);}
   .row-item .ri-name{flex:1;font-weight:600;}
   .row-item .ri-meta{font-size:11px;color:var(--text-muted);}
+  .rpt-controls { display:flex; gap:10px; align-items:center; margin-bottom:18px; flex-wrap:wrap; }
+  .rpt-header { border-bottom:2px solid var(--accent); padding-bottom:10px; margin-bottom:16px; }
+  .rpt-title { font-size:19px; font-weight:800; }
+  .rpt-sub { font-size:12.5px; color:var(--text-muted); margin-top:2px; }
+  .rpt-section-title { font-size:12.5px; font-weight:800; text-transform:uppercase; letter-spacing:.05em; color:var(--text-secondary); margin:22px 0 8px; }
+  .rpt-table { width:100%; border-collapse:collapse; font-size:12px; }
+  .rpt-table th { text-align:right; font-size:10px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-muted); padding:6px 8px; border-bottom:1px solid var(--border); }
+  .rpt-table th:first-child, .rpt-table td:first-child { text-align:left; }
+  .rpt-table td { text-align:right; padding:6px 8px; border-bottom:1px solid #f1f2f4; }
+  @media print {
+    body * { visibility:hidden; }
+    #overlayReport, #overlayReport * { visibility:visible; }
+    #overlayReport { position:absolute; inset:0; background:#fff; }
+    #overlayReport .modal { box-shadow:none; max-width:100%; margin:0; }
+    .no-print { display:none !important; }
+  }
 </style>
 </head>
 <body>
@@ -366,6 +382,20 @@
     <div class="settings-pane" id="paneNorms"></div>
     <div class="settings-pane" id="paneThresholds"></div>
     <div class="settings-pane" id="paneBackup"></div>
+  </div>
+</div>
+<div class="overlay" id="overlayReport">
+  <div class="modal" style="max-width:920px;">
+    <button class="close no-print" data-close>&times;</button>
+    <div class="rpt-controls no-print">
+      <div class="lb-mode-toggle" id="reportModeToggle">
+        <button data-rm="day" class="active" onclick="setReportMode('day')">Day</button>
+        <button data-rm="week" onclick="setReportMode('week')">Week</button>
+      </div>
+      <select id="reportDate" class="axis-select"></select>
+      <button class="btn" onclick="printReport()">🖨 Print / Save PDF</button>
+    </div>
+    <div id="reportContent"></div>
   </div>
 </div>
 <input type="file" id="restoreFileInput" accept=".json" style="display:none;" onchange="handleRestoreFile(event)">
@@ -2223,6 +2253,168 @@ function flagOutliers(rows, key){
   const high = new Set(sorted.slice(n-cut).map(r=>r.id));
   return rows.map(r=>({...r, flag: high.has(r.id)?'high':low.has(r.id)?'low':null}));
 }
+// ============================================================
+// PRINTABLE REPORTS — a single day's squad training report (team
+// session overview, drill-by-drill, player-by-player) matching the
+// Team/Player Daily Report examples, plus a weekly-summary alternative.
+// ============================================================
+function daySquadBreakdown(players, dateStr){
+  const playerTotals = [];
+  const drillTotals = {};
+  players.forEach(a=>{
+    const rowsToday = (a.trainingGps||[]).filter(e=>e.date===dateStr);
+    if (!rowsToday.length) return;
+    const t = { id:a.id, name:a.name, duration:0, distance:0, hsr:0, sprint:0, accelDecel:0, maxVel:null };
+    rowsToday.forEach(e=>{
+      t.duration += e.duration_min||0; t.distance += e.total_distance_m||0;
+      t.hsr += e.hsr_distance_m||0; t.sprint += e.sprint_distance_m||0; t.accelDecel += e.accel_decel_count||0;
+      if (e.max_velocity_kmh!=null) t.maxVel = Math.max(t.maxVel||0, e.max_velocity_kmh);
+      const dn = e.drill_name || '(Whole session)';
+      if (!drillTotals[dn]) drillTotals[dn] = { duration:0, distance:0, hsr:0 };
+      drillTotals[dn].duration += e.duration_min||0; drillTotals[dn].distance += e.total_distance_m||0; drillTotals[dn].hsr += e.hsr_distance_m||0;
+    });
+    playerTotals.push(t);
+  });
+  return { playerTotals, drillTotals };
+}
+function findReferenceSession(a, todayDate, label){
+  if (!label) return null;
+  const candidates = (a.trainingGps||[]).filter(e=>e.session_label===label && e.date<todayDate);
+  if (!candidates.length) return null;
+  const byDate = {};
+  candidates.forEach(e=>{
+    if (!byDate[e.date]) byDate[e.date] = { duration:0, distance:0, hsr:0, accelDecel:0 };
+    byDate[e.date].duration += e.duration_min||0; byDate[e.date].distance += e.total_distance_m||0;
+    byDate[e.date].hsr += e.hsr_distance_m||0; byDate[e.date].accelDecel += e.accel_decel_count||0;
+  });
+  const dates = Object.keys(byDate).sort();
+  const mostRecent = dates[dates.length-1];
+  return { date: mostRecent, ...byDate[mostRecent] };
+}
+function trainingSessionDates(players){
+  const dates = new Set();
+  players.forEach(a=>(a.trainingGps||[]).forEach(e=>dates.add(e.date)));
+  return [...dates].sort();
+}
+function pctDiff(today, ref){ return (ref) ? ((today-ref)/ref)*100 : null; }
+function buildDailyReportHtml(dateStr){
+  const players = Object.values(athleteMap).filter(a=>genderFilterVal==='all'||a.gender===genderFilterVal);
+  const { playerTotals, drillTotals } = daySquadBreakdown(players, dateStr);
+  if (!playerTotals.length) return `<div class="hint" style="padding:20px 4px;">No training GPS data for ${dateStr}.</div>`;
+  const labelsUsed = [...new Set(playerTotals.map(t=>{
+    const a = athleteMap[t.id];
+    const row = (a.trainingGps||[]).find(e=>e.date===dateStr);
+    return row ? row.session_label : '';
+  }).filter(Boolean))];
+  const primaryLabel = labelsUsed[0] || '';
+  const teamTotals = playerTotals.reduce((acc,t)=>({ duration:acc.duration+t.duration, distance:acc.distance+t.distance, hsr:acc.hsr+t.hsr, accelDecel:acc.accelDecel+t.accelDecel }), {duration:0,distance:0,hsr:0,accelDecel:0});
+  const avgN = playerTotals.length;
+  const teamAvg = { duration:teamTotals.duration/avgN, distance:teamTotals.distance/avgN, hsr:teamTotals.hsr/avgN, accelDecel:teamTotals.accelDecel/avgN };
+  const ref = primaryLabel ? findReferenceSession(athleteMap[playerTotals[0].id], dateStr, primaryLabel) : null;
+  const md = matchDemandReference(players);
+  const matchDistPerMin = (md.avgDistance && md.avgDuration) ? md.avgDistance/md.avgDuration : null;
+
+  let html = `<div class="rpt-header"><div><div class="rpt-title">Team Training Report</div><div class="rpt-sub">${dateStr}${primaryLabel?' · '+primaryLabel:''}</div></div></div>`;
+
+  html += `<div class="rpt-section-title">Session Overview</div>
+    <table class="rpt-table"><thead><tr><th></th><th>Duration</th><th>Distance</th><th>HSR</th><th>Accel/Decel</th></tr></thead><tbody>
+      <tr><td class="lbl">Today (squad avg)</td><td>${fmt(teamAvg.duration)} min</td><td>${fmt(teamAvg.distance)} m</td><td>${fmt(teamAvg.hsr)} m</td><td>${fmt(teamAvg.accelDecel)}</td></tr>
+      ${ref ? `<tr><td class="lbl">Reference (${primaryLabel}, ${ref.date})</td><td>${fmt(ref.duration)} min</td><td>${fmt(ref.distance)} m</td><td>${fmt(ref.hsr)} m</td><td>${fmt(ref.accelDecel)}</td></tr>
+      <tr><td class="lbl">% of Reference</td><td>${fmt(pctDiff(teamAvg.duration,ref.duration)+100)}%</td><td>${fmt(pctDiff(teamAvg.distance,ref.distance)+100)}%</td><td>${fmt(pctDiff(teamAvg.hsr,ref.hsr)+100)}%</td><td>${fmt(pctDiff(teamAvg.accelDecel,ref.accelDecel)+100)}%</td></tr>` : `<tr><td class="lbl" colspan="5" style="color:var(--text-muted);font-style:italic;">No prior "${primaryLabel||'—'}" session on record to compare against yet.</td></tr>`}
+    </tbody></table>`;
+
+  const drillNames = Object.keys(drillTotals);
+  html += `<div class="rpt-section-title">Drill-by-Drill</div>
+    <table class="rpt-table"><thead><tr><th>Drill</th><th>Duration</th><th>Distance</th><th>Dist/min</th><th>HSR/min</th><th>% Match Demand</th></tr></thead><tbody>
+    ${drillNames.map(name=>{
+      const d = drillTotals[name];
+      const distPerMin = d.duration ? d.distance/d.duration : null;
+      const hsrPerMin = d.duration ? d.hsr/d.duration : null;
+      const pctMatch = (matchDistPerMin && distPerMin!=null) ? (distPerMin/matchDistPerMin)*100 : null;
+      const over = pctMatch!=null && pctMatch>100;
+      return `<tr><td class="lbl">${name}</td><td>${fmt(d.duration)} min</td><td>${fmt(d.distance)} m</td><td>${fmt(distPerMin)} m/min</td><td>${fmt(hsrPerMin)} m/min</td>
+        <td style="color:${over?'#2f8f5b':'inherit'};font-weight:${over?'700':'400'}">${pctMatch!=null?fmt(pctMatch)+'%':'—'}</td></tr>`;
+    }).join('')}
+    </tbody></table>`;
+
+  const flagged = flagOutliers(playerTotals.map(t=>({...t})), 'distance');
+  html += `<div class="rpt-section-title">Player-by-Player</div>
+    <table class="rpt-table"><thead><tr><th>Player</th><th>Duration</th><th>Distance</th><th>HSR</th><th>Sprint Dist</th><th>Accel/Decel</th><th>Max Vel</th></tr></thead><tbody>
+    ${flagged.sort((a,b)=>b.distance-a.distance).map(t=>{
+      const rowBg = t.flag==='high' ? 'rgba(200,72,61,0.08)' : t.flag==='low' ? 'rgba(61,111,176,0.08)' : 'transparent';
+      return `<tr style="background:${rowBg}"><td class="lbl">${t.name}${t.flag?` <span style="font-size:10px;color:${t.flag==='high'?'#c8483d':'#3d6fb0'}">(${t.flag==='high'?'top':'bottom'} 10%)</span>`:''}</td>
+        <td>${fmt(t.duration)} min</td><td>${fmt(t.distance)} m</td><td>${fmt(t.hsr)} m</td><td>${fmt(t.sprint)} m</td><td>${fmt(t.accelDecel)}</td><td>${t.maxVel!=null?fmt(t.maxVel)+' km/h':'—'}</td></tr>`;
+    }).join('')}
+    </tbody></table>`;
+
+  return html;
+}
+function buildWeeklyReportHtml(endDateStr){
+  const players = Object.values(athleteMap).filter(a=>genderFilterVal==='all'||a.gender===genderFilterVal);
+  const asOf = new Date(endDateStr);
+  const weekDates = [];
+  for (let i=6;i>=0;i--){ const d=new Date(asOf); d.setDate(d.getDate()-i); weekDates.push(d.toISOString().slice(0,10)); }
+  const allDates = trainingSessionDates(players).filter(d=>weekDates.includes(d));
+  if (!allDates.length) return `<div class="hint" style="padding:20px 4px;">No training GPS data in the 7 days ending ${endDateStr}.</div>`;
+
+  let html = `<div class="rpt-header"><div><div class="rpt-title">Weekly Training Report</div><div class="rpt-sub">${weekDates[0]} to ${endDateStr}</div></div></div>`;
+
+  html += `<div class="rpt-section-title">Session-by-Session</div>
+    <table class="rpt-table"><thead><tr><th>Date</th><th>Duration</th><th>Distance</th><th>HSR</th><th>Accel/Decel</th></tr></thead><tbody>
+    ${allDates.map(dt=>{
+      const { playerTotals } = daySquadBreakdown(players, dt);
+      const sum = playerTotals.reduce((acc,t)=>({duration:acc.duration+t.duration,distance:acc.distance+t.distance,hsr:acc.hsr+t.hsr,accelDecel:acc.accelDecel+t.accelDecel}),{duration:0,distance:0,hsr:0,accelDecel:0});
+      return `<tr><td class="lbl">${dt}</td><td>${fmt(sum.duration)} min</td><td>${fmt(sum.distance)} m</td><td>${fmt(sum.hsr)} m</td><td>${fmt(sum.accelDecel)}</td></tr>`;
+    }).join('')}
+    </tbody></table>`;
+
+  const md = matchDemandReference(players);
+  const target = SETTINGS.weeklyTargetMultiplier;
+  let rows = players.filter(a=>a.trainingGps&&a.trainingGps.length).map(a=>({ id:a.id, name:a.name, ...weeklyLoad(a, endDateStr) }));
+  rows = flagOutliers(rows, 'distance');
+  html += `<div class="rpt-section-title">Player Weekly Accumulated Load</div>
+    <table class="rpt-table"><thead><tr><th>Player</th><th>Sessions</th><th>Distance</th><th>HSR</th><th>Sprint Dist</th><th>Accel/Decel</th></tr></thead><tbody>
+    ${rows.sort((a,b)=>b.distance-a.distance).map(r=>{
+      const rowBg = r.flag==='high' ? 'rgba(200,72,61,0.08)' : r.flag==='low' ? 'rgba(61,111,176,0.08)' : 'transparent';
+      return `<tr style="background:${rowBg}"><td class="lbl">${r.name}${r.flag?` <span style="font-size:10px;color:${r.flag==='high'?'#c8483d':'#3d6fb0'}">(${r.flag==='high'?'top':'bottom'} 10%)</span>`:''}</td>
+        <td>${r.sessionCount}</td><td>${fmt(r.distance)} m</td><td>${fmt(r.hsr)} m</td><td>${fmt(r.sprint)} m</td><td>${fmt(r.accelDecel)}</td></tr>`;
+    }).join('')}
+    </tbody></table>`;
+
+  html += `<div class="rpt-section-title">Player % Weekly Targets ${target!=null?`<span style="font-weight:400;font-size:11px;color:var(--text-muted);">(target = ${target}× avg match demand)</span>`:''}</div>
+    <table class="rpt-table"><thead><tr><th>Player</th><th>Distance %</th><th>HSR %</th></tr></thead><tbody>
+    ${rows.map(r=>{
+      const distPct = (target!=null && md.avgDistance) ? (r.distance/(md.avgDistance*target))*100 : null;
+      const hsrPct = (target!=null && md.avgHsr) ? (r.hsr/(md.avgHsr*target))*100 : null;
+      return `<tr><td class="lbl">${r.name}</td><td>${distPct!=null?fmt(distPct)+'%':'—'}</td><td>${hsrPct!=null?fmt(hsrPct)+'%':'—'}</td></tr>`;
+    }).join('')}
+    </tbody></table>`;
+
+  return html;
+}
+let reportMode = 'day';
+function openReportModal(){
+  const players = Object.values(athleteMap).filter(a=>genderFilterVal==='all'||a.gender===genderFilterVal);
+  const dates = trainingSessionDates(players);
+  const sel = document.getElementById('reportDate');
+  sel.innerHTML = dates.map(d=>`<option value="${d}">${d}</option>`).join('');
+  if (dates.length) sel.value = dates[dates.length-1];
+  sel.onchange = renderReportContent;
+  document.getElementById('overlayReport').classList.add('show');
+  renderReportContent();
+}
+function setReportMode(m){
+  reportMode = m;
+  document.querySelectorAll('#reportModeToggle button').forEach(b=>b.classList.toggle('active', b.dataset.rm===m));
+  renderReportContent();
+}
+function renderReportContent(){
+  const dateStr = document.getElementById('reportDate').value;
+  const target = document.getElementById('reportContent');
+  if (!dateStr){ target.innerHTML = `<div class="hint" style="padding:20px 4px;">No training GPS data yet — nothing to report on.</div>`; return; }
+  target.innerHTML = reportMode==='day' ? buildDailyReportHtml(dateStr) : buildWeeklyReportHtml(dateStr);
+}
+function printReport(){ window.print(); }
 function drawTeamGpsTraining(){
   const el = document.getElementById('teamGpsTrainingBody'); if (!el) return;
   const players = Object.values(athleteMap).filter(a=>genderFilterVal==='all'||a.gender===genderFilterVal);
@@ -2230,7 +2422,8 @@ function drawTeamGpsTraining(){
   const today = new Date().toISOString().slice(0,10);
   const target = SETTINGS.weeklyTargetMultiplier;
 
-  let html = `<div class="pq-heading">Match-Demand Reference (from your squad's own Game GPS)</div>`;
+  let html = `<div class="quad-ctrl-row" style="margin-bottom:14px;"><button class="btn" onclick="openReportModal()">📄 Print Training Report</button></div>`;
+  html += `<div class="pq-heading">Match-Demand Reference (from your squad's own Game GPS)</div>`;
   if (!md.n){
     html += `<div class="hint" style="padding:8px 4px;">No Game GPS data yet — add match data to unlock match-demand benchmarking and weekly targets.</div>`;
   } else {
