@@ -1518,6 +1518,17 @@ function parseCSV(text){
   const headers = trimmedRows[headerIdx];
   return trimmedRows.slice(headerIdx+1).filter(r=>r.some(c=>c)).map(r=>{ const obj={}; headers.forEach((h,i)=>obj[h]=(r[i]||'').trim()); return obj; });
 }
+function refreshReportModalIfOpen(){
+  const overlay = document.getElementById('overlayReport');
+  if (!overlay || !overlay.classList.contains('show')) return;
+  const players = Object.values(athleteMap).filter(a=>genderFilterVal==='all'||a.gender===genderFilterVal);
+  const dates = trainingSessionDates(players);
+  const sel = document.getElementById('reportDate');
+  const prevValue = sel.value;
+  sel.innerHTML = dates.map(d=>`<option value="${d}">${d}</option>`).join('');
+  sel.value = dates.includes(prevValue) ? prevValue : (dates.length ? dates[dates.length-1] : '');
+  renderReportContent();
+}
 async function importFromSheet(silent){
   if (!CONFIG.athletesUrl || !CONFIG.resultsUrl){ if(!silent) alert('Add both sheet URLs first.'); return; }
   const btn = document.getElementById('btnImportSheet');
@@ -1544,6 +1555,7 @@ async function importFromSheet(silent){
     if (statusEl) statusEl.textContent = `${Object.keys(athleteMap).length} players · synced ${stamp}`;
     if (!selectedId){ const ids=Object.keys(athleteMap); if(ids.length) selectedId=ids[0]; }
     renderSidebar(); renderMain();
+    refreshReportModalIfOpen();
     if (btn){ btn.disabled=false; btn.textContent='Import now'; }
     if (unmatched>0 && !silent) alert(`Imported. ${unmatched} result row(s) had a name that didn't match any athlete and were skipped.`);
   }catch(e){
@@ -2372,6 +2384,35 @@ function flagTag(flag){ return flag ? ` <span style="font-size:9px;color:${flag=
 // session overview, drill-by-drill, player-by-player) matching the
 // Team/Player Daily Report examples, plus a weekly-summary alternative.
 // ============================================================
+// Classifies every player in the squad (not just those with GPS data) into
+// full / partial / dnt for a given training date. "Full" duration is taken
+// as the day's max recorded duration; anyone meaningfully short of that is
+// "partial"; anyone with zero rows for the date is "did not train".
+function participationStatus(players, dateStr, playerTotals){
+  const durations = playerTotals.map(t=>t.duration).filter(d=>d>0);
+  const fullDuration = durations.length ? Math.max(...durations) : null;
+  const byId = {}; playerTotals.forEach(t=>byId[t.id]=t);
+  return players.map(a=>{
+    const t = byId[a.id];
+    if (!t || !t.duration) return { id:a.id, name:a.name, status:'dnt', duration:0 };
+    const status = (fullDuration && t.duration < fullDuration*0.8) ? 'partial' : 'full';
+    return { id:a.id, name:a.name, status, duration:t.duration };
+  });
+}
+const PARTICIPATION_LABEL = { full:'Full', partial:'Partial', dnt:'Did Not Train' };
+const PARTICIPATION_COLOR = { full:'#2f8f5b', partial:'#d97f3d', dnt:'#c8483d' };
+// %MAX (max velocity vs personal best) is only meaningful once a player
+// has had several genuine sprint-eliciting efforts recorded -- with very
+// few, "personal best" is really just "highest of a small sample" and the
+// resulting % overstates confidence.
+function maxVelSampleSize(a){
+  const all = [...(a.trainingGps||[]), ...(a.gameGps||[])];
+  return all.filter(e=>e.max_velocity_kmh!=null).length;
+}
+function maxVelConfidence(a){
+  const n = maxVelSampleSize(a);
+  return n<3 ? 'low' : n<6 ? 'medium' : 'high';
+}
 function daySquadBreakdown(players, dateStr){
   const playerTotals = [];
   const drillTotals = {};
@@ -2490,21 +2531,29 @@ function buildDailyReportHtml(dateStr, customTitle){
     }).join('')}
     </tbody></table>`;
 
-  const flagged = flagOutliersMulti(playerTotals.map(t=>({...t, pctBest: maxVelPctOfBest(athleteMap[t.id], t.maxVel)})), ['distance','hsr','sprint','accelDecel']);
+  const flagged = flagOutliersMulti(playerTotals.map(t=>({...t, pctBest: maxVelPctOfBest(athleteMap[t.id], t.maxVel), velConfidence: maxVelConfidence(athleteMap[t.id])})), ['distance','hsr','sprint','accelDecel']);
+  const flaggedById = {}; flagged.forEach(t=>flaggedById[t.id]=t);
+  const statusList = participationStatus(players, dateStr, playerTotals);
   html += `<div class="rpt-section-title">Player-by-Player</div>
-    <table class="rpt-table"><thead><tr><th>Player</th><th>Duration</th><th>Distance</th><th>HSR</th><th>Sprint Dist</th><th>Accel/Decel</th><th>Max Vel</th><th>%MAX</th></tr></thead><tbody>
-    ${flagged.sort((a,b)=>b.distance-a.distance).map(t=>{
-      return `<tr><td class="lbl">${t.name}</td>
+    <table class="rpt-table"><thead><tr><th>Player</th><th>Status</th><th>Duration</th><th>Distance</th><th>HSR</th><th>Sprint Dist</th><th>Accel/Decel</th><th>Max Vel</th><th>%MAX</th></tr></thead><tbody>
+    ${statusList.sort((a,b)=>(flaggedById[b.id]?.distance||-1)-(flaggedById[a.id]?.distance||-1)).map(s=>{
+      const t = flaggedById[s.id];
+      const statusBadge = `<span style="color:${PARTICIPATION_COLOR[s.status]};font-weight:700;">${PARTICIPATION_LABEL[s.status]}</span>`;
+      if (!t){
+        return `<tr style="color:var(--text-muted);"><td class="lbl">${s.name}</td><td>${statusBadge}</td><td colspan="6">—</td></tr>`;
+      }
+      const pctBestDisplay = t.pctBest!=null ? `${fmt(t.pctBest)}%${t.velConfidence==='low'?' <span title="Based on very few recorded max-velocity efforts — treat with caution until more sprint efforts are recorded.">⚠︎</span>':''}` : '—';
+      return `<tr><td class="lbl">${s.name}</td><td>${statusBadge}</td>
         <td>${fmt(t.duration)} min</td>
         <td style="background:${flagBg(t.flags.distance)}">${fmt(t.distance)} m${flagTag(t.flags.distance)}</td>
         <td style="background:${flagBg(t.flags.hsr)}">${fmt(t.hsr)} m${flagTag(t.flags.hsr)}</td>
         <td style="background:${flagBg(t.flags.sprint)}">${fmt(t.sprint)} m${flagTag(t.flags.sprint)}</td>
         <td style="background:${flagBg(t.flags.accelDecel)}">${fmt(t.accelDecel)}${flagTag(t.flags.accelDecel)}</td>
         <td>${t.maxVel!=null?fmt(t.maxVel)+' km/h':'—'}</td>
-        <td>${t.pctBest!=null?fmt(t.pctBest)+'%':'—'}</td></tr>`;
+        <td>${pctBestDisplay}</td></tr>`;
     }).join('')}
     </tbody></table>
-    <div class="chart-note"><span>▪ Each column's top/bottom 10% is flagged independently — a player can be a distance outlier without being an HSR outlier, and vice versa.</span></div>`;
+    <div class="chart-note"><span>▪ Each column's top/bottom 10% is flagged independently. Status: Full = within normal session duration, Partial = meaningfully shorter, Did Not Train = no data recorded. ⚠︎ next to %MAX means fewer than 3 max-velocity efforts have been recorded for that player yet — treat the figure as provisional.</span></div>`;
 
   return html;
 }
@@ -2537,21 +2586,22 @@ function buildWeeklyReportHtml(endDateStr, customTitle){
 
   const md = matchDemandReference(players);
   const target = SETTINGS.weeklyTargetMultiplier;
-  let rows = players.filter(a=>a.trainingGps&&a.trainingGps.length).map(a=>({ id:a.id, name:a.name, ...weeklyLoad(a, endDateStr), pctBest: null }));
+  let rows = players.filter(a=>a.trainingGps&&a.trainingGps.length).map(a=>({ id:a.id, name:a.name, ...weeklyLoad(a, endDateStr), pctBest: null, velConfidence: maxVelConfidence(a) }));
   rows.forEach(r=>{ r.pctBest = maxVelPctOfBest(athleteMap[r.id], r.maxVel); });
   rows = flagOutliersMulti(rows, ['distance','hsr','sprint','accelDecel']);
   html += `<div class="rpt-section-title">Player Weekly Accumulated Load</div>
     <table class="rpt-table"><thead><tr><th>Player</th><th>Sessions</th><th>Distance</th><th>HSR</th><th>Sprint Dist</th><th>Accel/Decel</th><th>%MAX (peak)</th></tr></thead><tbody>
     ${rows.sort((a,b)=>b.distance-a.distance).map(r=>{
+      const pctBestDisplay = r.pctBest!=null ? `${fmt(r.pctBest)}%${r.velConfidence==='low'?' <span title="Based on very few recorded max-velocity efforts — treat with caution.">⚠︎</span>':''}` : '—';
       return `<tr><td class="lbl">${r.name}</td><td>${r.sessionCount}</td>
         <td style="background:${flagBg(r.flags.distance)}">${fmt(r.distance)} m${flagTag(r.flags.distance)}</td>
         <td style="background:${flagBg(r.flags.hsr)}">${fmt(r.hsr)} m${flagTag(r.flags.hsr)}</td>
         <td style="background:${flagBg(r.flags.sprint)}">${fmt(r.sprint)} m${flagTag(r.flags.sprint)}</td>
         <td style="background:${flagBg(r.flags.accelDecel)}">${fmt(r.accelDecel)}${flagTag(r.flags.accelDecel)}</td>
-        <td>${r.pctBest!=null?fmt(r.pctBest)+'%':'—'}</td></tr>`;
+        <td>${pctBestDisplay}</td></tr>`;
     }).join('')}
     </tbody></table>
-    <div class="chart-note"><span>▪ %MAX (peak) = this player's highest max velocity recorded this week, as a % of their own all-time best.</span></div>`;
+    <div class="chart-note"><span>▪ %MAX (peak) = this player's highest max velocity recorded this week, as a % of their own all-time best. ⚠︎ = fewer than 3 max-velocity efforts recorded so far — treat as provisional.</span></div>`;
 
   html += `<div class="rpt-section-title">Player % Weekly Targets ${target!=null?`<span style="font-weight:400;font-size:11px;color:var(--text-muted);">(target = ${target}× avg match demand)</span>`:''}</div>
     <table class="rpt-table"><thead><tr><th>Player</th><th>Distance %</th><th>HSR %</th><th>Accel/Decel %</th></tr></thead><tbody>
