@@ -1327,7 +1327,9 @@ function densityCloud(pointsPx, w, h, bandwidth){
 // here.
 const DEFAULT_ATHLETES_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRks76KA_H05de2gPv3Ni-OxogWovkyrjwWjAuzh0UYaIt-0zGRPHMhkssFX8dw3kImnMDZ5-T7ZQak/pub?gid=0&single=true&output=csv';
 const DEFAULT_RESULTS_URL  = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRks76KA_H05de2gPv3Ni-OxogWovkyrjwWjAuzh0UYaIt-0zGRPHMhkssFX8dw3kImnMDZ5-T7ZQak/pub?gid=1486780869&single=true&output=csv';
-let CONFIG = { athletesUrl: DEFAULT_ATHLETES_URL, resultsUrl: DEFAULT_RESULTS_URL, trainingGpsUrl:'', gameGpsUrl:'' };
+const DEFAULT_TRAINING_GPS_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRks76KA_H05de2gPv3Ni-OxogWovkyrjwWjAuzh0UYaIt-0zGRPHMhkssFX8dw3kImnMDZ5-T7ZQak/pub?gid=92862242&single=true&output=csv';
+const DEFAULT_GAME_GPS_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRks76KA_H05de2gPv3Ni-OxogWovkyrjwWjAuzh0UYaIt-0zGRPHMhkssFX8dw3kImnMDZ5-T7ZQak/pub?gid=1403564128&single=true&output=csv';
+let CONFIG = { athletesUrl: DEFAULT_ATHLETES_URL, resultsUrl: DEFAULT_RESULTS_URL, trainingGpsUrl: DEFAULT_TRAINING_GPS_URL, gameGpsUrl: DEFAULT_GAME_GPS_URL };
 let SETTINGS = { asymFlag: 10, stsThreshold: null, weeklyTargetMultiplier: 2.5 };
 let athleteMap={}, nameIndex={}, selectedId=null, searchQ='', genderFilterVal='all', mode='individual';
 let refFrame = { trends:'league', scatter:'league', radar:'league', heatmap:'league' };
@@ -1367,6 +1369,8 @@ async function loadPersisted(){
       if (p.CONFIG) CONFIG = p.CONFIG;
       if (!CONFIG.athletesUrl) CONFIG.athletesUrl = DEFAULT_ATHLETES_URL;
       if (!CONFIG.resultsUrl) CONFIG.resultsUrl = DEFAULT_RESULTS_URL;
+      if (!CONFIG.trainingGpsUrl) CONFIG.trainingGpsUrl = DEFAULT_TRAINING_GPS_URL;
+      if (!CONFIG.gameGpsUrl) CONFIG.gameGpsUrl = DEFAULT_GAME_GPS_URL;
       if (p.NORMS) NORMS = p.NORMS;
       if (p.SETTINGS) SETTINGS = Object.assign(SETTINGS, p.SETTINGS);
     }
