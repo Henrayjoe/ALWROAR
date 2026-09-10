@@ -393,6 +393,7 @@
         <button data-rm="week" onclick="setReportMode('week')">Week</button>
       </div>
       <select id="reportDate" class="axis-select"></select>
+      <input id="reportTitle" type="text" class="axis-select" style="flex:1;min-width:180px;" placeholder="Optional custom title (e.g. 'Week 3 Pre-Season')" oninput="renderReportContent()">
       <button class="btn" onclick="printReport()">🖨 Print / Save PDF</button>
     </div>
     <div id="reportContent"></div>
@@ -699,6 +700,8 @@ function mapSonraTrainingRow(row){
     hsr_distance_m: row.highSpeedRunningAbs, sprint_distance_m: row.sprintDistance,
     accel_decel_count: (pf(row.accelerationsRel)||0) + (pf(row.decelerationsRel)||0),
     max_velocity_kmh: row.maxSpeed,
+    avg_heart_rate: row.avgHeartrate, max_heart_rate: row.maxHeartrate,
+    pct_time_red_zone: row.percentTimeInRedZoneRel,
   };
 }
 // Rows safe to SUM for totals/load calculations: if a whole-session row
@@ -733,6 +736,7 @@ function mergeTrainingGpsFromSheet(rows){
       duration_min: pf(r.duration_min), total_distance_m: pf(r.total_distance_m),
       hsr_distance_m: pf(r.hsr_distance_m), sprint_distance_m: pf(r.sprint_distance_m),
       accel_decel_count: pf(r.accel_decel_count), max_velocity_kmh: pf(r.max_velocity_kmh),
+      avg_heart_rate: pf(r.avg_heart_rate), max_heart_rate: pf(r.max_heart_rate), pct_time_red_zone: pf(r.pct_time_red_zone),
     };
     const i = a.trainingGps.findIndex(e=>trainingGpsKey(e)===rowKey);
     if (i>=0){ a.trainingGps[i] = entry; updated++; } else { a.trainingGps.push(entry); added++; }
@@ -1405,6 +1409,7 @@ const DEFAULT_TRAINING_GPS_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX
 const DEFAULT_GAME_GPS_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRks76KA_H05de2gPv3Ni-OxogWovkyrjwWjAuzh0UYaIt-0zGRPHMhkssFX8dw3kImnMDZ5-T7ZQak/pub?gid=1403564128&single=true&output=csv';
 let CONFIG = { athletesUrl: DEFAULT_ATHLETES_URL, resultsUrl: DEFAULT_RESULTS_URL, trainingGpsUrl: DEFAULT_TRAINING_GPS_URL, gameGpsUrl: DEFAULT_GAME_GPS_URL };
 let SETTINGS = { asymFlag: 10, stsThreshold: null, weeklyTargetMultiplier: 2.5 };
+let SESSION_TYPES = {}; // keyed by `${date}|${session_label}` -> 'principle'|'conditioning'|'tactical-2'|'tactical-1'
 let athleteMap={}, nameIndex={}, selectedId=null, searchQ='', genderFilterVal='all', mode='individual';
 let refFrame = { trends:'league', scatter:'league', radar:'league', heatmap:'league' };
 let squadCollapsed = new Set();
@@ -1424,7 +1429,7 @@ let saveTimer=null, dataSaveTimer=null;
 function persist(){
   clearTimeout(saveTimer);
   saveTimer = setTimeout(async ()=>{
-    try{ await window.storage.set('roar-config', JSON.stringify({CONFIG,NORMS,SETTINGS}), false); }
+    try{ await window.storage.set('roar-config', JSON.stringify({CONFIG,NORMS,SETTINGS,SESSION_TYPES}), false); }
     catch(e){ console.error('save failed', e); }
   }, 200);
 }
@@ -1447,6 +1452,7 @@ async function loadPersisted(){
       if (!CONFIG.gameGpsUrl) CONFIG.gameGpsUrl = DEFAULT_GAME_GPS_URL;
       if (p.NORMS) NORMS = p.NORMS;
       if (p.SETTINGS) SETTINGS = Object.assign(SETTINGS, p.SETTINGS);
+      if (p.SESSION_TYPES) SESSION_TYPES = p.SESSION_TYPES;
     }
   }catch(e){ /* nothing saved yet */ }
   try{
@@ -2264,6 +2270,36 @@ function overallStatusBadge(a, d){
 // Match-demand reference: average per-match output across the squad's
 // actual Game GPS data, used as the "100%" benchmark for training targets
 // and drill intensity, same idea as Green Gully's "% match demands" flag.
+// Johno's per-session-type physical targets, checked against the squad's
+// own match-demand reference. Each rule only evaluates when its underlying
+// data exists (e.g. Red Zone needs HR data, match-demand checks need at
+// least one Game GPS entry) -- a missing input shows as null, never a
+// false pass.
+const SESSION_TYPE_INFO = {
+  principle:    { label:'Principle', rules:['accelDecel50','distance50Under'] },
+  conditioning: { label:'Conditioning', rules:['redZone60','accelDecel100'] },
+  'tactical-2': { label:'Tactical (-2 MD)', rules:['hsr100','sprint100'] },
+  'tactical-1': { label:'Tactical (-1)', rules:['accelDecel50','distance50Under'] },
+};
+function evaluateSessionTargets(sessionType, teamAvg, md){
+  const info = SESSION_TYPE_INFO[sessionType];
+  if (!info) return null;
+  const accelDecelPct = md.avgAccelDecel ? (teamAvg.accelDecel/md.avgAccelDecel)*100 : null;
+  const distancePct = md.avgDistance ? (teamAvg.distance/md.avgDistance)*100 : null;
+  const hsrPct = md.avgHsr ? (teamAvg.hsr/md.avgHsr)*100 : null;
+  const sprintPct = md.avgSprint ? (teamAvg.sprint/md.avgSprint)*100 : null;
+  const redZonePct = teamAvg.redZone;
+  const checks = [];
+  info.rules.forEach(rule=>{
+    if (rule==='accelDecel50') checks.push({ label:'Accel/Decel ≥50% match demand', value:accelDecelPct, target:50, pass: accelDecelPct!=null && accelDecelPct>=50, unit:'%' });
+    if (rule==='distance50Under') checks.push({ label:'Total Distance ≤50% match average', value:distancePct, target:50, pass: distancePct!=null && distancePct<=50, unit:'%', direction:'under' });
+    if (rule==='redZone60') checks.push({ label:'Time in Red Zone (>85% max HR) ≥60%', value:redZonePct, target:60, pass: redZonePct!=null && redZonePct>=60, unit:'%' });
+    if (rule==='accelDecel100') checks.push({ label:'Accel/Decel ≥100% match demand', value:accelDecelPct, target:100, pass: accelDecelPct!=null && accelDecelPct>=100, unit:'%' });
+    if (rule==='hsr100') checks.push({ label:'HSR ≥100% match demand', value:hsrPct, target:100, pass: hsrPct!=null && hsrPct>=100, unit:'%' });
+    if (rule==='sprint100') checks.push({ label:'Sprint Distance ≥100% match demand', value:sprintPct, target:100, pass: sprintPct!=null && sprintPct>=100, unit:'%' });
+  });
+  return { label:info.label, checks, allPass: checks.every(c=>c.pass) };
+}
 function matchDemandReference(players){
   const dists=[], hsrs=[], sprints=[], durations=[], accelDecels=[];
   players.forEach(a=>{
@@ -2330,12 +2366,17 @@ function daySquadBreakdown(players, dateStr){
     // Player totals: use gpsLoadRows so a whole-session row (if present)
     // is used alone rather than summed on top of its own constituent drills.
     const safeToday = gpsLoadRows(rowsToday);
-    const t = { id:a.id, name:a.name, duration:0, distance:0, hsr:0, sprint:0, accelDecel:0, maxVel:null };
+    const t = { id:a.id, name:a.name, duration:0, distance:0, hsr:0, sprint:0, accelDecel:0, maxVel:null, redZoneWeighted:0, redZoneDur:0 };
     safeToday.forEach(e=>{
       t.duration += e.duration_min||0; t.distance += e.total_distance_m||0;
       t.hsr += e.hsr_distance_m||0; t.sprint += e.sprint_distance_m||0; t.accelDecel += e.accel_decel_count||0;
       if (e.max_velocity_kmh!=null) t.maxVel = Math.max(t.maxVel||0, e.max_velocity_kmh);
+      // Red Zone % is a percentage, not summable across drills -- weight
+      // it by each entry's duration so a short high-intensity drill
+      // doesn't get averaged the same as a long low-intensity one.
+      if (e.pct_time_red_zone!=null && e.duration_min){ t.redZoneWeighted += e.pct_time_red_zone*e.duration_min; t.redZoneDur += e.duration_min; }
     });
+    t.redZone = t.redZoneDur ? t.redZoneWeighted/t.redZoneDur : null;
     playerTotals.push(t);
     // Drill breakdown: always the real named drills only, never the
     // whole-session row itself (that would show as a fake pseudo-drill).
@@ -2367,7 +2408,7 @@ function trainingSessionDates(players){
   return [...dates].sort();
 }
 function pctDiff(today, ref){ return (ref) ? ((today-ref)/ref)*100 : null; }
-function buildDailyReportHtml(dateStr){
+function buildDailyReportHtml(dateStr, customTitle){
   const players = Object.values(athleteMap).filter(a=>genderFilterVal==='all'||a.gender===genderFilterVal);
   const { playerTotals, drillTotals } = daySquadBreakdown(players, dateStr);
   if (!playerTotals.length) return `<div class="hint" style="padding:20px 4px;">No training GPS data for ${dateStr}.</div>`;
@@ -2377,15 +2418,35 @@ function buildDailyReportHtml(dateStr){
     return row ? row.session_label : '';
   }).filter(Boolean))];
   const primaryLabel = labelsUsed[0] || '';
-  const teamTotals = playerTotals.reduce((acc,t)=>({ duration:acc.duration+t.duration, distance:acc.distance+t.distance, hsr:acc.hsr+t.hsr, accelDecel:acc.accelDecel+t.accelDecel }), {duration:0,distance:0,hsr:0,accelDecel:0});
+  const teamTotals = playerTotals.reduce((acc,t)=>({ duration:acc.duration+t.duration, distance:acc.distance+t.distance, hsr:acc.hsr+t.hsr, sprint:acc.sprint+t.sprint, accelDecel:acc.accelDecel+t.accelDecel }), {duration:0,distance:0,hsr:0,sprint:0,accelDecel:0});
   const avgN = playerTotals.length;
-  const teamAvg = { duration:teamTotals.duration/avgN, distance:teamTotals.distance/avgN, hsr:teamTotals.hsr/avgN, accelDecel:teamTotals.accelDecel/avgN };
+  const redZoneVals = playerTotals.filter(t=>t.redZone!=null);
+  const teamAvg = { duration:teamTotals.duration/avgN, distance:teamTotals.distance/avgN, hsr:teamTotals.hsr/avgN, sprint:teamTotals.sprint/avgN, accelDecel:teamTotals.accelDecel/avgN, redZone: redZoneVals.length ? redZoneVals.reduce((s,t)=>s+t.redZone,0)/redZoneVals.length : null };
   const ref = primaryLabel ? findReferenceSession(athleteMap[playerTotals[0].id], dateStr, primaryLabel) : null;
   const md = matchDemandReference(players);
   const matchDistPerMin = (md.avgDistance && md.avgDuration) ? md.avgDistance/md.avgDuration : null;
   const matchAccelDecelPerMin = (md.avgAccelDecel && md.avgDuration) ? md.avgAccelDecel/md.avgDuration : null;
 
-  let html = `<div class="rpt-header"><div><div class="rpt-title">Team Training Report</div><div class="rpt-sub">${dateStr}${primaryLabel?' · '+primaryLabel:''}</div></div></div>`;
+  let html = `<div class="rpt-header"><div><div class="rpt-title">${customTitle || 'Team Training Report'}</div><div class="rpt-sub">${dateStr}${primaryLabel?' · '+primaryLabel:''}</div></div></div>`;
+
+  // Session type tagging + target breakdown
+  const typeKey = dateStr+'|'+primaryLabel;
+  const currentType = SESSION_TYPES[typeKey] || '';
+  html += `<div class="no-print" style="margin-bottom:14px;">
+    <label style="font-size:11px;font-weight:700;color:var(--text-muted);margin-right:8px;">Session Type</label>
+    <select class="axis-select" onchange="setSessionType('${typeKey}', this.value)">
+      <option value="" ${!currentType?'selected':''}>— Not tagged —</option>
+      ${Object.keys(SESSION_TYPE_INFO).map(k=>`<option value="${k}" ${currentType===k?'selected':''}>${SESSION_TYPE_INFO[k].label}</option>`).join('')}
+    </select>
+  </div>`;
+  const evaluation = currentType ? evaluateSessionTargets(currentType, teamAvg, md) : null;
+  if (evaluation){
+    html += `<div class="rpt-section-title">Target Achievement — ${evaluation.label}</div>
+      <table class="rpt-table"><thead><tr><th>Check</th><th>Target</th><th>Actual</th><th>Result</th></tr></thead><tbody>
+      ${evaluation.checks.map(c=>`<tr><td class="lbl">${c.label}</td><td>${c.direction==='under'?'≤':'≥'}${c.target}%</td><td>${c.value!=null?fmt(c.value)+'%':'No data yet'}</td>
+        <td style="font-weight:700;color:${c.value==null?'var(--text-muted)':c.pass?'#2f8f5b':'#c8483d'}">${c.value==null?'—':c.pass?'✓ Met':'✗ Missed'}</td></tr>`).join('')}
+      </tbody></table>`;
+  }
 
   html += `<div class="rpt-section-title">Session Overview</div>
     <table class="rpt-table"><thead><tr><th></th><th>Duration</th><th>Distance</th><th>HSR</th><th>Accel/Decel</th></tr></thead><tbody>
@@ -2431,7 +2492,7 @@ function buildDailyReportHtml(dateStr){
 
   return html;
 }
-function buildWeeklyReportHtml(endDateStr){
+function buildWeeklyReportHtml(endDateStr, customTitle){
   const players = Object.values(athleteMap).filter(a=>genderFilterVal==='all'||a.gender===genderFilterVal);
   const asOf = new Date(endDateStr);
   const weekDates = [];
@@ -2439,7 +2500,7 @@ function buildWeeklyReportHtml(endDateStr){
   const allDates = trainingSessionDates(players).filter(d=>weekDates.includes(d));
   if (!allDates.length) return `<div class="hint" style="padding:20px 4px;">No training GPS data in the 7 days ending ${endDateStr}.</div>`;
 
-  let html = `<div class="rpt-header"><div><div class="rpt-title">Weekly Training Report</div><div class="rpt-sub">${weekDates[0]} to ${endDateStr}</div></div></div>`;
+  let html = `<div class="rpt-header"><div><div class="rpt-title">${customTitle || 'Weekly Training Report'}</div><div class="rpt-sub">${weekDates[0]} to ${endDateStr}</div></div></div>`;
 
   const sessionSums = allDates.map(dt=>{
     const { playerTotals } = daySquadBreakdown(players, dt);
@@ -2495,6 +2556,7 @@ function openReportModal(){
   sel.innerHTML = dates.map(d=>`<option value="${d}">${d}</option>`).join('');
   if (dates.length) sel.value = dates[dates.length-1];
   sel.onchange = renderReportContent;
+  document.getElementById('reportTitle').value = ''; // avoid an old title accidentally carrying onto a different day/week
   document.getElementById('overlayReport').classList.add('show');
   renderReportContent();
 }
@@ -2503,11 +2565,17 @@ function setReportMode(m){
   document.querySelectorAll('#reportModeToggle button').forEach(b=>b.classList.toggle('active', b.dataset.rm===m));
   renderReportContent();
 }
+function setSessionType(typeKey, value){
+  if (value) SESSION_TYPES[typeKey] = value; else delete SESSION_TYPES[typeKey];
+  persist();
+  renderReportContent();
+}
 function renderReportContent(){
   const dateStr = document.getElementById('reportDate').value;
+  const customTitle = document.getElementById('reportTitle').value.trim();
   const target = document.getElementById('reportContent');
   if (!dateStr){ target.innerHTML = `<div class="hint" style="padding:20px 4px;">No training GPS data yet — nothing to report on.</div>`; return; }
-  target.innerHTML = reportMode==='day' ? buildDailyReportHtml(dateStr) : buildWeeklyReportHtml(dateStr);
+  target.innerHTML = reportMode==='day' ? buildDailyReportHtml(dateStr, customTitle) : buildWeeklyReportHtml(dateStr, customTitle);
 }
 function printReport(){ window.print(); }
 function drawTeamGpsTraining(){
