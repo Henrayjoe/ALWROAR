@@ -269,11 +269,15 @@
   .rpt-table th:first-child, .rpt-table td:first-child { text-align:left; }
   .rpt-table td { text-align:right; padding:6px 8px; border-bottom:1px solid #f1f2f4; }
   @media print {
+    @page { size: A4 landscape; margin: 12mm; }
     body * { visibility:hidden; }
-    #overlayReport, #overlayReport * { visibility:visible; }
+    #overlayReport, #overlayReport * { visibility:visible; -webkit-print-color-adjust:exact; print-color-adjust:exact; color-adjust:exact; }
     #overlayReport { position:absolute; inset:0; background:#fff; }
     #overlayReport .modal { box-shadow:none; max-width:100%; margin:0; }
     .no-print { display:none !important; }
+    .rpt-table thead { display:table-header-group; }
+    .rpt-table tr { page-break-inside:avoid; break-inside:avoid; }
+    .rpt-section-title { page-break-after:avoid; break-after:avoid; }
   }
 </style>
 </head>
