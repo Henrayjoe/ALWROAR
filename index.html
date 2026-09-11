@@ -707,6 +707,7 @@ function mapSonraTrainingRow(row){
     max_velocity_kmh: row.maxSpeed,
     avg_heart_rate: row.avgHeartrate, max_heart_rate: row.maxHeartrate,
     pct_time_red_zone: row.percentTimeInRedZoneRel,
+    participation: row.Participation || '',
   };
 }
 // Rows safe to SUM for totals/load calculations: if a whole-session row
@@ -742,6 +743,7 @@ function mergeTrainingGpsFromSheet(rows){
       hsr_distance_m: pf(r.hsr_distance_m), sprint_distance_m: pf(r.sprint_distance_m),
       accel_decel_count: pf(r.accel_decel_count), max_velocity_kmh: pf(r.max_velocity_kmh),
       avg_heart_rate: pf(r.avg_heart_rate), max_heart_rate: pf(r.max_heart_rate), pct_time_red_zone: pf(r.pct_time_red_zone),
+      participation: r.participation || '',
     };
     const i = a.trainingGps.findIndex(e=>trainingGpsKey(e)===rowKey);
     if (i>=0){ a.trainingGps[i] = entry; updated++; } else { a.trainingGps.push(entry); added++; }
@@ -2384,23 +2386,28 @@ function flagTag(flag){ return flag ? ` <span style="font-size:9px;color:${flag=
 // session overview, drill-by-drill, player-by-player) matching the
 // Team/Player Daily Report examples, plus a weekly-summary alternative.
 // ============================================================
-// Classifies every player in the squad (not just those with GPS data) into
-// full / partial / dnt for a given training date. "Full" duration is taken
-// as the day's max recorded duration; anyone meaningfully short of that is
-// "partial"; anyone with zero rows for the date is "did not train".
+// Reads each player's actual participation status directly from the GPS
+// sheet's Participation column (Sonra native field: Full / Rehab / Goal
+// Keeper / etc, whatever the club records) rather than guessing from
+// session duration -- duration varies for all sorts of legitimate reasons
+// (goalkeepers, individual extras, rehab work) that a length-based guess
+// can't distinguish. The one thing still inferred here is unavoidable:
+// zero rows for a date means no data exists to read a status from, so
+// that's shown as "Did Not Train" rather than blank.
 function participationStatus(players, dateStr, playerTotals){
-  const durations = playerTotals.map(t=>t.duration).filter(d=>d>0);
-  const fullDuration = durations.length ? Math.max(...durations) : null;
   const byId = {}; playerTotals.forEach(t=>byId[t.id]=t);
   return players.map(a=>{
     const t = byId[a.id];
-    if (!t || !t.duration) return { id:a.id, name:a.name, status:'dnt', duration:0 };
-    const status = (fullDuration && t.duration < fullDuration*0.8) ? 'partial' : 'full';
-    return { id:a.id, name:a.name, status, duration:t.duration };
+    if (!t || !t.duration) return { id:a.id, name:a.name, label:'Did Not Train', duration:0 };
+    return { id:a.id, name:a.name, label: t.participation || '—', duration:t.duration };
   });
 }
-const PARTICIPATION_LABEL = { full:'Full', partial:'Partial', dnt:'Did Not Train' };
-const PARTICIPATION_COLOR = { full:'#2f8f5b', partial:'#d97f3d', dnt:'#c8483d' };
+function participationColor(label){
+  const l = (label||'').toLowerCase();
+  if (l==='full') return '#2f8f5b';
+  if (l==='did not train' || l==='—' || l==='') return '#c8483d';
+  return '#d97f3d'; // any other recorded value (Rehab, Goal Keeper, Partial, etc.)
+}
 // %MAX (max velocity vs personal best) is only meaningful once a player
 // has had several genuine sprint-eliciting efforts recorded -- with very
 // few, "personal best" is really just "highest of a small sample" and the
@@ -2422,11 +2429,12 @@ function daySquadBreakdown(players, dateStr){
     // Player totals: use gpsLoadRows so a whole-session row (if present)
     // is used alone rather than summed on top of its own constituent drills.
     const safeToday = gpsLoadRows(rowsToday);
-    const t = { id:a.id, name:a.name, duration:0, distance:0, hsr:0, sprint:0, accelDecel:0, maxVel:null, redZoneWeighted:0, redZoneDur:0 };
+    const t = { id:a.id, name:a.name, duration:0, distance:0, hsr:0, sprint:0, accelDecel:0, maxVel:null, redZoneWeighted:0, redZoneDur:0, participation:'' };
     safeToday.forEach(e=>{
       t.duration += e.duration_min||0; t.distance += e.total_distance_m||0;
       t.hsr += e.hsr_distance_m||0; t.sprint += e.sprint_distance_m||0; t.accelDecel += e.accel_decel_count||0;
       if (e.max_velocity_kmh!=null) t.maxVel = Math.max(t.maxVel||0, e.max_velocity_kmh);
+      if (!t.participation && e.participation) t.participation = e.participation;
       // Red Zone % is a percentage, not summable across drills -- weight
       // it by each entry's duration so a short high-intensity drill
       // doesn't get averaged the same as a long low-intensity one.
@@ -2436,10 +2444,15 @@ function daySquadBreakdown(players, dateStr){
     playerTotals.push(t);
     // Drill breakdown: always the real named drills only, never the
     // whole-session row itself (that would show as a fake pseudo-drill).
+    // duration is tracked as a sum + count so it can be AVERAGED for
+    // display (how long the drill actually lasted) while the sum itself
+    // is kept for the rate calculations below, where summed-distance ÷
+    // summed-duration already gives the correct per-player rate (the
+    // player-count factor cancels out in that division).
     rowsToday.filter(e=>e.drill_name).forEach(e=>{
       const dn = e.drill_name;
-      if (!drillTotals[dn]) drillTotals[dn] = { duration:0, distance:0, hsr:0, accelDecel:0 };
-      drillTotals[dn].duration += e.duration_min||0; drillTotals[dn].distance += e.total_distance_m||0; drillTotals[dn].hsr += e.hsr_distance_m||0; drillTotals[dn].accelDecel += e.accel_decel_count||0;
+      if (!drillTotals[dn]) drillTotals[dn] = { duration:0, n:0, distance:0, hsr:0, accelDecel:0 };
+      drillTotals[dn].duration += e.duration_min||0; drillTotals[dn].n++; drillTotals[dn].distance += e.total_distance_m||0; drillTotals[dn].hsr += e.hsr_distance_m||0; drillTotals[dn].accelDecel += e.accel_decel_count||0;
     });
   });
   return { playerTotals, drillTotals };
@@ -2518,6 +2531,7 @@ function buildDailyReportHtml(dateStr, customTitle){
     <table class="rpt-table"><thead><tr><th>Drill</th><th>Duration</th><th>Distance</th><th>Accel/Decel</th><th>Dist/min</th><th>HSR/min</th><th>Accel/Decel per min</th><th>% Match Demand (dist)</th><th>% Match Demand (accel/decel)</th></tr></thead><tbody>
     ${drillNames.map(name=>{
       const d = drillTotals[name];
+      const avgDuration = d.n ? d.duration/d.n : null;
       const distPerMin = d.duration ? d.distance/d.duration : null;
       const hsrPerMin = d.duration ? d.hsr/d.duration : null;
       const accelDecelPerMin = d.duration ? d.accelDecel/d.duration : null;
@@ -2525,7 +2539,7 @@ function buildDailyReportHtml(dateStr, customTitle){
       const pctMatchAccelDecel = (matchAccelDecelPerMin && accelDecelPerMin!=null) ? (accelDecelPerMin/matchAccelDecelPerMin)*100 : null;
       const overDist = pctMatchDist!=null && pctMatchDist>100;
       const overAccelDecel = pctMatchAccelDecel!=null && pctMatchAccelDecel>100;
-      return `<tr><td class="lbl">${name}</td><td>${fmt(d.duration)} min</td><td>${fmt(d.distance)} m</td><td>${fmt(d.accelDecel)}</td><td>${fmt(distPerMin)} m/min</td><td>${fmt(hsrPerMin)} m/min</td><td>${fmt(accelDecelPerMin)}/min</td>
+      return `<tr><td class="lbl">${name}</td><td>${fmt(avgDuration)} min</td><td>${fmt(d.distance)} m</td><td>${fmt(d.accelDecel)}</td><td>${fmt(distPerMin)} m/min</td><td>${fmt(hsrPerMin)} m/min</td><td>${fmt(accelDecelPerMin)}/min</td>
         <td style="color:${overDist?'#2f8f5b':'inherit'};font-weight:${overDist?'700':'400'}">${pctMatchDist!=null?fmt(pctMatchDist)+'%':'—'}</td>
         <td style="color:${overAccelDecel?'#2f8f5b':'inherit'};font-weight:${overAccelDecel?'700':'400'}">${pctMatchAccelDecel!=null?fmt(pctMatchAccelDecel)+'%':'—'}</td></tr>`;
     }).join('')}
@@ -2538,7 +2552,7 @@ function buildDailyReportHtml(dateStr, customTitle){
     <table class="rpt-table"><thead><tr><th>Player</th><th>Status</th><th>Duration</th><th>Distance</th><th>HSR</th><th>Sprint Dist</th><th>Accel/Decel</th><th>Max Vel</th><th>%MAX</th></tr></thead><tbody>
     ${statusList.sort((a,b)=>(flaggedById[b.id]?.distance||-1)-(flaggedById[a.id]?.distance||-1)).map(s=>{
       const t = flaggedById[s.id];
-      const statusBadge = `<span style="color:${PARTICIPATION_COLOR[s.status]};font-weight:700;">${PARTICIPATION_LABEL[s.status]}</span>`;
+      const statusBadge = `<span style="color:${participationColor(s.label)};font-weight:700;">${s.label}</span>`;
       if (!t){
         return `<tr style="color:var(--text-muted);"><td class="lbl">${s.name}</td><td>${statusBadge}</td><td colspan="6">—</td></tr>`;
       }
@@ -2553,7 +2567,7 @@ function buildDailyReportHtml(dateStr, customTitle){
         <td>${pctBestDisplay}</td></tr>`;
     }).join('')}
     </tbody></table>
-    <div class="chart-note"><span>▪ Each column's top/bottom 10% is flagged independently. Status: Full = within normal session duration, Partial = meaningfully shorter, Did Not Train = no data recorded. ⚠︎ next to %MAX means fewer than 3 max-velocity efforts have been recorded for that player yet — treat the figure as provisional.</span></div>`;
+    <div class="chart-note"><span>▪ Each column's top/bottom 10% is flagged independently. Status is read directly from the GPS sheet's Participation column; "Did Not Train" means no data was recorded for that player on this date. ⚠︎ next to %MAX means fewer than 3 max-velocity efforts have been recorded for that player yet — treat the figure as provisional.</span></div>`;
 
   return html;
 }
@@ -2694,14 +2708,15 @@ function drawTeamGpsTraining(){
   if (drillNames.length){
     const matchDistPerMin = (md.avgDistance && md.avgDuration) ? md.avgDistance/md.avgDuration : null;
     html += `<div class="pq-heading" style="margin-top:18px;">Drill-by-Drill vs Match Demand</div>
-      <div class="squad-table-scroll"><table><thead><tr><th>Drill</th><th>Total Duration</th><th>Dist/min</th><th>HSR/min</th><th>% Match Demand (dist/min)</th></tr></thead><tbody>
+      <div class="squad-table-scroll"><table><thead><tr><th>Drill</th><th>Avg Duration</th><th>Dist/min</th><th>HSR/min</th><th>% Match Demand (dist/min)</th></tr></thead><tbody>
       ${drillNames.map(name=>{
         const d = drillMap[name];
+        const avgDuration = d.n ? d.duration/d.n : null;
         const distPerMin = d.duration ? d.distance/d.duration : null;
         const hsrPerMin = d.duration ? d.hsr/d.duration : null;
         const pctMatch = (matchDistPerMin && distPerMin!=null) ? (distPerMin/matchDistPerMin)*100 : null;
         const over = pctMatch!=null && pctMatch>100;
-        return `<tr><td class="lbl">${name}</td><td>${fmt(d.duration)} min</td><td>${fmt(distPerMin)} m/min</td><td>${fmt(hsrPerMin)} m/min</td>
+        return `<tr><td class="lbl">${name}</td><td>${fmt(avgDuration)} min</td><td>${fmt(distPerMin)} m/min</td><td>${fmt(hsrPerMin)} m/min</td>
           <td style="color:${over?'#2f8f5b':'inherit'};font-weight:${over?'700':'400'}">${pctMatch!=null?fmt(pctMatch)+'%':'—'}</td></tr>`;
       }).join('')}
       </tbody></table></div>
@@ -3200,7 +3215,7 @@ function buildPaneSheet(){
     <p class="hint"><b>Results tab:</b> name (matched to Athletes tab), test_date, weight_kg, notes, then one column per metric:</p>
     <p class="hint" style="font-family:monospace;font-size:10.5px;line-height:1.8;">${resultsColumns().join(', ')}</p>
     <p class="hint"><b>Training GPS tab</b> (one row per player per drill, or per whole session if you don't have drill splits):</p>
-    <p class="hint" style="font-family:monospace;font-size:10.5px;line-height:1.8;">date, session_label, player_name, drill_name (blank = whole session), duration_min, total_distance_m, hsr_distance_m, sprint_distance_m, accel_decel_count, max_velocity_kmh</p>
+    <p class="hint" style="font-family:monospace;font-size:10.5px;line-height:1.8;">date, session_label, player_name, drill_name (blank = whole session), duration_min, total_distance_m, hsr_distance_m, sprint_distance_m, accel_decel_count, max_velocity_kmh, participation (Full/Rehab/Goal Keeper/etc — read as-is, never inferred)</p>
     <button class="btn-sm" onclick="exportTrainingGpsTemplateCSV()">⬇ Download blank template (.csv)</button>
     <p class="hint"><b>Game GPS tab</b> (one row per player per match):</p>
     <p class="hint" style="font-family:monospace;font-size:10.5px;line-height:1.8;">date, opponent, round, player_name, minutes_played, total_distance_m, hsr_distance_m, sprint_distance_m, accel_decel_count, max_velocity_kmh, half1_distance_m, half1_hsr_m, half2_distance_m, half2_hsr_m</p>
@@ -3287,11 +3302,11 @@ function todayStamp(){ return new Date().toISOString().slice(0,10); }
 // example row using a real name from the current roster (or a placeholder
 // if the roster is empty yet) so it's immediately clear what goes where.
 function exportTrainingGpsTemplateCSV(){
-  const cols = ['date','session_label','player_name','drill_name','duration_min','total_distance_m','hsr_distance_m','sprint_distance_m','accel_decel_count','max_velocity_kmh'];
+  const cols = ['date','session_label','player_name','drill_name','duration_min','total_distance_m','hsr_distance_m','sprint_distance_m','accel_decel_count','max_velocity_kmh','participation'];
   const sampleName = Object.values(athleteMap)[0]?.name || 'Player Name';
   const rows = [cols.join(','),
-    [todayStamp(),'MD-2',csvEscape(sampleName),'Warm Up','9.75','753','42','5','6','24.9'].join(','),
-    [todayStamp(),'MD-2',csvEscape(sampleName),'','56.33','5074','142','44','55','29.9'].join(',')];
+    [todayStamp(),'MD-2',csvEscape(sampleName),'Warm Up','9.75','753','42','5','6','24.9','Full'].join(','),
+    [todayStamp(),'MD-2',csvEscape(sampleName),'','56.33','5074','142','44','55','29.9','Full'].join(',')];
   downloadFile('training-gps-template.csv', rows.join('\n'), 'text/csv');
 }
 function exportGameGpsTemplateCSV(){
