@@ -2420,6 +2420,12 @@ function maxVelConfidence(a){
   const n = maxVelSampleSize(a);
   return n<3 ? 'low' : n<6 ? 'medium' : 'high';
 }
+function median(arr){
+  const vals = arr.filter(v=>v!=null).sort((a,b)=>a-b);
+  if (!vals.length) return null;
+  const mid = Math.floor(vals.length/2);
+  return vals.length%2 ? vals[mid] : (vals[mid-1]+vals[mid])/2;
+}
 function daySquadBreakdown(players, dateStr){
   const playerTotals = [];
   const drillTotals = {};
@@ -2451,8 +2457,9 @@ function daySquadBreakdown(players, dateStr){
     // player-count factor cancels out in that division).
     rowsToday.filter(e=>e.drill_name).forEach(e=>{
       const dn = e.drill_name;
-      if (!drillTotals[dn]) drillTotals[dn] = { duration:0, n:0, distance:0, hsr:0, accelDecel:0 };
+      if (!drillTotals[dn]) drillTotals[dn] = { duration:0, n:0, distance:0, hsr:0, accelDecel:0, distances:[], accelDecels:[] };
       drillTotals[dn].duration += e.duration_min||0; drillTotals[dn].n++; drillTotals[dn].distance += e.total_distance_m||0; drillTotals[dn].hsr += e.hsr_distance_m||0; drillTotals[dn].accelDecel += e.accel_decel_count||0;
+      drillTotals[dn].distances.push(e.total_distance_m); drillTotals[dn].accelDecels.push(e.accel_decel_count);
     });
   });
   return { playerTotals, drillTotals };
@@ -2528,10 +2535,12 @@ function buildDailyReportHtml(dateStr, customTitle){
 
   const drillNames = Object.keys(drillTotals);
   html += `<div class="rpt-section-title">Drill-by-Drill</div>
-    <table class="rpt-table"><thead><tr><th>Drill</th><th>Duration</th><th>Distance</th><th>Accel/Decel</th><th>Dist/min</th><th>HSR/min</th><th>Accel/Decel per min</th><th>% Match Demand (dist)</th><th>% Match Demand (accel/decel)</th></tr></thead><tbody>
+    <table class="rpt-table"><thead><tr><th>Drill</th><th>Duration</th><th>Median Distance</th><th>Median Accel/Decel</th><th>Dist/min</th><th>HSR/min</th><th>Accel/Decel per min</th><th>% Match Demand (dist)</th><th>% Match Demand (accel/decel)</th></tr></thead><tbody>
     ${drillNames.map(name=>{
       const d = drillTotals[name];
       const avgDuration = d.n ? d.duration/d.n : null;
+      const medDistance = median(d.distances);
+      const medAccelDecel = median(d.accelDecels);
       const distPerMin = d.duration ? d.distance/d.duration : null;
       const hsrPerMin = d.duration ? d.hsr/d.duration : null;
       const accelDecelPerMin = d.duration ? d.accelDecel/d.duration : null;
@@ -2539,7 +2548,7 @@ function buildDailyReportHtml(dateStr, customTitle){
       const pctMatchAccelDecel = (matchAccelDecelPerMin && accelDecelPerMin!=null) ? (accelDecelPerMin/matchAccelDecelPerMin)*100 : null;
       const overDist = pctMatchDist!=null && pctMatchDist>100;
       const overAccelDecel = pctMatchAccelDecel!=null && pctMatchAccelDecel>100;
-      return `<tr><td class="lbl">${name}</td><td>${fmt(avgDuration)} min</td><td>${fmt(d.distance)} m</td><td>${fmt(d.accelDecel)}</td><td>${fmt(distPerMin)} m/min</td><td>${fmt(hsrPerMin)} m/min</td><td>${fmt(accelDecelPerMin)}/min</td>
+      return `<tr><td class="lbl">${name}</td><td>${fmt(avgDuration)} min</td><td>${fmt(medDistance)} m</td><td>${fmt(medAccelDecel)}</td><td>${fmt(distPerMin)} m/min</td><td>${fmt(hsrPerMin)} m/min</td><td>${fmt(accelDecelPerMin)}/min</td>
         <td style="color:${overDist?'#2f8f5b':'inherit'};font-weight:${overDist?'700':'400'}">${pctMatchDist!=null?fmt(pctMatchDist)+'%':'—'}</td>
         <td style="color:${overAccelDecel?'#2f8f5b':'inherit'};font-weight:${overAccelDecel?'700':'400'}">${pctMatchAccelDecel!=null?fmt(pctMatchAccelDecel)+'%':'—'}</td></tr>`;
     }).join('')}
