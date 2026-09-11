@@ -270,19 +270,20 @@
   .rpt-table td { text-align:right; padding:6px 8px; border-bottom:1px solid #f1f2f4; }
   .rpt-print-hint { font-size:11px; color:var(--accent); font-weight:600; display:flex; align-items:center; gap:5px; }
   @media print {
-    @page { size: A4 landscape; margin: 10mm; }
+    @page { size: A4 portrait; margin: 12mm; }
     body * { visibility:hidden; }
     #overlayReport, #overlayReport * { visibility:visible; -webkit-print-color-adjust:exact; print-color-adjust:exact; color-adjust:exact; }
-    #overlayReport { position:absolute; inset:0; background:#fff; }
-    #overlayReport .modal { box-shadow:none; max-width:100%; margin:0; }
+    #overlayReport { position:static; overflow:visible; background:#fff; padding:0; display:block; }
+    #overlayReport .modal { box-shadow:none; max-width:100%; width:100%; margin:0; padding:0; overflow:visible; }
     .no-print { display:none !important; }
-    .rpt-table { font-size:9.5px; }
-    .rpt-table th { font-size:8px; padding:3px 4px; white-space:normal; }
-    .rpt-table td { padding:3px 4px; }
-    .rpt-table th:first-child, .rpt-table td:first-child { width:15%; }
+    .rpt-table { font-size:10px; }
+    .rpt-table th { font-size:8.5px; padding:4px 5px; white-space:normal; }
+    .rpt-table td { padding:4px 5px; }
+    .rpt-table th:first-child, .rpt-table td:first-child { width:16%; }
     .rpt-section-title { font-size:11px; margin:12px 0 5px; page-break-after:avoid; break-after:avoid; }
     .rpt-table thead { display:table-header-group; }
     .rpt-table tr { page-break-inside:avoid; break-inside:avoid; }
+    canvas { max-width:100% !important; page-break-inside:avoid; break-inside:avoid; }
   }
 </style>
 </head>
@@ -410,7 +411,7 @@
       <input id="reportTitle" type="text" class="axis-select" style="flex:1;min-width:180px;" placeholder="Optional custom title (e.g. 'Week 3 Pre-Season')" oninput="renderReportContent()">
       <button class="btn" onclick="printReport()">🖨 Print / Save PDF</button>
     </div>
-    <div class="rpt-print-hint no-print" style="margin:-8px 0 14px;">⚠ In the print dialog, set Orientation to <b>Landscape</b> — some browsers don't apply this automatically, and the tables are built for the wider layout.</div>
+    <div class="rpt-print-hint no-print" style="margin:-8px 0 14px;">ℹ Prints as a normal multi-page document — if your print dialog has a "Pages" or "Headers and footers" option, leave defaults on so page breaks fall correctly.</div>
     <div id="reportContent"></div>
   </div>
 </div>
@@ -828,6 +829,59 @@ function computeACWR(a, asOfDate){
 }
 const ACWR_ZONE_COLOR = { undertrained:'#3d6fb0', 'sweet-spot':'#2f8f5b', caution:'#d97f3d', 'high-risk':'#c8483d' };
 const ACWR_ZONE_LABEL = { undertrained:'Undertrained', 'sweet-spot':'Sweet Spot', caution:'Caution', 'high-risk':'High Risk' };
+// Team-level ACWR: computed on the SQUAD'S aggregate daily load (sum of
+// every player's distance that day), not an average of individual ratios
+// -- averaging ratios gets skewed badly by any one player with a thin
+// data sample, while a team-aggregate load is robust and matches how
+// "team distance per day" already works elsewhere in this dashboard.
+function teamDailyLoads(players){
+  const byDate = {};
+  players.forEach(a=>{
+    gpsLoadRows(a.trainingGps).forEach(e=>{
+      if (e.total_distance_m==null) return;
+      byDate[e.date] = (byDate[e.date]||0) + e.total_distance_m;
+    });
+    (a.gameGps||[]).forEach(g=>{
+      if (g.total_distance_m==null) return;
+      byDate[g.date] = (byDate[g.date]||0) + g.total_distance_m;
+    });
+  });
+  return byDate;
+}
+function teamAcwrTimeSeries(players){
+  const byDate = teamDailyLoads(players);
+  const dates = Object.keys(byDate).sort();
+  if (!dates.length) return [];
+  const first = new Date(dates[0]), last = new Date(dates[dates.length-1]);
+  const series = [];
+  for (let d=new Date(first); d<=last; d.setDate(d.getDate()+1)){
+    const asOfKey = d.toISOString().slice(0,10);
+    let acuteSum=0, chronicSum=0;
+    for (let i=0;i<28;i++){
+      const dd = new Date(d); dd.setDate(dd.getDate()-i);
+      const load = byDate[dd.toISOString().slice(0,10)]||0;
+      chronicSum += load;
+      if (i<7) acuteSum += load;
+    }
+    const acute = acuteSum/7, chronic = chronicSum/28;
+    if (chronic===0) continue;
+    const acwr = acute/chronic;
+    let zone = acwr<0.8?'undertrained':acwr<=1.3?'sweet-spot':acwr<=1.5?'caution':'high-risk';
+    series.push({ date: asOfKey, acwr, zone });
+  }
+  return series;
+}
+function teamSessionLoadSeries(players){
+  const byDate = {};
+  players.forEach(a=>{
+    gpsLoadRows(a.trainingGps).forEach(e=>{
+      if (e.total_distance_m==null) return;
+      if (!byDate[e.date]) byDate[e.date] = { total:0, n:0 };
+      byDate[e.date].total += e.total_distance_m; byDate[e.date].n++;
+    });
+  });
+  return Object.keys(byDate).sort().map(date=>({ date, total: byDate[date].total, avgPerPlayer: byDate[date].total/byDate[date].n, n: byDate[date].n }));
+}
 function bs(v, key, gender){
   const m = metricByKey(key);
   if (!m || m.noNorm || v==null) return null;
@@ -2695,6 +2749,8 @@ function renderReportContent(){
   target.innerHTML = reportMode==='day' ? buildDailyReportHtml(dateStr, customTitle) : buildWeeklyReportHtml(dateStr, customTitle);
 }
 function printReport(){ window.print(); }
+let teamAcwrChartInstance = null;
+let teamSessionLoadChartInstance = null;
 function drawTeamGpsTraining(){
   const el = document.getElementById('teamGpsTrainingBody'); if (!el) return;
   const players = Object.values(athleteMap).filter(a=>genderFilterVal==='all'||a.gender===genderFilterVal);
@@ -2703,7 +2759,13 @@ function drawTeamGpsTraining(){
   const target = SETTINGS.weeklyTargetMultiplier;
 
   let html = `<div class="quad-ctrl-row" style="margin-bottom:14px;"><button class="btn" onclick="openReportModal()">📄 Print Training Report</button></div>`;
-  html += `<div class="pq-heading">Match-Demand Reference</div>`;
+  html += `<div class="pq-heading">Squad Training Load Trend</div>
+    <canvas id="teamAcwrChart" height="80"></canvas>
+    <div class="chart-note"><span>▪ Team ACWR = squad's total daily distance, acute (7-day) vs chronic (28-day) average. Bands: below 0.8 undertrained, 0.8–1.3 sweet spot, 1.3–1.5 caution, above 1.5 high injury risk (Gabbett et al.).</span></div>
+    <div class="pq-heading" style="margin-top:18px;">Session Load by Day</div>
+    <canvas id="teamSessionLoadChart" height="80"></canvas>
+    <div class="chart-note"><span>▪ Bars show total squad distance per training day; the line shows average distance per player who trained that day, so it stays comparable even as squad availability changes.</span></div>`;
+  html += `<div class="pq-heading" style="margin-top:18px;">Match-Demand Reference</div>`;
   if (md.source==='last-season'){
     html += `<div class="hint" style="padding:8px 4px;background:#fff8f0;border-radius:8px;">📋 No current-season match GPS logged yet — showing <b>last season's (2025-26) match-day averages</b> as a placeholder reference. This will switch automatically to your squad's own current-season data the moment a Game GPS row is logged.</div>`;
   }
@@ -2759,6 +2821,32 @@ function drawTeamGpsTraining(){
   }
 
   el.innerHTML = `<div class="fade-redraw">${html}</div>`;
+
+  const acwrSeries = teamAcwrTimeSeries(players);
+  if (acwrSeries.length){
+    const ctx = document.getElementById('teamAcwrChart').getContext('2d');
+    if (teamAcwrChartInstance) teamAcwrChartInstance.destroy();
+    teamAcwrChartInstance = new Chart(ctx, { type:'line', data:{ labels:acwrSeries.map(p=>p.date), datasets:[
+      { label:'Team ACWR', data:acwrSeries.map(p=>p.acwr), borderColor:'#f26522', backgroundColor:'#f26522', tension:0.2, pointRadius:0, borderWidth:2 },
+    ]}, options:{responsive:true, plugins:{legend:{display:false}, annotation:undefined}, scales:{
+      x:{ title:{display:true,text:'Date',font:{size:10}}, ticks:{maxTicksLimit:10} },
+      y:{ title:{display:true,text:'ACWR (7d:28d)',font:{size:10}}, min:0,
+          grid:{ color: gridCtx => { const v=gridCtx.tick.value; return (v>=0.8&&v<=1.3)?'rgba(47,143,91,0.15)':'rgba(0,0,0,0.06)'; } } }
+    }} });
+  }
+  const loadSeries = teamSessionLoadSeries(players);
+  if (loadSeries.length){
+    const ctx2 = document.getElementById('teamSessionLoadChart').getContext('2d');
+    if (teamSessionLoadChartInstance) teamSessionLoadChartInstance.destroy();
+    teamSessionLoadChartInstance = new Chart(ctx2, { data:{ labels:loadSeries.map(p=>p.date), datasets:[
+      { type:'bar', label:'Total Squad Distance (m)', data:loadSeries.map(p=>p.total), backgroundColor:'#fdae6b' },
+      { type:'line', label:'Avg per Player (m)', data:loadSeries.map(p=>p.avgPerPlayer), borderColor:'#3d6fb0', backgroundColor:'#3d6fb0', tension:0.2, pointRadius:0, borderWidth:2, yAxisID:'y2' },
+    ]}, options:{responsive:true, plugins:{legend:{position:'bottom'}}, scales:{
+      x:{ title:{display:true,text:'Date',font:{size:10}}, ticks:{maxTicksLimit:10} },
+      y:{ title:{display:true,text:'Total Squad Distance (m)',font:{size:10}} },
+      y2:{ position:'right', title:{display:true,text:'Avg per Player (m)',font:{size:10}}, grid:{drawOnChartArea:false} }
+    }} });
+  }
 }
 let teamGpsMatchChartInstance = null;
 function drawTeamGpsMatch(){
