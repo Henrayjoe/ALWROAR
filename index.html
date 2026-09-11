@@ -268,16 +268,21 @@
   .rpt-table th { text-align:right; font-size:10px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-muted); padding:6px 8px; border-bottom:1px solid var(--border); }
   .rpt-table th:first-child, .rpt-table td:first-child { text-align:left; }
   .rpt-table td { text-align:right; padding:6px 8px; border-bottom:1px solid #f1f2f4; }
+  .rpt-print-hint { font-size:11px; color:var(--accent); font-weight:600; display:flex; align-items:center; gap:5px; }
   @media print {
-    @page { size: A4 landscape; margin: 12mm; }
+    @page { size: A4 landscape; margin: 10mm; }
     body * { visibility:hidden; }
     #overlayReport, #overlayReport * { visibility:visible; -webkit-print-color-adjust:exact; print-color-adjust:exact; color-adjust:exact; }
     #overlayReport { position:absolute; inset:0; background:#fff; }
     #overlayReport .modal { box-shadow:none; max-width:100%; margin:0; }
     .no-print { display:none !important; }
+    .rpt-table { font-size:9.5px; }
+    .rpt-table th { font-size:8px; padding:3px 4px; white-space:normal; }
+    .rpt-table td { padding:3px 4px; }
+    .rpt-table th:first-child, .rpt-table td:first-child { width:15%; }
+    .rpt-section-title { font-size:11px; margin:12px 0 5px; page-break-after:avoid; break-after:avoid; }
     .rpt-table thead { display:table-header-group; }
     .rpt-table tr { page-break-inside:avoid; break-inside:avoid; }
-    .rpt-section-title { page-break-after:avoid; break-after:avoid; }
   }
 </style>
 </head>
@@ -405,6 +410,7 @@
       <input id="reportTitle" type="text" class="axis-select" style="flex:1;min-width:180px;" placeholder="Optional custom title (e.g. 'Week 3 Pre-Season')" oninput="renderReportContent()">
       <button class="btn" onclick="printReport()">🖨 Print / Save PDF</button>
     </div>
+    <div class="rpt-print-hint no-print" style="margin:-8px 0 14px;">⚠ In the print dialog, set Orientation to <b>Landscape</b> — some browsers don't apply this automatically, and the tables are built for the wider layout.</div>
     <div id="reportContent"></div>
   </div>
 </div>
