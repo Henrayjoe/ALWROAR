@@ -2329,6 +2329,20 @@ function evaluateSessionTargets(sessionType, teamAvg, md){
   });
   return { label:info.label, checks, allPass: checks.every(c=>c.pass) };
 }
+// Seeded from Brisbane Roar's 2025-26 ALW end-of-season report -- the
+// explicit "MD Mean ... inc. WU" table (Total Distance 10,323.95m; HSM
+// 410.02m + VHSM 108.14m = 518.16m combined, matching our Z5+Z6 HSR
+// definition; Accelerations 50.12 + Decelerations 63.59 = 113.71 combined).
+// Used ONLY as a placeholder until real current-season Game GPS data
+// exists, so match-demand checks aren't blind before the first match is
+// logged. sprint_distance and avgDuration are deliberately left unseeded --
+// the report doesn't give a clean equivalent figure for either in our
+// units, and guessing would be worse than honestly showing "no data yet"
+// for whatever depends on them.
+const LAST_SEASON_MATCH_DEMAND_SEED = {
+  avgDistance: 10323.95, avgHsr: 518.16, avgAccelDecel: 113.71,
+  avgSprint: null, avgDuration: null, n: 0, source: 'last-season',
+};
 function matchDemandReference(players){
   const dists=[], hsrs=[], sprints=[], durations=[], accelDecels=[];
   players.forEach(a=>{
@@ -2341,7 +2355,9 @@ function matchDemandReference(players){
     });
   });
   const avg = arr => arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : null;
-  return { avgDistance: avg(dists), avgHsr: avg(hsrs), avgSprint: avg(sprints), avgDuration: avg(durations), avgAccelDecel: avg(accelDecels), n: dists.length };
+  const n = dists.length;
+  if (n>0) return { avgDistance: avg(dists), avgHsr: avg(hsrs), avgSprint: avg(sprints), avgDuration: avg(durations), avgAccelDecel: avg(accelDecels), n, source:'current-season' };
+  return { ...LAST_SEASON_MATCH_DEMAND_SEED };
 }
 function weeklyLoad(a, asOfDate){
   const asOf = new Date(asOfDate);
@@ -2518,8 +2534,9 @@ function buildDailyReportHtml(dateStr, customTitle){
   </div>`;
   const evaluation = currentType ? evaluateSessionTargets(currentType, teamAvg, md) : null;
   if (evaluation){
-    html += `<div class="rpt-section-title">Target Achievement — ${evaluation.label}</div>
-      <table class="rpt-table"><thead><tr><th>Check</th><th>Target</th><th>Actual</th><th>Result</th></tr></thead><tbody>
+    html += `<div class="rpt-section-title">Target Achievement — ${evaluation.label}</div>`;
+    if (md.source==='last-season') html += `<div class="hint" style="font-size:11px;margin-bottom:8px;">📋 Match demand reference is last season's average (no current-season match GPS logged yet) — will switch automatically once real match data exists.</div>`;
+    html += `<table class="rpt-table"><thead><tr><th>Check</th><th>Target</th><th>Actual</th><th>Result</th></tr></thead><tbody>
       ${evaluation.checks.map(c=>`<tr><td class="lbl">${c.label}</td><td>${c.direction==='under'?'≤':'≥'}${c.target}%</td><td>${c.value!=null?fmt(c.value)+'%':'No data yet'}</td>
         <td style="font-weight:700;color:${c.value==null?'var(--text-muted)':c.pass?'#2f8f5b':'#c8483d'}">${c.value==null?'—':c.pass?'✓ Met':'✗ Missed'}</td></tr>`).join('')}
       </tbody></table>`;
@@ -2676,17 +2693,16 @@ function drawTeamGpsTraining(){
   const target = SETTINGS.weeklyTargetMultiplier;
 
   let html = `<div class="quad-ctrl-row" style="margin-bottom:14px;"><button class="btn" onclick="openReportModal()">📄 Print Training Report</button></div>`;
-  html += `<div class="pq-heading">Match-Demand Reference (from your squad's own Game GPS)</div>`;
-  if (!md.n){
-    html += `<div class="hint" style="padding:8px 4px;">No Game GPS data yet — add match data to unlock match-demand benchmarking and weekly targets.</div>`;
-  } else {
-    html += `<div class="tp-sw-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:18px;">
-      <div class="cat-card"><div class="cat-name">Avg Distance / Match</div><div class="cat-status">${fmt(md.avgDistance)} m</div></div>
-      <div class="cat-card"><div class="cat-name">Avg HSR / Match</div><div class="cat-status">${fmt(md.avgHsr)} m</div></div>
-      <div class="cat-card"><div class="cat-name">Weekly Target</div><div class="cat-status">${target!=null?fmt(md.avgDistance*target)+' m':'—'}</div>${target!=null?`<div class="pq-sub">${target}× match demand</div>`:''}</div>
-      <div class="cat-card"><div class="cat-name">Games Used</div><div class="cat-status">${md.n}</div></div>
-    </div>`;
+  html += `<div class="pq-heading">Match-Demand Reference</div>`;
+  if (md.source==='last-season'){
+    html += `<div class="hint" style="padding:8px 4px;background:#fff8f0;border-radius:8px;">📋 No current-season match GPS logged yet — showing <b>last season's (2025-26) match-day averages</b> as a placeholder reference. This will switch automatically to your squad's own current-season data the moment a Game GPS row is logged.</div>`;
   }
+  html += `<div class="tp-sw-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:18px;">
+      <div class="cat-card"><div class="cat-name">Avg Distance / Match</div><div class="cat-status">${fmt(md.avgDistance)} m</div></div>
+      <div class="cat-card"><div class="cat-name">Avg HSR / Match</div><div class="cat-status">${md.avgHsr!=null?fmt(md.avgHsr)+' m':'—'}</div></div>
+      <div class="cat-card"><div class="cat-name">Weekly Target</div><div class="cat-status">${target!=null?fmt(md.avgDistance*target)+' m':'—'}</div>${target!=null?`<div class="pq-sub">${target}× match demand</div>`:''}</div>
+      <div class="cat-card"><div class="cat-name">Games Used</div><div class="cat-status">${md.n}</div>${md.source==='last-season'?'<div class="pq-sub">Last season reference</div>':''}</div>
+    </div>`;
 
   html += `<div class="pq-heading">Player Weekly Accumulated Load (trailing 7 days)</div>`;
   let rows = players.filter(a=>a.trainingGps&&a.trainingGps.length).map(a=>({ id:a.id, name:a.name, ...weeklyLoad(a, today) }));
