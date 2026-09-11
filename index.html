@@ -2431,16 +2431,23 @@ function matchDemandReference(players){
 }
 function weeklyLoad(a, asOfDate){
   const asOf = new Date(asOfDate);
-  let distance=0, hsr=0, sprint=0, accelDecel=0, sessionCount=0, maxVel=null;
+  let distance=0, hsr=0, sprint=0, accelDecel=0, maxVel=null;
+  // "Sessions" counts distinct training DATES, not rows -- some sheets give
+  // a whole-session summary row per date, others only give individual
+  // drill rows with nothing marking "this is the whole day". Counting rows
+  // would then count drills as if they were separate sessions; counting
+  // distinct dates is correct either way.
+  const datesInWindow = new Set();
   gpsLoadRows(a.trainingGps).forEach(e=>{
     const daysAgo = Math.round((asOf-new Date(e.date))/86400000);
     if (daysAgo>=0 && daysAgo<7){
       distance+=e.total_distance_m||0; hsr+=e.hsr_distance_m||0;
-      sprint+=e.sprint_distance_m||0; accelDecel+=e.accel_decel_count||0; sessionCount++;
+      sprint+=e.sprint_distance_m||0; accelDecel+=e.accel_decel_count||0;
+      datesInWindow.add(e.date);
       if (e.max_velocity_kmh!=null) maxVel = Math.max(maxVel||0, e.max_velocity_kmh);
     }
   });
-  return { distance, hsr, sprint, accelDecel, sessionCount, maxVel };
+  return { distance, hsr, sprint, accelDecel, sessionCount: datesInWindow.size, maxVel };
 }
 function flagOutliers(rows, key){
   const sorted = [...rows].sort((a,b)=>a[key]-b[key]);
