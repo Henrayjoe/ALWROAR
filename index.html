@@ -705,11 +705,12 @@ function sonraDateToISO(d){
 }
 function mapSonraTrainingRow(row){
   const practice = row.drillPractice && row.drillPractice!==row.drillTitle ? ` (${row.drillPractice})` : '';
+  const isEntireSession = (row.drillTitle||'').trim().toLowerCase()==='entire session';
   return {
     date: sonraDateToISO(row.sessionDate),
     session_label: row.sessionType || '',
     player_name: row.playerName,
-    drill_name: (row.drillTitle==='Entire Session') ? '' : ((row.drillTitle||'')+practice),
+    drill_name: isEntireSession ? '' : ((row.drillTitle||'')+practice),
     drill_start_time: row.drillStartTime || '',
     duration_min: row.totaltimeinMinutes, total_distance_m: row.distanceTotal,
     hsr_distance_m: row.highSpeedRunningAbs, sprint_distance_m: row.sprintDistance,
