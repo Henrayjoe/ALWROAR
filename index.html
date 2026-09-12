@@ -423,8 +423,8 @@
 const METRICS = [
   {key:'cmj_jumpHeight', label:'CMJ — Jump Height', unit:'cm', lb:false, group:'Jump', paired:false},
   {key:'cmj_peakPowerBW', label:'CMJ — Peak Power/BW', unit:'W/kg', lb:false, group:'Jump', paired:false},
-  {key:'cmj_contractionTime', label:'CMJ — Contraction Time', unit:'ms', lb:true, group:'Jump', paired:false},
-  {key:'cmj_conForce', label:'CMJ — Concentric Force', unit:'N/kg', lb:false, group:'Jump', paired:false},
+  {key:'cmj_concentricDuration', label:'CMJ — Concentric Duration', unit:'ms', lb:true, group:'Jump', paired:false},
+  {key:'cmj_forceAtZeroVelocityBM', label:'CMJ — Force at Zero Velocity/BM', unit:'N/kg', lb:false, group:'Jump', paired:false},
   {key:'slcmj_jumpHeight', label:'Single Leg CMJ — Jump Height', unit:'cm', lb:false, group:'Jump', paired:true},
   {key:'slcmj_peakPowerBW', label:'Single Leg CMJ — Peak Power/BW', unit:'W/kg', lb:false, group:'Jump', paired:true},
   {key:'slcmj_eccBrakingImpulse', label:'Single Leg CMJ — Ecc Braking Impulse', unit:'N·s', lb:false, group:'Jump', paired:true},
@@ -485,8 +485,8 @@ const SCORE_COLS = ['#c8483d','#d97f3d','#c99a2e','#3d6fb0','#2f8f5b'];
 let NORMS = {
   cmj_jumpHeight:        { W:{min:26.4, max:31.7}, M:{min:35.3, max:42.4} },
   cmj_peakPowerBW:       { W:{min:41.6, max:48.0}, M:{min:51.7, max:60.4} },
-  cmj_contractionTime:   { W:{min:230, max:280},   M:{min:220, max:280} },
-  cmj_conForce:          { W:{min:21.8, max:25.5}, M:{min:22.5, max:27.0} },
+  cmj_concentricDuration:   { W:{min:230, max:280},   M:{min:220, max:280} },
+  cmj_forceAtZeroVelocityBM:          { W:{min:21.8, max:25.5}, M:{min:22.5, max:27.0} },
   slcmj_jumpHeight:      { W:{min:13.0, max:16.9}, M:{min:18.4, max:23.2} },
   slcmj_peakPowerBW:     { W:{min:26.1, max:31.3}, M:{min:32.6, max:38.4} },
   slcmj_eccBrakingImpulse:{ W:{min:39.6, max:61.6}, M:{min:62, max:90} },
@@ -521,8 +521,8 @@ let NORMS = {
 const NORM_SOURCES = {
   cmj_jumpHeight:  'VALD WSL / Premier League 2025/26, senior 25th–75th percentile (Impulse-Momentum). Well supported.',
   cmj_peakPowerBW: 'VALD WSL / Premier League 2025/26, senior 25th–75th percentile. Well supported.',
-  cmj_contractionTime: 'VALD WSL / Premier League 2025/26 — concentric duration, senior 25th–75th. Well supported.',
-  cmj_conForce:    'VALD WSL / Premier League 2025/26 — force at zero velocity/BM, senior 25th–75th. Well supported.',
+  cmj_concentricDuration: 'VALD WSL / Premier League 2025/26 — concentric duration, senior 25th–75th. Well supported.',
+  cmj_forceAtZeroVelocityBM:    'VALD WSL / Premier League 2025/26 — force at zero velocity/BM, senior 25th–75th. Well supported.',
   slcmj_jumpHeight: 'VALD Single Leg Jump (SLJ), senior 25th–75th — closest available proxy for SLCMJ. Moderate confidence.',
   slcmj_peakPowerBW:'VALD SLJ, senior 25th–75th — proxy for SLCMJ. Moderate confidence.',
   slcmj_eccBrakingImpulse:'VALD SLJ eccentric deceleration impulse, senior 25th–75th — proxy for SLCMJ. Moderate confidence.',
@@ -583,7 +583,7 @@ function recomputeDerived(d){
   d.hipKnee_ratio_L  = ratioOf(d.hipKnee_addPeak_L, d.hipKnee_abdPeak_L);
   d.hipKnee_ratio_R  = ratioOf(d.hipKnee_addPeak_R, d.hipKnee_abdPeak_R);
   d.eur = safeDiv(d.cmj_jumpHeight, d.sj_jumpHeight);
-  d.dsi = safeDiv(d.cmj_conForce, d.imtp_relForce);
+  d.dsi = safeDiv(d.cmj_forceAtZeroVelocityBM, d.imtp_relForce);
   d.aerobic_result = aerobicResult(d.aerobic_testType, d.aerobic_vift, d.aerobic_trialDistance_m, d.aerobic_trialTime_s);
   d.vo2max_result = (d.aerobic_result!=null) ? +(d.aerobic_result*3.5).toFixed(1) : null;
   return d;
