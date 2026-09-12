@@ -151,6 +151,14 @@
   .tp-reasoning-heading { font-size:10.5px; font-weight:800; text-transform:uppercase; letter-spacing:.06em; color:var(--text-muted); margin-bottom:8px; }
   .tp-reasoning-item { background:var(--surface); box-shadow:var(--shadow-sm); border-radius:var(--radius); padding:12px 14px; margin-bottom:8px; font-size:12.5px; line-height:1.55; color:var(--text-secondary); border-left:3px solid var(--accent); }
   .tp-reasoning-item b { color:var(--text-primary); }
+  .tp-results-group-title { font-size:10.5px; font-weight:800; text-transform:uppercase; letter-spacing:.06em; color:var(--text-muted); margin:20px 0 8px; }
+  .tp-results-table { width:100%; border-collapse:collapse; font-size:12px; margin-bottom:4px; }
+  .tp-results-table th { text-align:right; font-size:10px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-muted); padding:6px 8px; border-bottom:1px solid var(--border); }
+  .tp-results-table th:first-child, .tp-results-table td:first-child { text-align:left; }
+  .tp-results-table td { text-align:right; padding:6px 8px; }
+  .tp-results-table tr.tp-results-data-row td { border-bottom:none; padding-bottom:2px; }
+  .tp-results-interp-row td { text-align:left; padding:0 8px 10px; border-bottom:1px solid #f1f2f4; font-size:11.5px; line-height:1.5; color:var(--text-secondary); }
+  .tp-profile-strategy { font-size:15px; font-weight:800; margin:4px 0 10px; }
   .tp-sw-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px; }
   .tp-sw-heading { font-size:10.5px; font-weight:800; text-transform:uppercase; letter-spacing:.06em; color:var(--text-muted); margin-bottom:8px; }
   .tp-sw-row { display:flex; justify-content:space-between; font-size:13px; padding:7px 10px; border-radius:8px; background:var(--surface-alt); margin-bottom:6px; }
@@ -1146,6 +1154,184 @@ function resolveGroupTemplate(a, d, group){
   }
   return { tmpl: GROUP_TEMPLATES[group], note:null };
 }
+function ordinal(n){
+  const s = ['th','st','nd','rd'], v = n%100;
+  return n + (s[(v-20)%10] || s[v] || s[0]);
+}
+// Builds a per-metric results breakdown across every group the athlete has
+// data for: value, norm band, status, and where they rank in the squad --
+// plus a plain-English interpretation sentence per metric. This is the
+// full replacement for the old Strengths/Weaknesses grid and clinical
+// reasoning text (still computed internally below to drive the phase
+// programming block, just no longer displayed in that old form).
+// Heuristic jump/athletic profile -- not a true force-velocity profile
+// (that needs loaded jumps across a load spectrum, which this test battery
+// doesn't do), but a genuinely useful read built from the combination of
+// RSI, FT:CT, EUR and DSI: RSI and FT:CT both describe the same underlying
+// quality (short ground-contact time relative to output = fast
+// stretch-shortening cycle use = "elastic"), EUR describes how much the
+// countermovement itself contributes, and DSI is an orthogonal axis --
+// whether dynamic force output is already close to the athlete's isometric
+// ceiling, or whether there's strength "in reserve" not yet being
+// expressed quickly. Everything degrades gracefully: only metrics the
+// athlete actually has get used, and if none of the core four exist, the
+// section says so plainly rather than guessing.
+function jumpProfileNote(m, d, a, label){
+  const val = repVal(m, d);
+  if (val==null) return null;
+  const score = metricScore(m, d, a.gender);
+  return { key:m.key, label, val, unit:m.unit, score, m };
+}
+function buildJumpProfileHtml(a, d){
+  const gender = a.gender;
+  const rsiM = metricByKey('slhop_rsi'), ftctM = metricByKey('cmj_ftct');
+  const rsi = jumpProfileNote(rsiM, d, a, 'RSI');
+  const ftct = jumpProfileNote(ftctM, d, a, 'FT:CT');
+  const eurVal = d.eur, dsiVal = d.dsi;
+  const eurScore = eurVal!=null ? bs(eurVal, 'eur', gender) : null;
+  const dsiScore = dsiVal!=null ? bs(dsiVal, 'dsi', gender) : null;
+
+  const elasticInputs = [rsi?.score, ftct?.score].filter(s=>s!=null);
+  const hasElasticRead = elasticInputs.length>0;
+  const elasticScore = hasElasticRead ? elasticInputs.reduce((a,b)=>a+b,0)/elasticInputs.length : null;
+
+  if (!hasElasticRead && eurScore==null && dsiScore==null){
+    return `<div class="hint" style="padding:10px 4px;">No RSI, FT:CT, EUR or DSI on file yet — a jump/athletic profile needs at least one of these to say anything meaningful.</div>`;
+  }
+
+  let html = '';
+  const first = a.name.split(' ')[0];
+
+  // Primary strategy classification -- elastic vs force-dominant
+  if (hasElasticRead){
+    const bits = [];
+    if (rsi) bits.push(`RSI of ${fmt(rsi.val)}`);
+    if (ftct) bits.push(`FT:CT of ${fmt(ftct.val)}`);
+    let strategy, strategyDetail;
+    if (elasticScore>=3){
+      strategy = 'Elastic / reactive-dominant';
+      strategyDetail = `${bits.join(' and ')} sit at or above the norm band — short ground-contact time relative to output, typical of an athlete using the stretch-shortening cycle efficiently rather than grinding out force over a longer push.`;
+    } else if (elasticScore<=1){
+      strategy = 'Force-dominant';
+      strategyDetail = `${bits.join(' and ')} sit below the norm band — output is being built more through sustained force application than fast stretch-shortening cycle use.`;
+    } else {
+      strategy = 'Balanced';
+      strategyDetail = `${bits.join(' and ')} sit close to the middle of the norm band — no strong lean toward either a reactive or a force-dominant strategy.`;
+    }
+    html += `<div class="tp-profile-strategy"><b>${strategy}</b> jump strategy</div>
+      <div class="tp-reasoning-item">${strategyDetail}</div>`;
+  } else {
+    html += `<div class="hint" style="padding:6px 4px;">No RSI or FT:CT on file yet — can't classify reactive/elastic strategy specifically.</div>`;
+  }
+
+  // EUR -- SSC utilisation specifically, distinct from raw contact-time efficiency
+  if (eurScore!=null){
+    const eurNote = eurScore>=3
+      ? `EUR of ${fmt(eurVal)} sits at or above the norm band — the countermovement itself is contributing meaningfully to jump height, consistent with good stretch-shortening cycle utilisation.`
+      : eurScore<=1
+      ? `EUR of ${fmt(eurVal)} sits below the norm band — the countermovement is adding relatively little beyond a pure concentric push. Worth checking eccentric control specifically, since this is a distinct quality from raw jump height.`
+      : `EUR of ${fmt(eurVal)} sits mid-band — the countermovement contributes a normal amount to jump height, nothing notably over- or under-utilised.`;
+    html += `<div class="tp-reasoning-item">${eurNote}</div>`;
+  }
+
+  // DSI -- the orthogonal axis: is force being expressed dynamically, or left in reserve
+  if (dsiScore!=null){
+    const dsiNote = dsiScore<=1
+      ? `DSI of ${fmt(dsiVal)} sits below the norm band — there's a meaningful gap between what ${first} can produce isometrically and what's being expressed dynamically in the CMJ. This typically responds to ballistic/rate-of-force-development work (plyometrics, contrast training, Olympic lift variations) rather than more maximal-strength volume.`
+      : dsiScore>=3
+      ? `DSI of ${fmt(dsiVal)} sits at or above the norm band — dynamic force output is already close to isometric capacity. Further ceiling-raising is more likely to come from building additional maximal strength than from more rate-of-force-development work.`
+      : `DSI of ${fmt(dsiVal)} sits mid-band — a reasonable balance between maximal and dynamically-expressed force, no clear lean toward one type of work over the other.`;
+    html += `<div class="tp-reasoning-item">${dsiNote}</div>`;
+  }
+
+  // Speed cross-reference -- acceleration and top speed are related but
+  // distinct qualities from jump-based force/elastic profiling; note
+  // coherence rather than re-classifying on a new axis
+  const accelM = metricByKey('speed_5m') || metricByKey('speed_10m');
+  const accelVal = accelM ? repVal(accelM, d) : null;
+  const maxVelVal = repVal(metricByKey('speed_maxVel'), d);
+  if (accelVal!=null && hasElasticRead){
+    const accelScore = bs(accelVal, accelM.key, gender);
+    if (accelScore!=null){
+      const coherent = (accelScore>=3) === (elasticScore>=2.5);
+      html += `<div class="tp-reasoning-item">${accelM.label} of ${fmt(accelVal)}${accelM.unit} ${coherent ? 'lines up with' : 'sits somewhat apart from'} the jump-based strategy above — acceleration draws on a related but distinct quality (horizontal force application into the ground).</div>`;
+    }
+  }
+  if (maxVelVal!=null){
+    html += `<div class="tp-reasoning-item">Max velocity of ${fmt(maxVelVal)} m/s reflects stride mechanics and elastic qualities specific to high-speed running — a different context from jump testing, so it's worth reading on its own terms rather than expecting it to match the jump profile above.</div>`;
+  }
+
+  // Aerobic/MAS -- a genuinely separate physiological system (the engine),
+  // kept standalone rather than folded into the force/elastic axis
+  const masVal = repVal(metricByKey('aerobic_result'), d);
+  if (masVal!=null){
+    const masScore = bs(masVal, 'aerobic_result', gender);
+    const masNote = masScore!=null && masScore<=1
+      ? `sits below the norm band — an area to develop for repeat high-intensity efforts and recovery between them, distinct from the power qualities above.`
+      : masScore!=null && masScore>=3
+      ? `sits at or above the norm band — a strong aerobic base to support repeat high-intensity efforts and recovery between them.`
+      : `sits mid-band for the squad.`;
+    html += `<div class="tp-reasoning-item">MAS of ${fmt(masVal)} km/h ${masNote}</div>`;
+  }
+
+  return html;
+}
+function buildTestResultsBreakdown(a, d){
+  let html = '';
+  GROUPS.forEach(group=>{
+    const groupMetrics = METRICS.filter(m=>m.group===group && repVal(m,d)!=null);
+    if (!groupMetrics.length) return;
+    html += `<div class="tp-results-group-title">${group}</div>
+      <table class="tp-results-table"><thead><tr><th>Test</th><th>Result</th><th>Norm Band</th><th>Status</th><th>Squad</th></tr></thead><tbody>`;
+    groupMetrics.forEach(m=>{
+      const val = repVal(m, d);
+      const score = metricScore(m, d, a.gender);
+      const cat = catLabel(score);
+      const band = (!m.noNorm && NORMS[m.key]) ? NORMS[m.key][a.gender] : null;
+      const allVals = squadValues(m.key, a.gender, a.id);
+      const stats = squadStats(m.key, a.gender, a.id);
+      const z = squadZ(val, stats);
+      const totalN = allVals.length + 1; // include this athlete
+      let rankText = '';
+      if (totalN >= SQUAD_MIN_N){
+        const better = allVals.filter(v => m.lb ? v < val : v > val).length;
+        rankText = `${ordinal(better+1)} of ${totalN}`;
+      }
+
+      let interp = '';
+      if (band && band.min!=null){
+        interp += cat ? `${cat.l} against the ${genderPossessive(a.gender)} norm band (${fmt(band.min)}–${fmt(band.max)} ${m.unit}).` : '';
+      } else {
+        interp += 'No established norm band for this metric yet.';
+      }
+      interp += rankText
+        ? ` Ranks ${rankText} in the squad${z!=null?` (${z>=0?'+':''}${fmt(z)} SD vs squad average)`:''}.`
+        : ' Not enough squad data yet for a reliable comparison.';
+
+      let valDisplay = `${fmt(val)} ${m.unit}`;
+      if (m.paired){
+        const l = d[m.key+'_L'], r = d[m.key+'_R'];
+        valDisplay = `${fmt(l)} / ${fmt(r)} ${m.unit}`;
+        const asym = asymmetry(l, r);
+        if (asym!=null && SETTINGS.asymFlag!=null && asym>SETTINGS.asymFlag){
+          interp += ` L/R asymmetry of ${fmt(asym)}% exceeds the flagged threshold (${SETTINGS.asymFlag}%).`;
+        }
+      }
+
+      html += `<tr class="tp-results-data-row">
+        <td class="lbl">${m.label}</td>
+        <td>${valDisplay}</td>
+        <td>${band ? fmt(band.min)+'–'+fmt(band.max)+' '+m.unit : '—'}</td>
+        <td>${cat ? `<span style="color:${cat.c};font-weight:700;">${cat.l}</span>` : '—'}</td>
+        <td>${rankText || '—'}</td>
+      </tr>
+      <tr class="tp-results-interp-row"><td colspan="5">${interp}</td></tr>`;
+    });
+    html += `</tbody></table>`;
+  });
+  if (!html) html = `<div class="hint" style="padding:10px 4px;">No test results on file yet for this athlete.</div>`;
+  return html;
+}
 function buildTrainingPlanHtml(a){
   const d = buildLatest(a.sessions);
   if (!a.sessions.length){
@@ -1173,28 +1359,15 @@ function buildTrainingPlanHtml(a){
     html += `<div class="hint" style="padding:10px 4px;">No birthdate/age on file — add one in Manage Players to get a training-group categorisation.</div>`;
   }
 
-  // Strengths & weaknesses
-  if (!hasEnoughData){
-    html += `<div class="hint" style="padding:10px 4px;">Only one test category has data so far — strengths/weaknesses need at least two categories to compare meaningfully. Add more sessions to unlock this.</div>`;
-  } else {
-    html += `<div class="tp-sw-grid">
-      <div>
-        <div class="tp-sw-heading">Strengths</div>
-        ${strengths.length ? strengths.map(s=>`<div class="tp-sw-row"><span>${s.group}</span><b style="color:${catLabel(s.score).c}">${catLabel(s.score).l}</b></div>`).join('') : '<div class="hint" style="font-size:12px;">Nothing yet clearly above standard.</div>'}
-      </div>
-      <div>
-        <div class="tp-sw-heading">Weaknesses</div>
-        ${weaknesses.length ? weaknesses.map(s=>`<div class="tp-sw-row"><span>${s.group}</span><b style="color:${catLabel(s.score).c}">${catLabel(s.score).l}</b></div>`).join('') : '<div class="hint" style="font-size:12px;">No category is currently a clear weak point.</div>'}
-      </div>
-    </div>`;
-  }
+  // Jump/athletic profile -- a synthesized read across metrics, placed
+  // before the raw per-metric breakdown below
+  html += `<div class="tp-results-group-title" style="margin-top:0;">Jump & Athletic Profile</div>`;
+  html += buildJumpProfileHtml(a, d);
 
-  // Clinical/S&C reasoning — the "why" behind the prescription below
-  const reasoning = generateClinicalReasoning(a, d);
-  if (reasoning.length){
-    html += `<div class="tp-reasoning-heading">Current Status — Reasoning</div>`;
-    reasoning.forEach(r=>{ html += `<div class="tp-reasoning-item">${r}</div>`; });
-  }
+  // Full test-results breakdown -- every metric the athlete has data for,
+  // grouped by test category, with norm-band status and squad ranking.
+  html += `<div class="tp-results-group-title">Test Results</div>`;
+  html += buildTestResultsBreakdown(a, d);
 
   // Phase-based programming for each weakness (up to 2)
   if (weaknesses.length){
