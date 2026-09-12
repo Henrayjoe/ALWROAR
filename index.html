@@ -714,6 +714,7 @@ function mapSonraTrainingRow(row){
     drill_start_time: row.drillStartTime || '',
     duration_min: row.totaltimeinMinutes, total_distance_m: row.distanceTotal,
     hsr_distance_m: row.highSpeedRunningAbs, sprint_distance_m: row.sprintDistance,
+    vhsd_distance_m: row.distanceZ6Abs,
     accel_decel_count: (pf(row.accelerationsRel)||0) + (pf(row.decelerationsRel)||0),
     max_velocity_kmh: row.maxSpeed,
     avg_heart_rate: row.avgHeartrate, max_heart_rate: row.maxHeartrate,
@@ -751,7 +752,7 @@ function mergeTrainingGpsFromSheet(rows){
     const entry = {
       date: r.date, session_label: r.session_label||'', drill_name: r.drill_name||'', drill_start_time: r.drill_start_time||'',
       duration_min: pf(r.duration_min), total_distance_m: pf(r.total_distance_m),
-      hsr_distance_m: pf(r.hsr_distance_m), sprint_distance_m: pf(r.sprint_distance_m),
+      hsr_distance_m: pf(r.hsr_distance_m), sprint_distance_m: pf(r.sprint_distance_m), vhsd_distance_m: pf(r.vhsd_distance_m),
       accel_decel_count: pf(r.accel_decel_count), max_velocity_kmh: pf(r.max_velocity_kmh),
       avg_heart_rate: pf(r.avg_heart_rate), max_heart_rate: pf(r.max_heart_rate), pct_time_red_zone: pf(r.pct_time_red_zone),
       participation: r.participation || '',
@@ -2528,10 +2529,10 @@ function daySquadBreakdown(players, dateStr){
     // Player totals: use gpsLoadRows so a whole-session row (if present)
     // is used alone rather than summed on top of its own constituent drills.
     const safeToday = gpsLoadRows(rowsToday);
-    const t = { id:a.id, name:a.name, duration:0, distance:0, hsr:0, sprint:0, accelDecel:0, maxVel:null, redZoneWeighted:0, redZoneDur:0, hrWeighted:0, hrDur:0, participation:'' };
+    const t = { id:a.id, name:a.name, duration:0, distance:0, hsr:0, sprint:0, vhsd:0, accelDecel:0, maxVel:null, redZoneWeighted:0, redZoneDur:0, hrWeighted:0, hrDur:0, participation:'' };
     safeToday.forEach(e=>{
       t.duration += e.duration_min||0; t.distance += e.total_distance_m||0;
-      t.hsr += e.hsr_distance_m||0; t.sprint += e.sprint_distance_m||0; t.accelDecel += e.accel_decel_count||0;
+      t.hsr += e.hsr_distance_m||0; t.sprint += e.sprint_distance_m||0; t.vhsd += e.vhsd_distance_m||0; t.accelDecel += e.accel_decel_count||0;
       if (e.max_velocity_kmh!=null) t.maxVel = Math.max(t.maxVel||0, e.max_velocity_kmh);
       if (!t.participation && e.participation) t.participation = e.participation;
       // Red Zone % and avg heart rate are both percentages/rates, not
@@ -2686,21 +2687,32 @@ function buildWeeklyReportHtml(endDateStr, customTitle){
   const genDate2 = new Date().toLocaleDateString('en-AU', {day:'numeric', month:'short', year:'numeric'});
   let html = `<div class="rpt-header">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">Brisbane Roar · A-League Women</div><div class="rpt-title">${customTitle || 'Weekly Training Report'}</div><div class="rpt-sub">${weekDates[0]} to ${endDateStr}</div></div><div class="rpt-header-meta"><b>Henri Joensuu</b>Performance Coach<br>Generated ${genDate2}</div></div>`;
 
-  const sessionSums = allDates.map(dt=>{
+  const sessionMedians = allDates.map(dt=>{
     const { playerTotals } = daySquadBreakdown(players, dt);
-    return { date:dt, ...playerTotals.reduce((acc,t)=>({duration:acc.duration+t.duration,distance:acc.distance+t.distance,hsr:acc.hsr+t.hsr,accelDecel:acc.accelDecel+t.accelDecel}),{duration:0,distance:0,hsr:0,accelDecel:0}) };
+    return { date:dt,
+      duration: median(playerTotals.map(t=>t.duration)),
+      distance: median(playerTotals.map(t=>t.distance)),
+      hsr: median(playerTotals.map(t=>t.hsr)),
+      vhsd: median(playerTotals.map(t=>t.vhsd)),
+      sprint: median(playerTotals.map(t=>t.sprint)),
+      accelDecel: median(playerTotals.map(t=>t.accelDecel)),
+    };
   });
-  const sessTotal = sessionSums.reduce((acc,s)=>({duration:acc.duration+s.duration,distance:acc.distance+s.distance,hsr:acc.hsr+s.hsr,accelDecel:acc.accelDecel+s.accelDecel}),{duration:0,distance:0,hsr:0,accelDecel:0});
-  const sessMax = { duration:Math.max(...sessionSums.map(s=>s.duration)), distance:Math.max(...sessionSums.map(s=>s.distance)), hsr:Math.max(...sessionSums.map(s=>s.hsr)), accelDecel:Math.max(...sessionSums.map(s=>s.accelDecel)) };
-  const sessMin = { duration:Math.min(...sessionSums.map(s=>s.duration)), distance:Math.min(...sessionSums.map(s=>s.distance)), hsr:Math.min(...sessionSums.map(s=>s.hsr)), accelDecel:Math.min(...sessionSums.map(s=>s.accelDecel)) };
+  const sumField = f => sessionMedians.reduce((s,x)=>s+(x[f]||0),0);
+  const maxField = f => Math.max(...sessionMedians.map(x=>x[f]||0));
+  const minField = f => Math.min(...sessionMedians.map(x=>x[f]||0));
+  const sessTotal = { duration:sumField('duration'), distance:sumField('distance'), hsr:sumField('hsr'), vhsd:sumField('vhsd'), sprint:sumField('sprint'), accelDecel:sumField('accelDecel') };
+  const sessMax = { duration:maxField('duration'), distance:maxField('distance'), hsr:maxField('hsr'), vhsd:maxField('vhsd'), sprint:maxField('sprint'), accelDecel:maxField('accelDecel') };
+  const sessMin = { duration:minField('duration'), distance:minField('distance'), hsr:minField('hsr'), vhsd:minField('vhsd'), sprint:minField('sprint'), accelDecel:minField('accelDecel') };
 
-  html += `<div class="rpt-section-title">Session-by-Session</div>
-    <table class="rpt-table"><thead><tr><th>Date</th><th>Duration</th><th>Distance</th><th>HSR</th><th>Accel/Decel</th></tr></thead><tbody>
-    ${sessionSums.map(s=>`<tr><td class="lbl">${s.date}</td><td>${fmt(s.duration)} min</td><td>${fmt(s.distance)} m</td><td>${fmt(s.hsr)} m</td><td>${fmt(s.accelDecel)}</td></tr>`).join('')}
-    <tr style="border-top:2px solid var(--border);font-weight:700;"><td class="lbl">Total</td><td>${fmt(sessTotal.duration)} min</td><td>${fmt(sessTotal.distance)} m</td><td>${fmt(sessTotal.hsr)} m</td><td>${fmt(sessTotal.accelDecel)}</td></tr>
-    <tr><td class="lbl" style="color:var(--text-muted);">Max</td><td>${fmt(sessMax.duration)} min</td><td>${fmt(sessMax.distance)} m</td><td>${fmt(sessMax.hsr)} m</td><td>${fmt(sessMax.accelDecel)}</td></tr>
-    <tr><td class="lbl" style="color:var(--text-muted);">Min</td><td>${fmt(sessMin.duration)} min</td><td>${fmt(sessMin.distance)} m</td><td>${fmt(sessMin.hsr)} m</td><td>${fmt(sessMin.accelDecel)}</td></tr>
-    </tbody></table>`;
+  html += `<div class="rpt-section-title">Session-by-Session (Squad Median)</div>
+    <table class="rpt-table"><thead><tr><th>Date</th><th>Duration</th><th>Distance</th><th>HSR</th><th>VHSD</th><th>Sprint Dist</th><th>Accel/Decel</th></tr></thead><tbody>
+    ${sessionMedians.map(s=>`<tr><td class="lbl">${s.date}</td><td>${fmt(s.duration)} min</td><td>${fmt(s.distance)} m</td><td>${fmt(s.hsr)} m</td><td>${fmt(s.vhsd)} m</td><td>${fmt(s.sprint)} m</td><td>${fmt(s.accelDecel)}</td></tr>`).join('')}
+    <tr style="border-top:2px solid var(--border);font-weight:700;"><td class="lbl">Total</td><td>${fmt(sessTotal.duration)} min</td><td>${fmt(sessTotal.distance)} m</td><td>${fmt(sessTotal.hsr)} m</td><td>${fmt(sessTotal.vhsd)} m</td><td>${fmt(sessTotal.sprint)} m</td><td>${fmt(sessTotal.accelDecel)}</td></tr>
+    <tr><td class="lbl" style="color:var(--text-muted);">Max</td><td>${fmt(sessMax.duration)} min</td><td>${fmt(sessMax.distance)} m</td><td>${fmt(sessMax.hsr)} m</td><td>${fmt(sessMax.vhsd)} m</td><td>${fmt(sessMax.sprint)} m</td><td>${fmt(sessMax.accelDecel)}</td></tr>
+    <tr><td class="lbl" style="color:var(--text-muted);">Min</td><td>${fmt(sessMin.duration)} min</td><td>${fmt(sessMin.distance)} m</td><td>${fmt(sessMin.hsr)} m</td><td>${fmt(sessMin.vhsd)} m</td><td>${fmt(sessMin.sprint)} m</td><td>${fmt(sessMin.accelDecel)}</td></tr>
+    </tbody></table>
+    <div class="chart-note"><span>▪ Each day shows the squad's median player that day (typical output, not skewed by one outlier), not a combined squad total. VHSD (Sonra Zone 6 distance) is a best-effort mapping we haven't fully confirmed with you — flag it if the numbers look off.</span></div>`;
 
   const md = matchDemandReference(players);
   const target = SETTINGS.weeklyTargetMultiplier;
