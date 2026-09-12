@@ -422,24 +422,18 @@
 // ============================================================
 const METRICS = [
   {key:'cmj_jumpHeight', label:'CMJ — Jump Height', unit:'cm', lb:false, group:'Jump', paired:false},
-  {key:'cmj_peakPowerBW', label:'CMJ — Peak Power/BW', unit:'W/kg', lb:false, group:'Jump', paired:false},
-  {key:'cmj_concentricDuration', label:'CMJ — Concentric Duration', unit:'ms', lb:true, group:'Jump', paired:false},
+  {key:'cmj_peakPowerBM', label:'CMJ — Peak Power/BM', unit:'W/kg', lb:false, group:'Jump', paired:false},
+  {key:'cmj_ftct', label:'CMJ — FT:CT', unit:'', lb:false, group:'Jump', paired:false, noNorm:true},
   {key:'cmj_forceAtZeroVelocityBM', label:'CMJ — Force at Zero Velocity/BM', unit:'N/kg', lb:false, group:'Jump', paired:false},
   {key:'slcmj_jumpHeight', label:'Single Leg CMJ — Jump Height', unit:'cm', lb:false, group:'Jump', paired:true},
-  {key:'slcmj_peakPowerBW', label:'Single Leg CMJ — Peak Power/BW', unit:'W/kg', lb:false, group:'Jump', paired:true},
-  {key:'slcmj_eccBrakingImpulse', label:'Single Leg CMJ — Ecc Braking Impulse', unit:'N·s', lb:false, group:'Jump', paired:true},
-  {key:'hop_meanJumpHeight', label:'Hop Test (10/5) — Mean Jump Height', unit:'cm', lb:false, group:'Jump', paired:false},
-  {key:'hop_meanImpulse', label:'Hop Test (10/5) — Mean Impulse', unit:'N·s', lb:false, group:'Jump', paired:false, noNorm:true},
-  {key:'hop_rsi', label:'Hop Test (10/5) — RSI', unit:'', lb:false, group:'Jump', paired:false},
-  {key:'hop_activeStiffness', label:'Hop Test (10/5) — Active Stiffness', unit:'N/m', noNorm:true, group:'Jump', paired:false},
+  {key:'slcmj_ftct', label:'Single Leg CMJ — FT:CT', unit:'', lb:false, group:'Jump', paired:true, noNorm:true},
+  {key:'slcmj_peakPowerBM', label:'Single Leg CMJ — Peak Power/BM', unit:'W/kg', lb:false, group:'Jump', paired:true},
   {key:'slhop_meanJumpHeight', label:'SL Hop Test (10/5) — Mean Jump Height', unit:'cm', lb:false, group:'Jump', paired:true},
   {key:'slhop_meanImpulse', label:'SL Hop Test (10/5) — Mean Impulse', unit:'N·s', lb:false, group:'Jump', paired:true, noNorm:true},
   {key:'slhop_rsi', label:'SL Hop Test (10/5) — RSI', unit:'', lb:false, group:'Jump', paired:true},
-  {key:'slhop_activeStiffness', label:'SL Hop Test (10/5) — Active Stiffness', unit:'N/m', noNorm:true, group:'Jump', paired:true},
-  {key:'zigzag_distance', label:'Zig Zag 5-Hop — Distance', unit:'m', lb:false, noNorm:true, group:'Jump', paired:true},
   {key:'sj_jumpHeight', label:'Squat Jump — Jump Height', unit:'cm', lb:false, group:'Jump', paired:false},
-  {key:'sj_peakPowerBW', label:'Squat Jump — Peak Power/BW', unit:'W/kg', lb:false, group:'Jump', paired:false},
-  {key:'cmj_concentricImpulse100ms', label:'CMJ — Concentric Impulse (100ms)', unit:'N·s', lb:false, group:'Jump', paired:false, noNorm:true},
+  {key:'sj_peakPowerBM', label:'Squat Jump — Peak Power/BM', unit:'W/kg', lb:false, group:'Jump', paired:false},
+  {key:'cmj_concentricImpulse100ms', label:'CMJ — Concentric Impulse-100ms', unit:'N·s', lb:false, group:'Jump', paired:false, noNorm:true},
   {key:'eur', label:'EUR (CMJ ÷ SJ)', unit:'', lb:false, group:'Jump', paired:false, derived:true},
   {key:'hipAnkle_addPeak', label:'Hip Add (ankle) — Peak Force', unit:'N', lb:false, group:'Hip Strength', paired:true},
   {key:'hipAnkle_addMean', label:'Hip Add (ankle) — Mean Force', unit:'N', noNorm:true, group:'Hip Strength', paired:true},
@@ -485,18 +479,14 @@ const SCORE_COLS = ['#c8483d','#d97f3d','#c99a2e','#3d6fb0','#2f8f5b'];
 // ============================================================
 let NORMS = {
   cmj_jumpHeight:        { W:{min:26.4, max:31.7}, M:{min:35.3, max:42.4} },
-  cmj_peakPowerBW:       { W:{min:41.6, max:48.0}, M:{min:51.7, max:60.4} },
-  cmj_concentricDuration:   { W:{min:230, max:280},   M:{min:220, max:280} },
+  cmj_peakPowerBM:       { W:{min:41.6, max:48.0}, M:{min:51.7, max:60.4} },
   cmj_forceAtZeroVelocityBM:          { W:{min:21.8, max:25.5}, M:{min:22.5, max:27.0} },
   slcmj_jumpHeight:      { W:{min:13.0, max:16.9}, M:{min:18.4, max:23.2} },
-  slcmj_peakPowerBW:     { W:{min:26.1, max:31.3}, M:{min:32.6, max:38.4} },
-  slcmj_eccBrakingImpulse:{ W:{min:39.6, max:61.6}, M:{min:62, max:90} },
-  hop_meanJumpHeight:    { W:{min:19.1, max:26.8}, M:{min:20.7, max:30.1} },
-  hop_rsi:               { W:{min:2.30, max:2.90}, M:{min:2.37, max:2.96} },
+  slcmj_peakPowerBM:     { W:{min:26.1, max:31.3}, M:{min:32.6, max:38.4} },
   slhop_meanJumpHeight:  { W:{min:14.8, max:18.8}, M:{min:18.5, max:24.6} },
   slhop_rsi:             { W:{min:1.22, max:1.52}, M:{min:1.41, max:1.76} },
   sj_jumpHeight:         { W:{min:25.6, max:31.1}, M:{min:32.5, max:39.2} },
-  sj_peakPowerBW:        { W:{min:42.2, max:49.4}, M:{min:52.7, max:59.9} },
+  sj_peakPowerBM:        { W:{min:42.2, max:49.4}, M:{min:52.7, max:59.9} },
   eur:                   { W:{min:0.90, max:1.15}, M:{min:0.99, max:1.13} },
   hipAnkle_addPeak:      { W:{min:138, max:185},   M:{min:176, max:257} },
   hipAnkle_abdPeak:      { W:{min:146, max:180},   M:{min:189, max:252} },
@@ -520,18 +510,14 @@ let NORMS = {
 // these before trusting a band your athletes' status is scored against.
 const NORM_SOURCES = {
   cmj_jumpHeight:  'VALD WSL / Premier League 2025/26, senior 25th–75th percentile (Impulse-Momentum). Well supported.',
-  cmj_peakPowerBW: 'VALD WSL / Premier League 2025/26, senior 25th–75th percentile. Well supported.',
-  cmj_concentricDuration: 'VALD WSL / Premier League 2025/26 — concentric duration, senior 25th–75th. Well supported.',
+  cmj_peakPowerBM: 'VALD WSL / Premier League 2025/26, senior 25th–75th percentile. Well supported.',
   cmj_forceAtZeroVelocityBM:    'VALD WSL / Premier League 2025/26 — force at zero velocity/BM, senior 25th–75th. Well supported.',
   slcmj_jumpHeight: 'VALD Single Leg Jump (SLJ), senior 25th–75th — closest available proxy for SLCMJ. Moderate confidence.',
-  slcmj_peakPowerBW:'VALD SLJ, senior 25th–75th — proxy for SLCMJ. Moderate confidence.',
-  slcmj_eccBrakingImpulse:'VALD SLJ eccentric deceleration impulse, senior 25th–75th — proxy for SLCMJ. Moderate confidence.',
-  hop_meanJumpHeight:'VALD Hop Test, senior 25th–75th (flight time). Well supported.',
-  hop_rsi:         'VALD Hop Test, senior 25th–75th (flight time). Well supported.',
+  slcmj_peakPowerBM:'VALD SLJ, senior 25th–75th — proxy for SLCMJ. Moderate confidence.',
   slhop_meanJumpHeight:'VALD Single Leg Drop Jump (SLDJ), senior 25th–75th — proxy for SL Hop Test. Moderate confidence.',
   slhop_rsi:       'VALD SLDJ, senior 25th–75th — proxy for SL Hop Test. Moderate confidence.',
   sj_jumpHeight:   'VALD WSL / Premier League 2025/26, senior 25th–75th percentile (Impulse-Momentum). Well supported.',
-  sj_peakPowerBW:  'VALD WSL / Premier League 2025/26, senior 25th–75th percentile. Well supported.',
+  sj_peakPowerBM:  'VALD WSL / Premier League 2025/26, senior 25th–75th percentile. Well supported.',
   eur:             'Men: real VALD Premier League 2025/26 EUR distribution, 25th–75th, well supported. Women: no EUR table in the WSL report — using the general team-sport literature band (McGuigan et al. 2006), not women\'s-specific, moderate confidence.',
   hipAnkle_addPeak:'VALD ForceFrame Hip ADD/ABD Supine (Ankle), senior 25th–75th. Well supported.',
   hipAnkle_abdPeak:'VALD ForceFrame Hip ADD/ABD Supine (Ankle), senior 25th–75th. Well supported.',
@@ -1111,7 +1097,7 @@ function generateClinicalReasoning(a, d){
   }
 
   // 3. Nordic hamstring force relative to general lower-body power
-  const nordicScore = score('nordic_maxForce'), powerScore = score('cmj_peakPowerBW');
+  const nordicScore = score('nordic_maxForce'), powerScore = score('cmj_peakPowerBM');
   if (nordicScore!=null && powerScore!=null && nordicScore <= powerScore-1.5){
     items.push(`<b>Nordic hamstring force sits notably below general lower-body power</b> (CMJ peak power) — an eccentric hamstring deficit relative to overall power output, a recognised hamstring strain risk pattern in the literature. Eccentric-focused hamstring loading (Nordic progression) is indicated ahead of further general power work.`);
   }
@@ -1491,7 +1477,7 @@ let athleteMap={}, nameIndex={}, selectedId=null, searchQ='', genderFilterVal='a
 let refFrame = { trends:'league', scatter:'league', radar:'league', heatmap:'league' };
 let squadCollapsed = new Set();
 let squadSort = { group:null, key:null, dir:1 };
-let teamTrendKeys = new Set(['cmj_jumpHeight','hop_meanJumpHeight','hipAnkle_ratio']);
+let teamTrendKeys = new Set(['cmj_jumpHeight','slhop_meanJumpHeight','hipAnkle_ratio']);
 function setRefFrame(scope, val){
   refFrame[scope] = val;
   document.querySelectorAll(`.ref-toggle[data-scope="${scope}"] button`).forEach(b=>{
@@ -1954,7 +1940,7 @@ function buildQuadrantAxisOptions(){
   const xs=document.getElementById('quadX'), ys=document.getElementById('quadY');
   const opts = GROUPS.map(g=>`<optgroup label="${g}">${METRICS.filter(m=>m.group===g).map(m=>`<option value="${m.key}">${m.label}</option>`).join('')}</optgroup>`).join('');
   xs.innerHTML = opts; ys.innerHTML = opts;
-  xs.value = 'cmj_jumpHeight'; ys.value = 'cmj_peakPowerBW';
+  xs.value = 'cmj_jumpHeight'; ys.value = 'cmj_peakPowerBM';
 }
 function cohortValues(key, gender){
   const m = metricByKey(key);
@@ -1964,7 +1950,7 @@ function cohortValues(key, gender){
   }).filter(x=>x.val!=null);
 }
 const PRIORITY_QUADRANTS = [
-  { title:'Strength Profile', sub:'Dynamic vs isometric force application', xKey:'imtp_relForce', yKey:'cmj_peakPowerBW' },
+  { title:'Strength Profile', sub:'Dynamic vs isometric force application', xKey:'imtp_relForce', yKey:'cmj_peakPowerBM' },
   { title:'Hamstring Strain Risk', sub:'"Quadrant of Boom" — speed outrunning posterior-chain strength', xKey:'nordic_maxForce', yKey:'speed_maxVel' },
   { title:'Speed Reserve', sub:'Aerobic engine vs top-end speed', xKey:'aerobic_result', yKey:'speed_maxVel' },
   { title:'Groin / Adductor Risk', sub:'Adductor (knee) max force vs posterior-chain (Nordic) strength', xKey:'nordic_maxForce', yKey:'hipKnee_addPeak' },
@@ -2060,8 +2046,8 @@ function drawQuadrant(){
 // ATHLETIC PROFILE (radar chart)
 // ============================================================
 const RADAR_METRIC_KEYS = [
-  'cmj_jumpHeight','cmj_peakPowerBW','slcmj_jumpHeight','hop_meanJumpHeight','hop_rsi',
-  'slhop_meanJumpHeight','sj_jumpHeight','eur','hipAnkle_ratio','hipKnee_ratio',
+  'cmj_jumpHeight','cmj_peakPowerBM','slcmj_jumpHeight','slhop_meanJumpHeight','slhop_rsi',
+  'sj_jumpHeight','eur','hipAnkle_ratio','hipKnee_ratio',
   'imtp_relForce','nordic_maxForce','dsi','speed_10m','speed_20m','speed_maxVel','aerobic_result',
 ];
 function squadRadarScore(m, val, gender, athleteId){
@@ -3186,7 +3172,7 @@ function buildScatterAxisOptions(){
   // Setting innerHTML auto-selects the first <option>, so both selects would
   // otherwise start on the same metric — always force distinct defaults.
   xs.value = 'cmj_jumpHeight';
-  ys.value = 'cmj_peakPowerBW';
+  ys.value = 'cmj_peakPowerBM';
   xs.onchange = drawTeamScatter; ys.onchange = drawTeamScatter;
 }
 function renderTeamScatterSvg(xKey, yKey){
