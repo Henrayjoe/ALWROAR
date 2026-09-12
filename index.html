@@ -159,6 +159,10 @@
   .tp-results-table tr.tp-results-data-row td { border-bottom:none; padding-bottom:2px; }
   .tp-results-interp-row td { text-align:left; padding:0 8px 10px; border-bottom:1px solid #f1f2f4; font-size:11.5px; line-height:1.5; color:var(--text-secondary); }
   .tp-profile-strategy { font-size:15px; font-weight:800; margin:4px 0 10px; }
+  .tp-profile-technical { background:var(--surface); box-shadow:var(--shadow-sm); border-radius:var(--radius); padding:12px 14px; margin-bottom:6px; font-size:12.5px; line-height:1.6; color:var(--text-secondary); border-left:3px solid var(--accent); }
+  .tp-profile-technical b { color:var(--text-primary); }
+  .tp-profile-coach { background:#f4f7fb; border-radius:var(--radius); padding:10px 14px; margin-bottom:16px; font-size:12px; line-height:1.55; color:var(--text-secondary); }
+  .tp-profile-coach b { color:var(--text-primary); font-weight:700; }
   .tp-sw-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px; }
   .tp-sw-heading { font-size:10.5px; font-weight:800; text-transform:uppercase; letter-spacing:.06em; color:var(--text-muted); margin-bottom:8px; }
   .tp-sw-row { display:flex; justify-content:space-between; font-size:13px; padding:7px 10px; border-radius:8px; background:var(--surface-alt); margin-bottom:6px; }
@@ -1176,106 +1180,224 @@ function ordinal(n){
 // expressed quickly. Everything degrades gracefully: only metrics the
 // athlete actually has get used, and if none of the core four exist, the
 // section says so plainly rather than guessing.
-function jumpProfileNote(m, d, a, label){
-  const val = repVal(m, d);
-  if (val==null) return null;
-  const score = metricScore(m, d, a.gender);
-  return { key:m.key, label, val, unit:m.unit, score, m };
+function profileBlock(technical, coach){
+  return `<div class="tp-profile-technical">${technical}</div>
+    <div class="tp-profile-coach"><b>Head coach:</b> ${coach}</div>`;
 }
-function buildJumpProfileHtml(a, d){
+// Full athletic profile -- built for two audiences per group: a technical
+// paragraph (S&C + physio -- both are technically literate, so injury-risk
+// and load-management framing is woven directly into the technical text
+// rather than split into a third version) and a plain-language head-coach
+// line. Every group only renders if the athlete actually has data for it;
+// nothing here is inferred or invented for a metric that hasn't been
+// tested. This is deliberately a heuristic read built from single-effort
+// bodyweight testing, not a true force-velocity profile (that needs loaded
+// jumps across a load spectrum, which this battery doesn't include).
+function buildAthleticProfileHtml(a, d){
   const gender = a.gender;
-  const rsiM = metricByKey('slhop_rsi'), ftctM = metricByKey('cmj_ftct');
-  const rsi = jumpProfileNote(rsiM, d, a, 'RSI');
-  const ftct = jumpProfileNote(ftctM, d, a, 'FT:CT');
-  const eurVal = d.eur, dsiVal = d.dsi;
-  const eurScore = eurVal!=null ? bs(eurVal, 'eur', gender) : null;
-  const dsiScore = dsiVal!=null ? bs(dsiVal, 'dsi', gender) : null;
-
-  const elasticInputs = [rsi?.score, ftct?.score].filter(s=>s!=null);
-  const hasElasticRead = elasticInputs.length>0;
-  const elasticScore = hasElasticRead ? elasticInputs.reduce((a,b)=>a+b,0)/elasticInputs.length : null;
-
-  if (!hasElasticRead && eurScore==null && dsiScore==null){
-    return `<div class="hint" style="padding:10px 4px;">No RSI, FT:CT, EUR or DSI on file yet — a jump/athletic profile needs at least one of these to say anything meaningful.</div>`;
-  }
-
-  let html = '';
   const first = a.name.split(' ')[0];
+  let html = '';
 
-  // Primary strategy classification -- elastic vs force-dominant
-  if (hasElasticRead){
-    const bits = [];
-    if (rsi) bits.push(`RSI of ${fmt(rsi.val)}`);
-    if (ftct) bits.push(`FT:CT of ${fmt(ftct.val)}`);
-    let strategy, strategyDetail;
-    if (elasticScore>=3){
-      strategy = 'Elastic / reactive-dominant';
-      strategyDetail = `${bits.join(' and ')} sit at or above the norm band — short ground-contact time relative to output, typical of an athlete using the stretch-shortening cycle efficiently rather than grinding out force over a longer push.`;
-    } else if (elasticScore<=1){
-      strategy = 'Force-dominant';
-      strategyDetail = `${bits.join(' and ')} sit below the norm band — output is being built more through sustained force application than fast stretch-shortening cycle use.`;
-    } else {
-      strategy = 'Balanced';
-      strategyDetail = `${bits.join(' and ')} sit close to the middle of the norm band — no strong lean toward either a reactive or a force-dominant strategy.`;
+  // ============================== JUMP ==============================
+  {
+    const rsiM = metricByKey('slhop_rsi'), ftctM = metricByKey('cmj_ftct');
+    const rsiVal = repVal(rsiM, d), ftctVal = repVal(ftctM, d);
+    const rsiScore = rsiVal!=null ? metricScore(rsiM, d, gender) : null;
+    const ftctScore = ftctVal!=null ? bs(ftctVal, 'cmj_ftct', gender) : null;
+    const elasticInputs = [rsiScore, ftctScore].filter(s=>s!=null);
+    const hasElasticRead = elasticInputs.length>0;
+    const elasticScore = hasElasticRead ? elasticInputs.reduce((x,y)=>x+y,0)/elasticInputs.length : null;
+
+    const eurVal = d.eur, dsiVal = d.dsi;
+    const eurScore = eurVal!=null ? bs(eurVal, 'eur', gender) : null;
+    const dsiScore = dsiVal!=null ? bs(dsiVal, 'dsi', gender) : null;
+    const fzvVal = d.cmj_forceAtZeroVelocityBM;
+    const fzvScore = fzvVal!=null ? bs(fzvVal, 'cmj_forceAtZeroVelocityBM', gender) : null;
+    const ci100Val = d.cmj_concentricImpulse100ms;
+    const ci100Score = ci100Val!=null ? bs(ci100Val, 'cmj_concentricImpulse100ms', gender) : null;
+    const jhVal = d.cmj_jumpHeight, ppVal = d.cmj_peakPowerBM;
+
+    if (hasElasticRead || eurScore!=null || dsiScore!=null || fzvVal!=null || ci100Val!=null || jhVal!=null){
+      let tech = '', coach = '';
+
+      if (hasElasticRead){
+        const bits = [];
+        if (rsiVal!=null) bits.push(`RSI of ${fmt(rsiVal)}`);
+        if (ftctVal!=null) bits.push(`FT:CT of ${fmt(ftctVal)}`);
+        if (elasticScore>=3){
+          tech += `<b>Elastic / reactive-dominant strategy.</b> ${bits.join(' and ')} sit at or above the norm band. RSI and FT:CT both describe the same underlying quality from different angles — how much ground-contact time is needed to produce a given output. A high value means short contact time relative to output: force is being expressed through fast stretch-shortening cycle use (the muscle-tendon unit loading and releasing quickly) rather than a longer, sustained push. `;
+          coach += `${first} jumps in a "springy" way — quick off the ground rather than grinding into it. `;
+        } else if (elasticScore<=1){
+          tech += `<b>Force-dominant strategy.</b> ${bits.join(' and ')} sit below the norm band. Output is coming more from sustained force application through a longer ground-contact window than from fast stretch-shortening cycle use. `;
+          coach += `${first}'s jump comes more from pushing hard for longer than from being springy. `;
+        } else {
+          tech += `<b>Balanced strategy.</b> ${bits.join(' and ')} sit mid-band — no strong lean toward either a reactive or a force-dominant approach. `;
+          coach += `${first}'s jumping style is fairly balanced, no strong lean either way. `;
+        }
+      }
+
+      if (fzvVal!=null){
+        const statusTxt = fzvScore!=null && fzvScore>=3 ? 'sits at or above the norm band' : fzvScore!=null && fzvScore<=1 ? 'sits below the norm band' : 'sits mid-band';
+        tech += `<b>Force at Zero Velocity/BM of ${fmt(fzvVal)} N/kg</b> ${statusTxt} — this is the force ${first} produces at the exact instant velocity crosses zero, the turnaround between the eccentric braking phase and the concentric drive. It's a fairly pure force-capacity reading taken from inside the jump itself, less confounded by movement velocity than peak power (which blends force and velocity together). `;
+        if (fzvScore!=null && fzvScore<=1) { tech += `A low reading here, independent of how the strategy above looks, points to a genuine low-velocity force deficit — the kind of limiter that responds to traditional maximal-strength work. `; coach += `${first} is relatively weak at the low-speed, high-force end of the jump — more strength work should help here. `; }
+        else if (fzvScore!=null && fzvScore>=3) tech += `A strong reading means the low-velocity end of the force curve isn't the limiter — any remaining ceiling is more likely to come from rate of force development than raw strength. `;
+      }
+
+      if (ci100Val!=null){
+        const statusTxt = ci100Score!=null && ci100Score>=3 ? 'sits at or above the norm band' : ci100Score!=null && ci100Score<=1 ? 'sits below the norm band' : 'sits mid-band';
+        tech += `<b>Concentric Impulse-100ms of ${fmt(ci100Val)} N·s</b> ${statusTxt} — net force integrated over just the first 100 milliseconds of the concentric phase, before the movement has built up speed. It's the closest proxy this battery has to rate of force development inside a real, whole-body movement rather than an isolated lab test. `;
+        if (ci100Score!=null && ci100Score<=1) { tech += `A low reading means force builds up gradually through the concentric phase rather than early — worth watching in actions that reward a fast first movement (first step off the mark, reactive jumps, quick direction changes), even where total jump output looks fine. `; coach += `${first} takes a bit longer to "switch on" force at the start of a jump or sprint, even when the end result looks fine. `; }
+        else if (ci100Score!=null && ci100Score>=3) tech += `A strong reading is a genuine early-explosiveness marker — force is being expressed fast right from the start of the movement. `;
+      }
+
+      if (eurScore!=null){
+        const statusTxt = eurScore>=3 ? 'sits at or above the norm band' : eurScore<=1 ? 'sits below the norm band' : 'sits mid-band';
+        tech += `<b>EUR (CMJ ÷ SJ) of ${fmt(eurVal)}</b> ${statusTxt} — this isolates how much the countermovement (the pre-stretch dip before jumping) adds to height, by comparing against a squat jump that removes the countermovement entirely. `;
+        if (eurScore<=1) tech += `A low ratio means the countermovement isn't adding much — worth checking eccentric control and pre-stretch technique specifically, a distinct quality from raw jump height and from the reactive strategy above. `;
+        else if (eurScore>=3) tech += `A high ratio confirms genuinely good stretch-shortening cycle utilisation. `;
+      }
+
+      if (dsiScore!=null){
+        const statusTxt = dsiScore<=1 ? 'sits below the norm band' : dsiScore>=3 ? 'sits at or above the norm band' : 'sits mid-band';
+        tech += `<b>DSI of ${fmt(dsiVal)}</b> ${statusTxt} — dynamic force output (CMJ) compared against maximal isometric force (IMTP): the orthogonal question to everything above, not how the jump is strategised, but whether force capacity itself is the limiter. `;
+        if (dsiScore<=1) { tech += `A low DSI means there's a real gap between what ${first} can produce isometrically and what's actually being expressed dynamically — this typically responds well to ballistic/rate-of-force-development work (plyometrics, contrast training, Olympic-lift variations) rather than more maximal-strength volume, since the strength is already there and needs converting into faster output. `; coach += `${first} is stronger than their jumping shows — there's spare strength not yet turning into fast output. `; }
+        else if (dsiScore>=3) { tech += `A high DSI means dynamic output is already close to the isometric ceiling — further gains are more likely to come from building additional maximal strength than from more rate-of-force-development work. `; coach += `${first} is already turning their strength into fast output efficiently. `; }
+      }
+
+      if (jhVal!=null || ppVal!=null){
+        const bits=[];
+        if (jhVal!=null) bits.push(`jump height of ${fmt(jhVal)} cm`);
+        if (ppVal!=null) bits.push(`peak power of ${fmt(ppVal)} W/kg`);
+        tech += `Overall output — ${bits.join(' and ')} — is the magnitude context behind the strategy detail above: how these qualities translate into total force/power production.`;
+      }
+
+      html += `<div class="tp-results-group-title" style="margin-top:0;">Jump</div>`;
+      html += profileBlock(tech, coach || `${first}'s jump output looks in line with the squad — no standout strengths or concerns from this test alone.`);
     }
-    html += `<div class="tp-profile-strategy"><b>${strategy}</b> jump strategy</div>
-      <div class="tp-reasoning-item">${strategyDetail}</div>`;
-  } else {
-    html += `<div class="hint" style="padding:6px 4px;">No RSI or FT:CT on file yet — can't classify reactive/elastic strategy specifically.</div>`;
   }
 
-  // EUR -- SSC utilisation specifically, distinct from raw contact-time efficiency
-  if (eurScore!=null){
-    const eurNote = eurScore>=3
-      ? `EUR of ${fmt(eurVal)} sits at or above the norm band — the countermovement itself is contributing meaningfully to jump height, consistent with good stretch-shortening cycle utilisation.`
-      : eurScore<=1
-      ? `EUR of ${fmt(eurVal)} sits below the norm band — the countermovement is adding relatively little beyond a pure concentric push. Worth checking eccentric control specifically, since this is a distinct quality from raw jump height.`
-      : `EUR of ${fmt(eurVal)} sits mid-band — the countermovement contributes a normal amount to jump height, nothing notably over- or under-utilised.`;
-    html += `<div class="tp-reasoning-item">${eurNote}</div>`;
-  }
+  // ============================== STRENGTH ==============================
+  {
+    const imtpRel = d.imtp_relForce, imtpAbs = d.imtp_absForce;
+    const imtpRelScore = imtpRel!=null ? bs(imtpRel, 'imtp_relForce', gender) : null;
+    const nordicM = metricByKey('nordic_maxForce'), nordicVal = repVal(nordicM, d);
+    const nordicScore = nordicVal!=null ? metricScore(nordicM, d, gender) : null;
+    const kneeM = metricByKey('kneeExtIso_maxForce'), kneeVal = repVal(kneeM, d);
+    const kneeScore = kneeVal!=null ? metricScore(kneeM, d, gender) : null;
 
-  // DSI -- the orthogonal axis: is force being expressed dynamically, or left in reserve
-  if (dsiScore!=null){
-    const dsiNote = dsiScore<=1
-      ? `DSI of ${fmt(dsiVal)} sits below the norm band — there's a meaningful gap between what ${first} can produce isometrically and what's being expressed dynamically in the CMJ. This typically responds to ballistic/rate-of-force-development work (plyometrics, contrast training, Olympic lift variations) rather than more maximal-strength volume.`
-      : dsiScore>=3
-      ? `DSI of ${fmt(dsiVal)} sits at or above the norm band — dynamic force output is already close to isometric capacity. Further ceiling-raising is more likely to come from building additional maximal strength than from more rate-of-force-development work.`
-      : `DSI of ${fmt(dsiVal)} sits mid-band — a reasonable balance between maximal and dynamically-expressed force, no clear lean toward one type of work over the other.`;
-    html += `<div class="tp-reasoning-item">${dsiNote}</div>`;
-  }
+    if (imtpRel!=null || nordicVal!=null || kneeVal!=null){
+      let tech = '', coach = '';
 
-  // Speed cross-reference -- acceleration and top speed are related but
-  // distinct qualities from jump-based force/elastic profiling; note
-  // coherence rather than re-classifying on a new axis
-  const accelM = metricByKey('speed_5m') || metricByKey('speed_10m');
-  const accelVal = accelM ? repVal(accelM, d) : null;
-  const maxVelVal = repVal(metricByKey('speed_maxVel'), d);
-  if (accelVal!=null && hasElasticRead){
-    const accelScore = bs(accelVal, accelM.key, gender);
-    if (accelScore!=null){
-      const coherent = (accelScore>=3) === (elasticScore>=2.5);
-      html += `<div class="tp-reasoning-item">${accelM.label} of ${fmt(accelVal)}${accelM.unit} ${coherent ? 'lines up with' : 'sits somewhat apart from'} the jump-based strategy above — acceleration draws on a related but distinct quality (horizontal force application into the ground).</div>`;
+      if (imtpRel!=null){
+        const statusTxt = imtpRelScore>=3 ? 'sits at or above the norm band' : imtpRelScore<=1 ? 'sits below the norm band' : 'sits mid-band';
+        tech += `<b>IMTP Relative Force of ${fmt(imtpRel)} N/kg</b> ${statusTxt} — a maximal isometric pull, generally the most foundational strength reading in the battery: it's the ceiling most of the dynamic Jump-group qualities above (DSI in particular) get compared against. `;
+        if (imtpRelScore<=1){ tech += `A low reading here is rarely an isolated issue — it tends to set the ceiling on jump height, sprint power, and load tolerance more broadly, so it's usually the first priority regardless of what other tests show. `; coach += `${first}'s base strength is behind the squad — this is likely a limiting factor for several other physical qualities, not just strength itself. `; }
+        else if (imtpRelScore>=3) coach += `${first} has a strong base strength platform to build other qualities on. `;
+        if (imtpAbs!=null) tech += `Absolute force of ${fmt(imtpAbs)} N (not bodyweight-normalised) is worth reading alongside this — absolute strength matters more for contact situations (holding off an opponent, winning a physical duel), while relative strength matters more for moving the athlete's own body mass quickly (jumping, sprinting, changing direction). `;
+      }
+
+      if (nordicVal!=null){
+        const statusTxt = nordicScore>=3 ? 'sits at or above the norm band' : nordicScore<=1 ? 'sits below the norm band' : 'sits mid-band';
+        tech += `<b>Nordic ${nordicM.label.includes('Force')?'Force':'Torque'} of ${fmt(nordicVal)} ${nordicM.unit}</b> ${statusTxt} — eccentric hamstring strength specifically. This is the strength-group metric with the strongest direct evidence base for injury risk: low eccentric hamstring strength is a well-established hamstring strain risk factor in football, and this is a genuine physio-facing screening number, not just a performance one. `;
+        if (nordicScore<=1){ tech += `A low reading here should be flagged directly for injury-risk discussion, not just filed as a training target. `; coach += `${first}'s hamstring strength is a genuine injury-risk flag, worth a conversation with physio, not just something to train around. `; }
+        else if (nordicScore>=3) coach += `${first}'s hamstring strength looks protective against strain risk. `;
+      }
+
+      if (kneeVal!=null){
+        const statusTxt = kneeScore>=3 ? 'sits at or above the norm band' : kneeScore<=1 ? 'sits below the norm band' : 'sits mid-band';
+        tech += `<b>Knee Extension Isometric Force of ${fmt(kneeVal)} ${kneeM.unit}</b> ${statusTxt} — quadriceps strength, most relevant as a return-to-play/rehab benchmark (ACL and other knee-injury protocols commonly use limb-symmetry index on this exact test) rather than a general performance indicator. `;
+        if (kneeScore<=1) coach += `${first}'s quad strength on the tested side is worth flagging to physio if there's any rehab history. `;
+      }
+
+      html += `<div class="tp-results-group-title">Strength</div>`;
+      html += profileBlock(tech, coach || `${first}'s base strength profile looks in line with the squad.`);
     }
   }
-  if (maxVelVal!=null){
-    html += `<div class="tp-reasoning-item">Max velocity of ${fmt(maxVelVal)} m/s reflects stride mechanics and elastic qualities specific to high-speed running — a different context from jump testing, so it's worth reading on its own terms rather than expecting it to match the jump profile above.</div>`;
+
+  // ============================== HIP STRENGTH ==============================
+  {
+    const hipAnkleRatio = d.hipAnkle_ratio_L!=null || d.hipAnkle_ratio_R!=null ? ((d.hipAnkle_ratio_L||0)+(d.hipAnkle_ratio_R||0))/([d.hipAnkle_ratio_L,d.hipAnkle_ratio_R].filter(v=>v!=null).length||1) : null;
+    const hipKneeRatio = d.hipKnee_ratio_L!=null || d.hipKnee_ratio_R!=null ? ((d.hipKnee_ratio_L||0)+(d.hipKnee_ratio_R||0))/([d.hipKnee_ratio_L,d.hipKnee_ratio_R].filter(v=>v!=null).length||1) : null;
+    const hipAnkleScore = hipAnkleRatio!=null ? bs(hipAnkleRatio, 'hipAnkle_ratio', gender) : null;
+    const hipKneeScore = hipKneeRatio!=null ? bs(hipKneeRatio, 'hipKnee_ratio', gender) : null;
+
+    if (hipAnkleRatio!=null || hipKneeRatio!=null){
+      let tech = '', coach = '';
+      tech += `Hip adduction-to-abduction ratio is football's most specifically evidence-backed injury-risk screen: a low ratio (weak adductors relative to abductors) is a well-established risk factor for groin/adductor strain, one of the most common non-contact injuries in the sport. This is physio-facing first, performance-facing second. `;
+      if (hipAnkleRatio!=null){
+        const statusTxt = hipAnkleScore>=3 ? 'sits at or above the norm band' : hipAnkleScore<=1 ? 'sits below the norm band — a risk flag' : 'sits mid-band';
+        tech += `Hip (Ankle-position) ratio of ${fmt(hipAnkleRatio)} ${statusTxt}. `;
+        if (hipAnkleScore<=1) coach += `${first}'s adductor strength relative to abductors is a genuine groin-injury risk flag — worth prioritising directly, not just noting. `;
+      }
+      if (hipKneeRatio!=null){
+        const statusTxt = hipKneeScore>=3 ? 'sits at or above the norm band' : hipKneeScore<=1 ? 'sits below the norm band — a risk flag' : 'sits mid-band';
+        tech += `Hip (Knee-position) ratio of ${fmt(hipKneeRatio)} ${statusTxt}. `;
+      }
+      html += `<div class="tp-results-group-title">Hip Strength</div>`;
+      html += profileBlock(tech, coach || `${first}'s hip strength ratios look within a normal, low-risk range.`);
+    }
   }
 
-  // Aerobic/MAS -- a genuinely separate physiological system (the engine),
-  // kept standalone rather than folded into the force/elastic axis
-  const masVal = repVal(metricByKey('aerobic_result'), d);
-  if (masVal!=null){
-    const masScore = bs(masVal, 'aerobic_result', gender);
-    const masNote = masScore!=null && masScore<=1
-      ? `sits below the norm band — an area to develop for repeat high-intensity efforts and recovery between them, distinct from the power qualities above.`
-      : masScore!=null && masScore>=3
-      ? `sits at or above the norm band — a strong aerobic base to support repeat high-intensity efforts and recovery between them.`
-      : `sits mid-band for the squad.`;
-    html += `<div class="tp-reasoning-item">MAS of ${fmt(masVal)} km/h ${masNote}</div>`;
+  // ============================== SPEED & AEROBIC ==============================
+  {
+    const s5 = d.speed_5m, s10 = d.speed_10m, s20 = d.speed_20m, maxVel = d.speed_maxVel, mas = d.aerobic_result;
+    if (s5!=null || s10!=null || s20!=null || maxVel!=null || mas!=null){
+      let tech = '', coach = '';
+      if (s5!=null || s10!=null){
+        const accelKey = s5!=null ? 'speed_5m' : 'speed_10m', accelVal = s5!=null ? s5 : s10;
+        const accelScore = bs(accelVal, accelKey, gender);
+        tech += `Early acceleration (${accelKey==='speed_5m'?'5m':'10m'} split, ${fmt(accelVal)}s) reflects horizontal force application into the ground over the first few steps — a quality closely related to the lower-body strength and force qualities above, more than to top-end sprint mechanics. `;
+        if (accelScore!=null && accelScore<=1) coach += `${first}'s first few steps out of the blocks are behind the squad — likely connected to the strength picture above rather than a separate issue. `;
+      }
+      if (maxVel!=null){
+        const mvScore = bs(maxVel, 'speed_maxVel', gender);
+        tech += `Max velocity of ${fmt(maxVel)} m/s draws on stride mechanics and elastic qualities specific to high-speed running — a different velocity domain from both the acceleration split and the jump-based elastic qualities above, so it's worth reading on its own terms rather than expecting it to match either. `;
+        if (mvScore!=null && mvScore>=3) coach += `${first}'s top-end speed is a genuine strength, separate from jump or acceleration qualities. `;
+      }
+      if (mas!=null){
+        const masScore = bs(mas, 'aerobic_result', gender);
+        tech += `MAS of ${fmt(mas)} km/h reflects the aerobic engine specifically — a genuinely separate physiological system from everything above, relevant to repeat high-intensity efforts and recovery between them rather than single-effort power output. `;
+        if (masScore!=null && masScore<=1) coach += `${first}'s aerobic capacity is an area to build — affects how well they recover between sprints and high-intensity efforts across a match, not raw power. `;
+      }
+      html += `<div class="tp-results-group-title">Speed &amp; Aerobic</div>`;
+      html += profileBlock(tech, coach || `${first}'s speed and aerobic numbers look in line with the squad.`);
+    }
   }
 
+  // ============================== CAPACITY ==============================
+  {
+    const stsM = metricByKey('sts_reps'), stsVal = repVal(stsM, d);
+    const copM = metricByKey('copenhagen_time'), copVal = repVal(copM, d);
+    const heelM = metricByKey('heelRaise_reps'), heelVal = repVal(heelM, d);
+    const bridgeM = metricByKey('hamstringBridge_reps'), bridgeVal = repVal(bridgeM, d);
+    const plankM = metricByKey('sidePlank_time'), plankVal = repVal(plankM, d);
+    if ([stsVal,copVal,heelVal,bridgeVal,plankVal].some(v=>v!=null)){
+      let tech = '', coach = '';
+      tech += `Capacity tests measure muscular endurance under repeated or sustained load, rather than peak force or power — mostly physio-facing, used for injury-prevention screening and return-to-play benchmarks rather than day-to-day performance training. `;
+      if (copVal!=null){
+        const s = metricScore(copM, d, gender);
+        tech += `Copenhagen (adductor) time of ${fmt(copVal)}s ${s!=null&&s<=1?'sits below the norm band':'sits at or above the norm band'} — adductor endurance capacity, the specific exercise/test with strong evidence for groin-injury prevention in football; reads alongside the hip adduction:abduction ratio above rather than in isolation. `;
+        if (s!=null && s<=1) coach += `${first}'s adductor endurance is a groin-injury-prevention flag, worth linking with the hip ratio finding above. `;
+      }
+      if (heelVal!=null){
+        const s = metricScore(heelM, d, gender);
+        tech += `Heel raise reps (${fmt(heelVal)}) reflects calf/Achilles capacity — relevant to Achilles tendinopathy risk screening specifically. `;
+        if (s!=null && s<=1) coach += `${first}'s calf endurance is worth a look, relevant to lower-leg/Achilles load tolerance. `;
+      }
+      if (bridgeVal!=null) tech += `Hamstring bridge reps (${fmt(bridgeVal)}) reflects hamstring muscular endurance — distinct from the Nordic strength reading above (bridge tests repeated-contraction capacity, Nordic tests peak eccentric strength). `;
+      if (plankVal!=null) tech += `Side plank time (${fmt(plankVal)}s) reflects lateral trunk/core endurance — a general athletic-resilience indicator rather than injury-specific to one region. `;
+      if (stsVal!=null) tech += `Sit-to-stand reps (${fmt(stsVal)}) is a general lower-body muscular-endurance screen. `;
+      html += `<div class="tp-results-group-title">Capacity</div>`;
+      html += profileBlock(tech, coach || `${first}'s capacity/endurance markers look within a normal range.`);
+    }
+  }
+
+  if (!html){
+    return `<div class="hint" style="padding:10px 4px;">No test results on file yet for this athlete — an athletic profile needs at least one completed test to say anything meaningful.</div>`;
+  }
   return html;
 }
+
 function buildTestResultsBreakdown(a, d){
   let html = '';
   GROUPS.forEach(group=>{
@@ -1359,15 +1481,10 @@ function buildTrainingPlanHtml(a){
     html += `<div class="hint" style="padding:10px 4px;">No birthdate/age on file — add one in Manage Players to get a training-group categorisation.</div>`;
   }
 
-  // Jump/athletic profile -- a synthesized read across metrics, placed
-  // before the raw per-metric breakdown below
-  html += `<div class="tp-results-group-title" style="margin-top:0;">Jump & Athletic Profile</div>`;
-  html += buildJumpProfileHtml(a, d);
-
-  // Full test-results breakdown -- every metric the athlete has data for,
-  // grouped by test category, with norm-band status and squad ranking.
-  html += `<div class="tp-results-group-title">Test Results</div>`;
-  html += buildTestResultsBreakdown(a, d);
+  // Full athletic profile -- every group the athlete has data for, written
+  // as genuine S&C/physio-facing reasoning plus a head-coach summary line,
+  // not a raw data table.
+  html += buildAthleticProfileHtml(a, d);
 
   // Phase-based programming for each weakness (up to 2)
   if (weaknesses.length){
