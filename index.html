@@ -1974,6 +1974,7 @@ function switchTeamTab(t){
   if (t==='analysis') setTimeout(initTeamAnalysis,60);
   if (t==='gpstraining') setTimeout(drawTeamGpsTraining,60);
   if (t==='gpsmatch') setTimeout(drawTeamGpsMatch,60);
+  if (t==='mas') setTimeout(drawTeamMasView,60);
 }
 
 // ============================================================
@@ -2561,6 +2562,7 @@ function renderTeam(){
         <div class="team-tab tab" data-t="analysis" onclick="switchTeamTab('analysis')">Team Analysis</div>
         <div class="team-tab tab" data-t="gpstraining" onclick="switchTeamTab('gpstraining')">Training Load</div>
         <div class="team-tab tab" data-t="gpsmatch" onclick="switchTeamTab('gpsmatch')">Match Load</div>
+        <div class="team-tab tab" data-t="mas" onclick="switchTeamTab('mas')">MAS / Conditioning</div>
       </div>
       <div class="team-tc tc active" data-t="squad"><div class="quad-body" style="padding-bottom:0;">
         <div class="quad-ctrl-row">${refToggleHtml('heatmap', refFrame.heatmap)}<span class="ref-note">Cell color = status against the selected reference. Toggle changes color only, not the raw values shown.</span></div>
@@ -2616,6 +2618,7 @@ function renderTeam(){
       </div></div>
       <div class="team-tc tc" data-t="gpstraining"><div class="quad-body" id="teamGpsTrainingBody" style="padding:16px 20px;"></div></div>
       <div class="team-tc tc" data-t="gpsmatch"><div class="quad-body" id="teamGpsMatchBody" style="padding:16px 20px;"></div></div>
+      <div class="team-tc tc" data-t="mas"><div class="quad-body" id="teamMasBody" style="padding:16px 20px;"></div></div>
     </div>`;
   buildSquadTable();
   buildTeamTrendMetricOptions();
@@ -3060,6 +3063,65 @@ let teamAcwrChartInstance = null;
 let teamAcwrMetric = 'total_distance_m';
 function setTeamAcwrMetric(m){ teamAcwrMetric = m; drawTeamGpsTraining(); }
 let teamSessionLoadChartInstance = null;
+let masIntervalDuration = 30; // seconds -- adjustable in the UI
+let masGroupCount = 3;
+function setMasDuration(v){ masIntervalDuration = Math.max(1, +v||30); drawTeamMasView(); }
+function setMasGroupCount(v){ masGroupCount = Math.max(2, Math.min(6, +v||3)); drawTeamMasView(); }
+// Team-wide MAS view: groups players by aerobic capacity and computes the
+// distance each should cover in a given work duration at a spread of %MAS
+// intensities -- the standard way MAS testing gets used practically for
+// interval prescription (same time for everyone, different distance per
+// player's actual tested capacity).
+function drawTeamMasView(){
+  const el = document.getElementById('teamMasBody'); if (!el) return;
+  const players = Object.values(athleteMap).filter(a=>genderFilterVal==='all'||a.gender===genderFilterVal);
+  const rows = players.map(a=>{
+    const d = buildLatest(a.sessions);
+    return { id:a.id, name:a.name, mas:d.aerobic_result };
+  }).filter(r=>r.mas!=null).sort((x,y)=>y.mas-x.mas);
+
+  if (!rows.length){
+    el.innerHTML = `<div class="hint" style="padding:20px;">No MAS (aerobic capacity) results on file for the squad yet.</div>`;
+    return;
+  }
+
+  const n = rows.length;
+  const groupSize = Math.ceil(n / masGroupCount);
+  rows.forEach((r,i)=>{ r.group = Math.floor(i/groupSize) + 1; });
+
+  const pctLevels = [70,80,90,100,110,120];
+  const dist = (mas, pct, sec) => (mas/3.6) * (pct/100) * sec;
+
+  let html = `<div class="quad-ctrl-row" style="margin-bottom:14px;gap:20px;flex-wrap:wrap;align-items:center;">
+    <label style="font-size:12px;color:var(--text-muted);">Interval duration:
+      <input type="number" min="1" value="${masIntervalDuration}" style="width:60px;margin-left:6px;padding:3px 6px;" onchange="setMasDuration(this.value)"> sec
+    </label>
+    <label style="font-size:12px;color:var(--text-muted);">Groups:
+      <input type="number" min="2" max="6" value="${masGroupCount}" style="width:50px;margin-left:6px;padding:3px 6px;" onchange="setMasGroupCount(this.value)">
+    </label>
+  </div>`;
+
+  html += `<div class="pq-heading">Group Prescriptions (${masIntervalDuration}s efforts)</div>
+    <div class="chart-note"><span>▪ Each group's distance is set from its slowest member's MAS, not the average — so nobody in the group is being asked to exceed what they've actually tested at.</span></div>`;
+  const groups = {};
+  rows.forEach(r=>{ (groups[r.group] = groups[r.group]||[]).push(r); });
+  html += `<table class="rpt-table" style="margin-bottom:22px;"><thead><tr><th>Group</th><th>Players</th><th>Group MAS (min)</th>${pctLevels.map(p=>`<th>${p}% MAS</th>`).join('')}</tr></thead><tbody>`;
+  Object.keys(groups).sort((a,b)=>a-b).forEach(gNum=>{
+    const g = groups[gNum];
+    const minMas = Math.min(...g.map(r=>r.mas));
+    html += `<tr><td class="lbl">Group ${gNum}</td><td>${g.map(r=>r.name).join(', ')}</td><td>${fmt(minMas)} km/h</td>${pctLevels.map(p=>`<td>${fmt(dist(minMas,p,masIntervalDuration))} m</td>`).join('')}</tr>`;
+  });
+  html += `</tbody></table>`;
+
+  html += `<div class="pq-heading">Individual (${masIntervalDuration}s efforts)</div>`;
+  html += `<table class="rpt-table"><thead><tr><th>Player</th><th>MAS</th><th>Group</th>${pctLevels.map(p=>`<th>${p}%</th>`).join('')}</tr></thead><tbody>`;
+  rows.forEach(r=>{
+    html += `<tr><td class="lbl">${r.name}</td><td>${fmt(r.mas)} km/h</td><td>Group ${r.group}</td>${pctLevels.map(p=>`<td>${fmt(dist(r.mas,p,masIntervalDuration))} m</td>`).join('')}</tr>`;
+  });
+  html += `</tbody></table>`;
+
+  el.innerHTML = html;
+}
 function drawTeamGpsTraining(){
   const el = document.getElementById('teamGpsTrainingBody'); if (!el) return;
   const players = Object.values(athleteMap).filter(a=>genderFilterVal==='all'||a.gender===genderFilterVal);
