@@ -715,6 +715,7 @@ function mapSonraTrainingRow(row){
     player_name: row.playerName,
     drill_name: isEntireSession ? '' : ((row.drillTitle||'')+practice),
     drill_title: isEntireSession ? '' : (row.drillTitle||''),
+    drill_practice: isEntireSession ? '' : (row.drillPractice && row.drillPractice!==row.drillTitle ? row.drillPractice : ''),
     drill_start_time: row.drillStartTime || '',
     duration_min: row.totaltimeinMinutes, total_distance_m: row.distanceTotal,
     hsr_distance_m: row.highSpeedRunningAbs, sprint_distance_m: row.sprintDistance,
@@ -754,7 +755,7 @@ function mergeTrainingGpsFromSheet(rows){
     if (!a.trainingGps) a.trainingGps = [];
     const rowKey = trainingGpsKey(r);
     const entry = {
-      date: r.date, session_label: r.session_label||'', drill_name: r.drill_name||'', drill_title: r.drill_title||'', drill_start_time: r.drill_start_time||'',
+      date: r.date, session_label: r.session_label||'', drill_name: r.drill_name||'', drill_title: r.drill_title||'', drill_practice: r.drill_practice||'', drill_start_time: r.drill_start_time||'',
       duration_min: pf(r.duration_min), total_distance_m: pf(r.total_distance_m),
       hsr_distance_m: pf(r.hsr_distance_m), sprint_distance_m: pf(r.sprint_distance_m), vhsd_distance_m: pf(r.vhsd_distance_m),
       accel_decel_count: pf(r.accel_decel_count), max_velocity_kmh: pf(r.max_velocity_kmh),
@@ -2855,9 +2856,9 @@ function daySquadBreakdown(players, dateStr){
     // grouped by player rather than mixed into the squad's drill table --
     // a one-off "Box to Box 2" or "Technical 3" for a single player
     // rehabbing doesn't belong alongside the main session's actual drills.
-    // Squad drills are grouped by their base title (e.g. "Attacking
-    // Organisation") with each practice variant (Game/Possession/
-    // Technical) as its own row underneath, instead of one flat list.
+    // Squad drills are a flat, chronologically-ordered list keyed by the
+    // practice name itself (e.g. "Game", "Boxes") rather than grouped
+    // under the parent title -- just a plain rundown of the session.
     rowsToday.filter(e=>e.drill_name).forEach(e=>{
       const stats = ()=>({ duration:0, n:0, distance:0, hsr:0, accelDecel:0, distances:[], accelDecels:[], hsrs:[], heartRates:[], startSec:null });
       const accumulate = (b, e)=>{
@@ -2872,10 +2873,9 @@ function daySquadBreakdown(players, dateStr){
         if (!rehabByPlayer[a.name][e.drill_name]) rehabByPlayer[a.name][e.drill_name] = stats();
         accumulate(rehabByPlayer[a.name][e.drill_name], e);
       } else {
-        const title = e.drill_title || e.drill_name;
-        if (!drillTotals[title]) drillTotals[title] = {};
-        if (!drillTotals[title][e.drill_name]) drillTotals[title][e.drill_name] = stats();
-        accumulate(drillTotals[title][e.drill_name], e);
+        const label = e.drill_practice || e.drill_title || e.drill_name;
+        if (!drillTotals[label]) drillTotals[label] = stats();
+        accumulate(drillTotals[label], e);
       }
     });
   });
@@ -2972,25 +2972,12 @@ function buildDailyReportHtml(dateStr, customTitle){
   // the same way, rather than relying on whatever order the sheet rows
   // happened to be in (or guessing from drill names, which breaks the
   // moment a session's structure changes).
-  const titleStartSec = title => Math.min(...Object.values(drillTotals[title]).map(v=>v.startSec==null?Infinity:v.startSec));
-  const drillTitles = Object.keys(drillTotals).sort((a,b)=>titleStartSec(a)-titleStartSec(b));
+  // Flat, chronologically-ordered rundown of the session -- just the
+  // practice name and its metrics, no title grouping.
+  const drillLabels = Object.keys(drillTotals).sort((a,b)=>(drillTotals[a].startSec==null?Infinity:drillTotals[a].startSec)-(drillTotals[b].startSec==null?Infinity:drillTotals[b].startSec));
   html += `<div class="rpt-section-title">Drill-by-Drill</div>
     <table class="rpt-table">${drillTableHead}<tbody>
-    ${drillTitles.map(title=>{
-      const variants = drillTotals[title];
-      const variantNames = Object.keys(variants).sort((a,b)=>(variants[a].startSec==null?Infinity:variants[a].startSec)-(variants[b].startSec==null?Infinity:variants[b].startSec));
-      if (variantNames.length===1 && variantNames[0]===title){
-        // No practice sub-variants -- a single plain row, no group header needed
-        return drillStatRow(title, variants[title], 0);
-      }
-      // Bold group header (title only, spans the Drill column) followed by
-      // each practice variant as an indented row underneath it
-      return `<tr><td class="lbl" style="font-weight:800;">${title}</td><td colspan="8"></td></tr>`
-        + variantNames.map(vn=>{
-            const practiceLabel = vn.slice(title.length).trim().replace(/^\(|\)$/g,'') || vn;
-            return drillStatRow(practiceLabel, variants[vn], 18);
-          }).join('');
-    }).join('')}
+    ${drillLabels.map(label=>drillStatRow(label, drillTotals[label], 0)).join('')}
     </tbody></table>`;
 
   const rehabPlayers = Object.keys(rehabByPlayer);
