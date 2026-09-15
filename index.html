@@ -739,6 +739,11 @@ function sonraDateToISO(d){
   const [dd,mm,yyyy] = parts;
   return `${yyyy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`;
 }
+// Sonra's "Max Speed" export field is in m/s, not km/h despite the internal
+// schema field being named max_velocity_kmh -- convert at the mapping
+// boundary so every downstream consumer (norm bands, personal-best
+// tracking, display) can trust the field is genuinely in km/h.
+function msToKmh(v){ const n = pf(v); return n==null ? null : n*3.6; }
 function mapSonraTrainingRow(row){
   if ('Total Distance' in row){
     // Simplified human-readable export
@@ -758,7 +763,7 @@ function mapSonraTrainingRow(row){
       hsr_distance_m: row['High Speed Running (Absolute)'], sprint_distance_m: row['Sprint Distance'],
       vhsd_distance_m: row['Distance Zone 6 (Absolute)'], // present once the export includes per-speed-zone distance; falls back to null on older exports without it
       accel_decel_count: (pf(row['Accelerations (Absolute)'])||0) + (pf(row['Decelerations (Absolute)'])||0),
-      max_velocity_kmh: row['Max Speed'],
+      max_velocity_kmh: msToKmh(row['Max Speed']),
       avg_heart_rate: null, max_heart_rate: null, // not present in this export
       pct_time_red_zone: null, // not present in this export
       participation: 'Full', // no Participation column in this export -- everyone defaults to Full
@@ -778,7 +783,7 @@ function mapSonraTrainingRow(row){
     hsr_distance_m: row.highSpeedRunningAbs, sprint_distance_m: row.sprintDistance,
     vhsd_distance_m: row.distanceZ6Abs,
     accel_decel_count: (pf(row.accelerationsRel)||0) + (pf(row.decelerationsRel)||0),
-    max_velocity_kmh: row.maxSpeed,
+    max_velocity_kmh: msToKmh(row.maxSpeed),
     avg_heart_rate: row.avgHeartrate, max_heart_rate: row.maxHeartrate,
     pct_time_red_zone: row.percentTimeInRedZoneRel,
     participation: row.Participation || '',
