@@ -714,6 +714,7 @@ function mapSonraTrainingRow(row){
     session_label: row.sessionType || '',
     player_name: row.playerName,
     drill_name: isEntireSession ? '' : ((row.drillTitle||'')+practice),
+    drill_title: isEntireSession ? '' : (row.drillTitle||''),
     drill_start_time: row.drillStartTime || '',
     duration_min: row.totaltimeinMinutes, total_distance_m: row.distanceTotal,
     hsr_distance_m: row.highSpeedRunningAbs, sprint_distance_m: row.sprintDistance,
@@ -753,7 +754,7 @@ function mergeTrainingGpsFromSheet(rows){
     if (!a.trainingGps) a.trainingGps = [];
     const rowKey = trainingGpsKey(r);
     const entry = {
-      date: r.date, session_label: r.session_label||'', drill_name: r.drill_name||'', drill_start_time: r.drill_start_time||'',
+      date: r.date, session_label: r.session_label||'', drill_name: r.drill_name||'', drill_title: r.drill_title||'', drill_start_time: r.drill_start_time||'',
       duration_min: pf(r.duration_min), total_distance_m: pf(r.total_distance_m),
       hsr_distance_m: pf(r.hsr_distance_m), sprint_distance_m: pf(r.sprint_distance_m), vhsd_distance_m: pf(r.vhsd_distance_m),
       accel_decel_count: pf(r.accel_decel_count), max_velocity_kmh: pf(r.max_velocity_kmh),
@@ -2806,7 +2807,8 @@ function median(arr){
 }
 function daySquadBreakdown(players, dateStr){
   const playerTotals = [];
-  const drillTotals = {};
+  const drillTotals = {};      // squad drills only, grouped by title -> practice variant
+  const rehabByPlayer = {};    // rehab/individual-program drills, grouped by player name
   players.forEach(a=>{
     const rowsToday = (a.trainingGps||[]).filter(e=>e.date===dateStr);
     if (!rowsToday.length) return;
@@ -2836,15 +2838,34 @@ function daySquadBreakdown(players, dateStr){
     // is kept for the rate calculations below, where summed-distance ÷
     // summed-duration already gives the correct per-player rate (the
     // player-count factor cancels out in that division).
+    //
+    // Rehab/individual-program entries are kept entirely separate and
+    // grouped by player rather than mixed into the squad's drill table --
+    // a one-off "Box to Box 2" or "Technical 3" for a single player
+    // rehabbing doesn't belong alongside the main session's actual drills.
+    // Squad drills are grouped by their base title (e.g. "Attacking
+    // Organisation") with each practice variant (Game/Possession/
+    // Technical) as its own row underneath, instead of one flat list.
     rowsToday.filter(e=>e.drill_name).forEach(e=>{
-      const dn = e.drill_name;
-      if (!drillTotals[dn]) drillTotals[dn] = { duration:0, n:0, distance:0, hsr:0, accelDecel:0, distances:[], accelDecels:[], hsrs:[], heartRates:[] };
-      drillTotals[dn].duration += e.duration_min||0; drillTotals[dn].n++; drillTotals[dn].distance += e.total_distance_m||0; drillTotals[dn].hsr += e.hsr_distance_m||0; drillTotals[dn].accelDecel += e.accel_decel_count||0;
-      drillTotals[dn].distances.push(e.total_distance_m); drillTotals[dn].accelDecels.push(e.accel_decel_count);
-      drillTotals[dn].hsrs.push(e.hsr_distance_m); drillTotals[dn].heartRates.push(e.avg_heart_rate);
+      const stats = ()=>({ duration:0, n:0, distance:0, hsr:0, accelDecel:0, distances:[], accelDecels:[], hsrs:[], heartRates:[] });
+      const accumulate = (b, e)=>{
+        b.duration += e.duration_min||0; b.n++; b.distance += e.total_distance_m||0; b.hsr += e.hsr_distance_m||0; b.accelDecel += e.accel_decel_count||0;
+        b.distances.push(e.total_distance_m); b.accelDecels.push(e.accel_decel_count);
+        b.hsrs.push(e.hsr_distance_m); b.heartRates.push(e.avg_heart_rate);
+      };
+      if (e.participation==='Rehab'){
+        if (!rehabByPlayer[a.name]) rehabByPlayer[a.name] = {};
+        if (!rehabByPlayer[a.name][e.drill_name]) rehabByPlayer[a.name][e.drill_name] = stats();
+        accumulate(rehabByPlayer[a.name][e.drill_name], e);
+      } else {
+        const title = e.drill_title || e.drill_name;
+        if (!drillTotals[title]) drillTotals[title] = {};
+        if (!drillTotals[title][e.drill_name]) drillTotals[title][e.drill_name] = stats();
+        accumulate(drillTotals[title][e.drill_name], e);
+      }
     });
   });
-  return { playerTotals, drillTotals };
+  return { playerTotals, drillTotals, rehabByPlayer };
 }
 function findReferenceSession(a, todayDate, label){
   if (!label) return null;
@@ -2868,7 +2889,7 @@ function trainingSessionDates(players){
 function pctDiff(today, ref){ return (ref) ? ((today-ref)/ref)*100 : null; }
 function buildDailyReportHtml(dateStr, customTitle){
   const players = Object.values(athleteMap).filter(a=>genderFilterVal==='all'||a.gender===genderFilterVal);
-  const { playerTotals, drillTotals } = daySquadBreakdown(players, dateStr);
+  const { playerTotals, drillTotals, rehabByPlayer } = daySquadBreakdown(players, dateStr);
   if (!playerTotals.length) return `<div class="hint" style="padding:20px 4px;">No training GPS data for ${dateStr}.</div>`;
   const labelsUsed = [...new Set(playerTotals.map(t=>{
     const a = athleteMap[t.id];
@@ -2915,22 +2936,55 @@ function buildDailyReportHtml(dateStr, customTitle){
       <tr><td class="lbl">% of Reference</td><td>${fmt(pctDiff(teamAvg.duration,ref.duration)+100)}%</td><td>${fmt(pctDiff(teamAvg.distance,ref.distance)+100)}%</td><td>${fmt(pctDiff(teamAvg.hsr,ref.hsr)+100)}%</td><td>${fmt(pctDiff(teamAvg.accelDecel,ref.accelDecel)+100)}%</td><td colspan="2">—</td></tr>` : `<tr><td class="lbl" colspan="7" style="color:var(--text-muted);font-style:italic;">No prior "${primaryLabel||'—'}" session on record to compare against yet.</td></tr>`}
     </tbody></table>`;
 
-  const drillNames = Object.keys(drillTotals);
+  // Renders one stats row given a {duration,n,distance,hsr,accelDecel,
+  // distances,accelDecels,hsrs,heartRates} bucket -- shared by both the
+  // squad drill table and the rehab section below so the numbers are
+  // computed identically in both places.
+  const drillStatRow = (label, d, indentPx)=>{
+    const avgDuration = d.n ? d.duration/d.n : null;
+    const medDistance = median(d.distances);
+    const medHsr = median(d.hsrs);
+    const medAccelDecel = median(d.accelDecels);
+    const medHeartRate = median(d.heartRates);
+    const distPerMin = d.duration ? d.distance/d.duration : null;
+    const hsrPerMin = d.duration ? d.hsr/d.duration : null;
+    const accelDecelPerMin = d.duration ? d.accelDecel/d.duration : null;
+    return `<tr><td class="lbl"${indentPx?` style="padding-left:${indentPx}px;color:var(--text-muted);"`:''}>${label}</td><td>${fmt(avgDuration)} min</td><td>${fmt(medDistance)} m</td><td>${fmt(medHsr)} m</td><td>${fmt(medAccelDecel)}</td><td>${medHeartRate!=null?fmt(medHeartRate)+' bpm':'—'}</td><td>${fmt(distPerMin)} m/min</td><td>${fmt(hsrPerMin)} m/min</td><td>${fmt(accelDecelPerMin)}/min</td></tr>`;
+  };
+  const drillTableHead = `<thead><tr><th>Drill</th><th>Duration</th><th>Median Distance</th><th>Median HSR</th><th>Median Accel/Decel</th><th>Median Heart Rate</th><th>Dist/min</th><th>HSR/min</th><th>Accel/Decel per min</th></tr></thead>`;
+
+  const drillTitles = Object.keys(drillTotals);
   html += `<div class="rpt-section-title">Drill-by-Drill</div>
-    <table class="rpt-table"><thead><tr><th>Drill</th><th>Duration</th><th>Median Distance</th><th>Median HSR</th><th>Median Accel/Decel</th><th>Median Heart Rate</th><th>Dist/min</th><th>HSR/min</th><th>Accel/Decel per min</th></tr></thead><tbody>
-    ${drillNames.map(name=>{
-      const d = drillTotals[name];
-      const avgDuration = d.n ? d.duration/d.n : null;
-      const medDistance = median(d.distances);
-      const medHsr = median(d.hsrs);
-      const medAccelDecel = median(d.accelDecels);
-      const medHeartRate = median(d.heartRates);
-      const distPerMin = d.duration ? d.distance/d.duration : null;
-      const hsrPerMin = d.duration ? d.hsr/d.duration : null;
-      const accelDecelPerMin = d.duration ? d.accelDecel/d.duration : null;
-      return `<tr><td class="lbl">${name}</td><td>${fmt(avgDuration)} min</td><td>${fmt(medDistance)} m</td><td>${fmt(medHsr)} m</td><td>${fmt(medAccelDecel)}</td><td>${medHeartRate!=null?fmt(medHeartRate)+' bpm':'—'}</td><td>${fmt(distPerMin)} m/min</td><td>${fmt(hsrPerMin)} m/min</td><td>${fmt(accelDecelPerMin)}/min</td></tr>`;
+    <table class="rpt-table">${drillTableHead}<tbody>
+    ${drillTitles.map(title=>{
+      const variants = drillTotals[title];
+      const variantNames = Object.keys(variants);
+      if (variantNames.length===1 && variantNames[0]===title){
+        // No practice sub-variants -- a single plain row, no group header needed
+        return drillStatRow(title, variants[title], 0);
+      }
+      // Bold group header (title only, spans the Drill column) followed by
+      // each practice variant as an indented row underneath it
+      return `<tr><td class="lbl" style="font-weight:800;">${title}</td><td colspan="8"></td></tr>`
+        + variantNames.map(vn=>{
+            const practiceLabel = vn.slice(title.length).trim().replace(/^\(|\)$/g,'') || vn;
+            return drillStatRow(practiceLabel, variants[vn], 18);
+          }).join('');
     }).join('')}
     </tbody></table>`;
+
+  const rehabPlayers = Object.keys(rehabByPlayer);
+  if (rehabPlayers.length){
+    html += `<div class="rpt-section-title">Individual / Rehab Program</div>
+      <div class="chart-note" style="margin-bottom:6px;"><span>▪ Individualised program drills, kept separate from the main squad session above.</span></div>
+      <table class="rpt-table">${drillTableHead}<tbody>
+      ${rehabPlayers.map(name=>{
+        const drills = rehabByPlayer[name];
+        return `<tr><td class="lbl" style="font-weight:800;">${name}</td><td colspan="8"></td></tr>`
+          + Object.keys(drills).map(dn=>drillStatRow(dn, drills[dn], 18)).join('');
+      }).join('')}
+      </tbody></table>`;
+  }
 
   const flagged = flagOutliersMulti(playerTotals.map(t=>({...t, pctBest: maxVelPctOfBest(athleteMap[t.id], t.maxVel), velConfidence: maxVelConfidence(athleteMap[t.id])})), ['distance','hsr','sprint','accelDecel']);
   const flaggedById = {}; flagged.forEach(t=>flaggedById[t.id]=t);
