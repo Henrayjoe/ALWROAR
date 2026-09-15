@@ -579,6 +579,27 @@ function computeAge(birthdate, fallbackAge){
   return pf(fallbackAge);
 }
 function normalizeName(n){ return (n||'').trim().toLowerCase().replace(/\s+/g,' '); }
+// Falls back to first-initial + last-name matching when a data source
+// exports abbreviated first names (e.g. StatSports showing "L Punch" for
+// a roster entry of "Lily Punch") -- without this, those rows silently
+// fail to match anyone and their data just vanishes on import with no
+// error shown. Only resolves when exactly one roster player shares that
+// initial+lastname combination; genuinely ambiguous cases (two players
+// with the same initial and surname) are left unresolved rather than
+// risking data landing on the wrong athlete.
+function initialLastNameKey(name){
+  const parts = normalizeName(name).split(' ').filter(Boolean);
+  if (parts.length < 2) return null;
+  return parts[0][0] + '|' + parts[parts.length-1];
+}
+function resolvePlayerId(rawName){
+  const exact = nameIndex[normalizeName(rawName)];
+  if (exact) return exact;
+  const key = initialLastNameKey(rawName);
+  if (!key) return null;
+  const matches = Object.keys(athleteMap).filter(id => initialLastNameKey(athleteMap[id].name)===key);
+  return matches.length===1 ? matches[0] : null;
+}
 function safeDiv(a,b){ a=pf(a); b=pf(b); if(a==null||b==null||b===0) return null; return +(a/b).toFixed(2); }
 function recomputeDerived(d){
   d.hipAnkle_ratio_L = ratioOf(d.hipAnkle_addPeak_L, d.hipAnkle_abdPeak_L);
@@ -678,7 +699,7 @@ function purgeNamelessAthletes(){
 function mergeResultsFromSheet(resultRows){
   let matched=0, unmatched=0;
   resultRows.forEach(r=>{
-    const id = nameIndex[normalizeName(r.name)];
+    const id = resolvePlayerId(r.name);
     if (!id){ unmatched++; return; }
     const parsed = deriveSession(r); // parses + computes derived fields
     upsertSession(id, r.test_date, parsed);
@@ -698,7 +719,19 @@ function gameGpsKey(r){ return [r.date, r.opponent||''].join('|'); }
 // rows into our internal schema. Sonra's "Entire Session" row becomes our
 // whole-session marker (drill_name:''); every other drillTitle keeps its
 // real name. Date converts from Sonra's DD/MM/YYYY to YYYY-MM-DD.
-function isSonraFormat(row){ return row && ('distanceTotal' in row) && ('playerName' in row); }
+// Two real-world Sonra export shapes seen in practice: the full raw dump
+// (camelCase field names, e.g. distanceTotal/playerName) and a simplified,
+// human-readable export (spaced column names, e.g. "Total Distance"/
+// "Player Display Name") that's missing several fields entirely --
+// notably heart rate, VHSD, Participation, and any Drill Practice split.
+// Both are detected and mapped into the same internal schema; fields the
+// simplified export doesn't have are left null/blank rather than guessed.
+function isSonraFormat(row){
+  return row && (
+    (('distanceTotal' in row) && ('playerName' in row)) ||
+    (('Total Distance' in row) && ('Player Display Name' in row))
+  );
+}
 function sonraDateToISO(d){
   if (!d) return null;
   const parts = d.split('/');
@@ -707,6 +740,30 @@ function sonraDateToISO(d){
   return `${yyyy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`;
 }
 function mapSonraTrainingRow(row){
+  if ('Total Distance' in row){
+    // Simplified human-readable export
+    const title = (row['Drill Title']||'').trim();
+    const isEntireSession = title.toLowerCase()==='entire session';
+    const totalTimeSec = parseTimeToSeconds(row['Total Time']);
+    return {
+      date: sonraDateToISO(row['Session Date']),
+      session_label: row['Session Type'] || '',
+      player_name: row['Player Display Name'],
+      drill_name: isEntireSession ? '' : title,
+      drill_title: isEntireSession ? '' : title,
+      drill_practice: '', // not present in this export -- falls back to drill_title downstream
+      drill_start_time: row['Drill Start Time'] || '',
+      duration_min: totalTimeSec!=null ? totalTimeSec/60 : null,
+      total_distance_m: row['Total Distance'],
+      hsr_distance_m: row['High Speed Running (Absolute)'], sprint_distance_m: row['Sprint Distance'],
+      vhsd_distance_m: null, // not present in this export
+      accel_decel_count: (pf(row['Accelerations (Absolute)'])||0) + (pf(row['Decelerations (Absolute)'])||0),
+      max_velocity_kmh: row['Max Speed'],
+      avg_heart_rate: null, max_heart_rate: null, // not present in this export
+      pct_time_red_zone: null, // not present in this export
+      participation: 'Full', // no Participation column in this export -- everyone defaults to Full
+    };
+  }
   const practice = row.drillPractice && row.drillPractice!==row.drillTitle ? ` (${row.drillPractice})` : '';
   const isEntireSession = (row.drillTitle||'').trim().toLowerCase()==='entire session';
   return {
@@ -748,8 +805,7 @@ function mergeTrainingGpsFromSheet(rows){
   let added=0, updated=0, skipped=0;
   if (rows.length && isSonraFormat(rows[0])) rows = rows.map(mapSonraTrainingRow);
   rows.forEach(r=>{
-    const key = normalizeName(r.player_name);
-    const id = key ? nameIndex[key] : null;
+    const id = r.player_name ? resolvePlayerId(r.player_name) : null;
     if (!id || !athleteMap[id]){ skipped++; return; }
     const a = athleteMap[id];
     if (!a.trainingGps) a.trainingGps = [];
@@ -770,8 +826,7 @@ function mergeTrainingGpsFromSheet(rows){
 function mergeGameGpsFromSheet(rows){
   let added=0, updated=0, skipped=0;
   rows.forEach(r=>{
-    const key = normalizeName(r.player_name);
-    const id = key ? nameIndex[key] : null;
+    const id = r.player_name ? resolvePlayerId(r.player_name) : null;
     if (!id || !athleteMap[id]){ skipped++; return; }
     const a = athleteMap[id];
     if (!a.gameGps) a.gameGps = [];
