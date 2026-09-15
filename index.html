@@ -756,7 +756,7 @@ function mapSonraTrainingRow(row){
       duration_min: totalTimeSec!=null ? totalTimeSec/60 : null,
       total_distance_m: row['Total Distance'],
       hsr_distance_m: row['High Speed Running (Absolute)'], sprint_distance_m: row['Sprint Distance'],
-      vhsd_distance_m: null, // not present in this export
+      vhsd_distance_m: row['Distance Zone 6 (Absolute)'], // present once the export includes per-speed-zone distance; falls back to null on older exports without it
       accel_decel_count: (pf(row['Accelerations (Absolute)'])||0) + (pf(row['Decelerations (Absolute)'])||0),
       max_velocity_kmh: row['Max Speed'],
       avg_heart_rate: null, max_heart_rate: null, // not present in this export
