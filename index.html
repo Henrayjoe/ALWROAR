@@ -2820,8 +2820,7 @@ function median(arr){
 }
 function daySquadBreakdown(players, dateStr){
   const playerTotals = [];
-  const drillTotals = {};      // squad drills only, grouped by title -> practice variant
-  const rehabByPlayer = {};    // rehab/individual-program drills, grouped by player name
+  const drillTotals = {};      // squad drills only, in the sheet's own row order
   players.forEach(a=>{
     const rowsToday = (a.trainingGps||[]).filter(e=>e.date===dateStr);
     if (!rowsToday.length) return;
@@ -2845,41 +2844,23 @@ function daySquadBreakdown(players, dateStr){
     t.avgHr = t.hrDur ? t.hrWeighted/t.hrDur : null;
     playerTotals.push(t);
     // Drill breakdown: always the real named drills only, never the
-    // whole-session row itself (that would show as a fake pseudo-drill).
-    // duration is tracked as a sum + count so it can be AVERAGED for
-    // display (how long the drill actually lasted) while the sum itself
-    // is kept for the rate calculations below, where summed-distance ÷
-    // summed-duration already gives the correct per-player rate (the
-    // player-count factor cancels out in that division).
-    //
-    // Rehab/individual-program entries are kept entirely separate and
-    // grouped by player rather than mixed into the squad's drill table --
-    // a one-off "Box to Box 2" or "Technical 3" for a single player
-    // rehabbing doesn't belong alongside the main session's actual drills.
-    // Squad drills are a flat, chronologically-ordered list keyed by the
-    // practice name itself (e.g. "Game", "Boxes") rather than grouped
-    // under the parent title -- just a plain rundown of the session.
-    rowsToday.filter(e=>e.drill_name).forEach(e=>{
-      const stats = ()=>({ duration:0, n:0, distance:0, hsr:0, accelDecel:0, distances:[], accelDecels:[], hsrs:[], heartRates:[], startSec:null });
-      const accumulate = (b, e)=>{
-        b.duration += e.duration_min||0; b.n++; b.distance += e.total_distance_m||0; b.hsr += e.hsr_distance_m||0; b.accelDecel += e.accel_decel_count||0;
-        b.distances.push(e.total_distance_m); b.accelDecels.push(e.accel_decel_count);
-        b.hsrs.push(e.hsr_distance_m); b.heartRates.push(e.avg_heart_rate);
-        const sec = parseTimeToSeconds(e.drill_start_time);
-        if (sec!=null && (b.startSec==null || sec<b.startSec)) b.startSec = sec;
-      };
-      if (e.participation==='Rehab'){
-        if (!rehabByPlayer[a.name]) rehabByPlayer[a.name] = {};
-        if (!rehabByPlayer[a.name][e.drill_name]) rehabByPlayer[a.name][e.drill_name] = stats();
-        accumulate(rehabByPlayer[a.name][e.drill_name], e);
-      } else {
-        const label = e.drill_practice || e.drill_title || e.drill_name;
-        if (!drillTotals[label]) drillTotals[label] = stats();
-        accumulate(drillTotals[label], e);
-      }
+    // whole-session row itself (that would show as a fake pseudo-drill),
+    // and never rehab/individual-program entries -- those aren't part of
+    // the main squad session and are left out entirely rather than shown
+    // separately. Squad drills are a flat list keyed by the practice name
+    // itself (e.g. "Game", "Boxes"), in the order the sheet's own rows
+    // come in -- that's already the session's running order, so no
+    // re-sorting is applied.
+    rowsToday.filter(e=>e.drill_name && e.participation!=='Rehab').forEach(e=>{
+      const label = e.drill_practice || e.drill_title || e.drill_name;
+      if (!drillTotals[label]) drillTotals[label] = { duration:0, n:0, distance:0, hsr:0, accelDecel:0, distances:[], accelDecels:[], hsrs:[], heartRates:[] };
+      const b = drillTotals[label];
+      b.duration += e.duration_min||0; b.n++; b.distance += e.total_distance_m||0; b.hsr += e.hsr_distance_m||0; b.accelDecel += e.accel_decel_count||0;
+      b.distances.push(e.total_distance_m); b.accelDecels.push(e.accel_decel_count);
+      b.hsrs.push(e.hsr_distance_m); b.heartRates.push(e.avg_heart_rate);
     });
   });
-  return { playerTotals, drillTotals, rehabByPlayer };
+  return { playerTotals, drillTotals };
 }
 function findReferenceSession(a, todayDate, label){
   if (!label) return null;
@@ -2903,7 +2884,7 @@ function trainingSessionDates(players){
 function pctDiff(today, ref){ return (ref) ? ((today-ref)/ref)*100 : null; }
 function buildDailyReportHtml(dateStr, customTitle){
   const players = Object.values(athleteMap).filter(a=>genderFilterVal==='all'||a.gender===genderFilterVal);
-  const { playerTotals, drillTotals, rehabByPlayer } = daySquadBreakdown(players, dateStr);
+  const { playerTotals, drillTotals } = daySquadBreakdown(players, dateStr);
   if (!playerTotals.length) return `<div class="hint" style="padding:20px 4px;">No training GPS data for ${dateStr}.</div>`;
   const labelsUsed = [...new Set(playerTotals.map(t=>{
     const a = athleteMap[t.id];
@@ -2972,26 +2953,14 @@ function buildDailyReportHtml(dateStr, customTitle){
   // the same way, rather than relying on whatever order the sheet rows
   // happened to be in (or guessing from drill names, which breaks the
   // moment a session's structure changes).
-  // Flat, chronologically-ordered rundown of the session -- just the
-  // practice name and its metrics, no title grouping.
-  const drillLabels = Object.keys(drillTotals).sort((a,b)=>(drillTotals[a].startSec==null?Infinity:drillTotals[a].startSec)-(drillTotals[b].startSec==null?Infinity:drillTotals[b].startSec));
+  // Simple rundown of the session -- just the drill order as the sheet's
+  // own rows have it (that already reflects how the session was run), no
+  // re-sorting and no separate rehab section.
+  const drillLabels = Object.keys(drillTotals);
   html += `<div class="rpt-section-title">Drill-by-Drill</div>
     <table class="rpt-table">${drillTableHead}<tbody>
     ${drillLabels.map(label=>drillStatRow(label, drillTotals[label], 0)).join('')}
     </tbody></table>`;
-
-  const rehabPlayers = Object.keys(rehabByPlayer);
-  if (rehabPlayers.length){
-    html += `<div class="rpt-section-title">Individual / Rehab Program</div>
-      <div class="chart-note" style="margin-bottom:6px;"><span>▪ Individualised program drills, kept separate from the main squad session above.</span></div>
-      <table class="rpt-table">${drillTableHead}<tbody>
-      ${rehabPlayers.map(name=>{
-        const drills = rehabByPlayer[name];
-        return `<tr><td class="lbl" style="font-weight:800;">${name}</td><td colspan="8"></td></tr>`
-          + Object.keys(drills).sort((a,b)=>(drills[a].startSec==null?Infinity:drills[a].startSec)-(drills[b].startSec==null?Infinity:drills[b].startSec)).map(dn=>drillStatRow(dn, drills[dn], 18)).join('');
-      }).join('')}
-      </tbody></table>`;
-  }
 
   const flagged = flagOutliersMulti(playerTotals.map(t=>({...t, pctBest: maxVelPctOfBest(athleteMap[t.id], t.maxVel), velConfidence: maxVelConfidence(athleteMap[t.id])})), ['distance','hsr','sprint','accelDecel']);
   const flaggedById = {}; flagged.forEach(t=>flaggedById[t.id]=t);
