@@ -2848,16 +2848,20 @@ function daySquadBreakdown(players, dateStr){
     // and never rehab/individual-program entries -- those aren't part of
     // the main squad session and are left out entirely rather than shown
     // separately. Squad drills are a flat list keyed by the practice name
-    // itself (e.g. "Game", "Boxes"), in the order the sheet's own rows
-    // come in -- that's already the session's running order, so no
-    // re-sorting is applied.
+    // itself (e.g. "Game", "Boxes"), ordered by each drill's actual
+    // recorded start time -- the sheet's own row order does NOT reliably
+    // match the order the session was run in (e.g. Warm Up is listed
+    // last per player in the raw export, not first), so start time is
+    // the only field that's actually authoritative here.
     rowsToday.filter(e=>e.drill_name && e.participation!=='Rehab').forEach(e=>{
       const label = e.drill_practice || e.drill_title || e.drill_name;
-      if (!drillTotals[label]) drillTotals[label] = { duration:0, n:0, distance:0, hsr:0, accelDecel:0, distances:[], accelDecels:[], hsrs:[], heartRates:[] };
+      if (!drillTotals[label]) drillTotals[label] = { duration:0, n:0, distance:0, hsr:0, accelDecel:0, distances:[], accelDecels:[], hsrs:[], heartRates:[], startSec:null };
       const b = drillTotals[label];
       b.duration += e.duration_min||0; b.n++; b.distance += e.total_distance_m||0; b.hsr += e.hsr_distance_m||0; b.accelDecel += e.accel_decel_count||0;
       b.distances.push(e.total_distance_m); b.accelDecels.push(e.accel_decel_count);
       b.hsrs.push(e.hsr_distance_m); b.heartRates.push(e.avg_heart_rate);
+      const sec = parseTimeToSeconds(e.drill_start_time);
+      if (sec!=null && (b.startSec==null || sec<b.startSec)) b.startSec = sec;
     });
   });
   return { playerTotals, drillTotals };
@@ -2956,7 +2960,9 @@ function buildDailyReportHtml(dateStr, customTitle){
   // Simple rundown of the session -- just the drill order as the sheet's
   // own rows have it (that already reflects how the session was run), no
   // re-sorting and no separate rehab section.
-  const drillLabels = Object.keys(drillTotals);
+  // Ordered by actual recorded start time (see the accumulation note
+  // above for why the sheet's raw row order can't be trusted for this).
+  const drillLabels = Object.keys(drillTotals).sort((a,b)=>(drillTotals[a].startSec==null?Infinity:drillTotals[a].startSec)-(drillTotals[b].startSec==null?Infinity:drillTotals[b].startSec));
   html += `<div class="rpt-section-title">Drill-by-Drill</div>
     <table class="rpt-table">${drillTableHead}<tbody>
     ${drillLabels.map(label=>drillStatRow(label, drillTotals[label], 0)).join('')}
