@@ -2799,6 +2799,18 @@ function maxVelConfidence(a){
   const n = maxVelSampleSize(a);
   return n<3 ? 'low' : n<6 ? 'medium' : 'high';
 }
+// Parses a "H:MM:SS" or "HH:MM:SS" start-time string into seconds since
+// midnight, for correct chronological sorting. Plain string comparison
+// breaks on this data -- real exports use non-zero-padded hours (e.g.
+// "9:26:00"), so "10:12:21" would sort before "9:26:00" as text even
+// though it's later in the day.
+function parseTimeToSeconds(t){
+  if (!t) return null;
+  const parts = String(t).split(':').map(Number);
+  if (parts.some(isNaN) || !parts.length) return null;
+  const [h=0,m=0,s=0] = parts;
+  return h*3600 + m*60 + s;
+}
 function median(arr){
   const vals = arr.filter(v=>v!=null).sort((a,b)=>a-b);
   if (!vals.length) return null;
@@ -2847,11 +2859,13 @@ function daySquadBreakdown(players, dateStr){
     // Organisation") with each practice variant (Game/Possession/
     // Technical) as its own row underneath, instead of one flat list.
     rowsToday.filter(e=>e.drill_name).forEach(e=>{
-      const stats = ()=>({ duration:0, n:0, distance:0, hsr:0, accelDecel:0, distances:[], accelDecels:[], hsrs:[], heartRates:[] });
+      const stats = ()=>({ duration:0, n:0, distance:0, hsr:0, accelDecel:0, distances:[], accelDecels:[], hsrs:[], heartRates:[], startSec:null });
       const accumulate = (b, e)=>{
         b.duration += e.duration_min||0; b.n++; b.distance += e.total_distance_m||0; b.hsr += e.hsr_distance_m||0; b.accelDecel += e.accel_decel_count||0;
         b.distances.push(e.total_distance_m); b.accelDecels.push(e.accel_decel_count);
         b.hsrs.push(e.hsr_distance_m); b.heartRates.push(e.avg_heart_rate);
+        const sec = parseTimeToSeconds(e.drill_start_time);
+        if (sec!=null && (b.startSec==null || sec<b.startSec)) b.startSec = sec;
       };
       if (e.participation==='Rehab'){
         if (!rehabByPlayer[a.name]) rehabByPlayer[a.name] = {};
@@ -2953,12 +2967,18 @@ function buildDailyReportHtml(dateStr, customTitle){
   };
   const drillTableHead = `<thead><tr><th>Drill</th><th>Duration</th><th>Median Distance</th><th>Median HSR</th><th>Median Accel/Decel</th><th>Median Heart Rate</th><th>Dist/min</th><th>HSR/min</th><th>Accel/Decel per min</th></tr></thead>`;
 
-  const drillTitles = Object.keys(drillTotals);
+  // Chronological order -- each title's position is set by its earliest
+  // variant's actual start time, and variants within a title are sorted
+  // the same way, rather than relying on whatever order the sheet rows
+  // happened to be in (or guessing from drill names, which breaks the
+  // moment a session's structure changes).
+  const titleStartSec = title => Math.min(...Object.values(drillTotals[title]).map(v=>v.startSec==null?Infinity:v.startSec));
+  const drillTitles = Object.keys(drillTotals).sort((a,b)=>titleStartSec(a)-titleStartSec(b));
   html += `<div class="rpt-section-title">Drill-by-Drill</div>
     <table class="rpt-table">${drillTableHead}<tbody>
     ${drillTitles.map(title=>{
       const variants = drillTotals[title];
-      const variantNames = Object.keys(variants);
+      const variantNames = Object.keys(variants).sort((a,b)=>(variants[a].startSec==null?Infinity:variants[a].startSec)-(variants[b].startSec==null?Infinity:variants[b].startSec));
       if (variantNames.length===1 && variantNames[0]===title){
         // No practice sub-variants -- a single plain row, no group header needed
         return drillStatRow(title, variants[title], 0);
@@ -2981,7 +3001,7 @@ function buildDailyReportHtml(dateStr, customTitle){
       ${rehabPlayers.map(name=>{
         const drills = rehabByPlayer[name];
         return `<tr><td class="lbl" style="font-weight:800;">${name}</td><td colspan="8"></td></tr>`
-          + Object.keys(drills).map(dn=>drillStatRow(dn, drills[dn], 18)).join('');
+          + Object.keys(drills).sort((a,b)=>(drills[a].startSec==null?Infinity:drills[a].startSec)-(drills[b].startSec==null?Infinity:drills[b].startSec)).map(dn=>drillStatRow(dn, drills[dn], 18)).join('');
       }).join('')}
       </tbody></table>`;
   }
