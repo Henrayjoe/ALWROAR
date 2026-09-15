@@ -1771,6 +1771,7 @@ const DEFAULT_GAME_GPS_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vR
 let CONFIG = { athletesUrl: DEFAULT_ATHLETES_URL, resultsUrl: DEFAULT_RESULTS_URL, trainingGpsUrl: DEFAULT_TRAINING_GPS_URL, gameGpsUrl: DEFAULT_GAME_GPS_URL };
 let SETTINGS = { asymFlag: 10, stsThreshold: null, weeklyTargetMultiplier: 2.5 };
 let SESSION_TYPES = {}; // keyed by `${date}|${session_label}` -> 'principle'|'conditioning'|'tactical-2'|'tactical-1'
+let DAILY_TARGETS = {}; // keyed by date -> {duration,distance,hsr,accelDecel,vhsd}, coach-entered, all optional
 let athleteMap={}, nameIndex={}, selectedId=null, searchQ='', genderFilterVal='all', mode='individual';
 let refFrame = { trends:'league', scatter:'league', radar:'league', heatmap:'league' };
 let squadCollapsed = new Set();
@@ -1790,7 +1791,7 @@ let saveTimer=null, dataSaveTimer=null;
 function persist(){
   clearTimeout(saveTimer);
   saveTimer = setTimeout(async ()=>{
-    try{ await window.storage.set('roar-config', JSON.stringify({CONFIG,NORMS,SETTINGS,SESSION_TYPES}), false); }
+    try{ await window.storage.set('roar-config', JSON.stringify({CONFIG,NORMS,SETTINGS,SESSION_TYPES,DAILY_TARGETS}), false); }
     catch(e){ console.error('save failed', e); }
   }, 200);
 }
@@ -1814,6 +1815,7 @@ async function loadPersisted(){
       if (p.NORMS) NORMS = p.NORMS;
       if (p.SETTINGS) SETTINGS = Object.assign(SETTINGS, p.SETTINGS);
       if (p.SESSION_TYPES) SESSION_TYPES = p.SESSION_TYPES;
+      if (p.DAILY_TARGETS) DAILY_TARGETS = p.DAILY_TARGETS;
     }
   }catch(e){ /* nothing saved yet */ }
   try{
@@ -2872,9 +2874,9 @@ function findReferenceSession(a, todayDate, label){
   if (!candidates.length) return null;
   const byDate = {};
   candidates.forEach(e=>{
-    if (!byDate[e.date]) byDate[e.date] = { duration:0, distance:0, hsr:0, accelDecel:0 };
+    if (!byDate[e.date]) byDate[e.date] = { duration:0, distance:0, hsr:0, vhsd:0, accelDecel:0 };
     byDate[e.date].duration += e.duration_min||0; byDate[e.date].distance += e.total_distance_m||0;
-    byDate[e.date].hsr += e.hsr_distance_m||0; byDate[e.date].accelDecel += e.accel_decel_count||0;
+    byDate[e.date].hsr += e.hsr_distance_m||0; byDate[e.date].vhsd += e.vhsd_distance_m||0; byDate[e.date].accelDecel += e.accel_decel_count||0;
   });
   const dates = Object.keys(byDate).sort();
   const mostRecent = dates[dates.length-1];
@@ -2889,6 +2891,12 @@ function pctDiff(today, ref){ return (ref) ? ((today-ref)/ref)*100 : null; }
 function buildDailyReportHtml(dateStr, customTitle){
   const players = Object.values(athleteMap).filter(a=>genderFilterVal==='all'||a.gender===genderFilterVal);
   const { playerTotals, drillTotals } = daySquadBreakdown(players, dateStr);
+  // Heart rate and red zone % are both monitor-dependent -- if nobody had
+  // a monitor on for this session, showing a column full of dashes is
+  // just noise. Check once, up front, and leave the columns out entirely
+  // rather than rendering them empty.
+  const anyHrData = playerTotals.some(t=>t.avgHr!=null);
+  const anyRedZoneData = playerTotals.some(t=>t.redZone!=null);
   if (!playerTotals.length) return `<div class="hint" style="padding:20px 4px;">No training GPS data for ${dateStr}.</div>`;
   const labelsUsed = [...new Set(playerTotals.map(t=>{
     const a = athleteMap[t.id];
@@ -2896,11 +2904,11 @@ function buildDailyReportHtml(dateStr, customTitle){
     return row ? row.session_label : '';
   }).filter(Boolean))];
   const primaryLabel = labelsUsed[0] || '';
-  const teamTotals = playerTotals.reduce((acc,t)=>({ duration:acc.duration+t.duration, distance:acc.distance+t.distance, hsr:acc.hsr+t.hsr, sprint:acc.sprint+t.sprint, accelDecel:acc.accelDecel+t.accelDecel }), {duration:0,distance:0,hsr:0,sprint:0,accelDecel:0});
+  const teamTotals = playerTotals.reduce((acc,t)=>({ duration:acc.duration+t.duration, distance:acc.distance+t.distance, hsr:acc.hsr+t.hsr, sprint:acc.sprint+t.sprint, vhsd:acc.vhsd+(t.vhsd||0), accelDecel:acc.accelDecel+t.accelDecel }), {duration:0,distance:0,hsr:0,sprint:0,vhsd:0,accelDecel:0});
   const avgN = playerTotals.length;
   const redZoneVals = playerTotals.filter(t=>t.redZone!=null);
   const hrVals = playerTotals.filter(t=>t.avgHr!=null);
-  const teamAvg = { duration:teamTotals.duration/avgN, distance:teamTotals.distance/avgN, hsr:teamTotals.hsr/avgN, sprint:teamTotals.sprint/avgN, accelDecel:teamTotals.accelDecel/avgN, redZone: redZoneVals.length ? redZoneVals.reduce((s,t)=>s+t.redZone,0)/redZoneVals.length : null, avgHr: hrVals.length ? hrVals.reduce((s,t)=>s+t.avgHr,0)/hrVals.length : null };
+  const teamAvg = { duration:teamTotals.duration/avgN, distance:teamTotals.distance/avgN, hsr:teamTotals.hsr/avgN, sprint:teamTotals.sprint/avgN, vhsd:teamTotals.vhsd/avgN, accelDecel:teamTotals.accelDecel/avgN, redZone: redZoneVals.length ? redZoneVals.reduce((s,t)=>s+t.redZone,0)/redZoneVals.length : null, avgHr: hrVals.length ? hrVals.reduce((s,t)=>s+t.avgHr,0)/hrVals.length : null };
   const ref = primaryLabel ? findReferenceSession(athleteMap[playerTotals[0].id], dateStr, primaryLabel) : null;
   const md = matchDemandReference(players);
 
@@ -2927,12 +2935,25 @@ function buildDailyReportHtml(dateStr, customTitle){
       </tbody></table>`;
   }
 
+  const targets = DAILY_TARGETS[dateStr] || {};
+  const targetInput = (field, val)=>`<input type="number" step="any" placeholder="—" value="${val!=null?val:''}" style="width:56px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;font-size:11px;" onchange="setDailyTarget('${dateStr}','${field}',this.value)">`;
+  const hasAnyTarget = Object.keys(targets).length>0;
+  const pctOfTarget = (field, unit)=> targets[field]!=null ? `${fmt(pctDiff(teamAvg[field],targets[field])+100)}%` : '—';
+
+  // Avg HR / Time in Red Zone columns only appear if someone actually had
+  // a monitor on for this session -- otherwise it's just a column of dashes.
+  const hrCols = (anyHrData?1:0) + (anyRedZoneData?1:0);
+  const hrPlaceholder = hrCols>0 ? `<td colspan="${hrCols}">—</td>` : '';
+  const overviewCols = 6 + hrCols; // label + Duration/Distance/HSR/VHSD/Accel-Decel + HR cols
+
   html += `<div class="rpt-section-title">Session Overview</div>
-    <table class="rpt-table"><thead><tr><th></th><th>Duration</th><th>Distance</th><th>HSR</th><th>Accel/Decel</th><th>Avg HR</th><th>Time in Red Zone</th></tr></thead><tbody>
-      <tr><td class="lbl">Today (squad avg)</td><td>${fmt(teamAvg.duration)} min</td><td>${fmt(teamAvg.distance)} m</td><td>${fmt(teamAvg.hsr)} m</td><td>${fmt(teamAvg.accelDecel)}</td><td>${teamAvg.avgHr!=null?fmt(teamAvg.avgHr)+' bpm':'—'}</td><td>${teamAvg.redZone!=null?fmt(teamAvg.redZone)+'%':'—'}</td></tr>
-      ${ref ? `<tr><td class="lbl">Reference (${primaryLabel}, ${ref.date})</td><td>${fmt(ref.duration)} min</td><td>${fmt(ref.distance)} m</td><td>${fmt(ref.hsr)} m</td><td>${fmt(ref.accelDecel)}</td><td colspan="2">—</td></tr>
-      <tr><td class="lbl">Diff</td><td>${teamAvg.duration-ref.duration>=0?'+':''}${fmt(teamAvg.duration-ref.duration)} min</td><td>${teamAvg.distance-ref.distance>=0?'+':''}${fmt(teamAvg.distance-ref.distance)} m</td><td>${teamAvg.hsr-ref.hsr>=0?'+':''}${fmt(teamAvg.hsr-ref.hsr)} m</td><td>${teamAvg.accelDecel-ref.accelDecel>=0?'+':''}${fmt(teamAvg.accelDecel-ref.accelDecel)}</td><td colspan="2">—</td></tr>
-      <tr><td class="lbl">% of Reference</td><td>${fmt(pctDiff(teamAvg.duration,ref.duration)+100)}%</td><td>${fmt(pctDiff(teamAvg.distance,ref.distance)+100)}%</td><td>${fmt(pctDiff(teamAvg.hsr,ref.hsr)+100)}%</td><td>${fmt(pctDiff(teamAvg.accelDecel,ref.accelDecel)+100)}%</td><td colspan="2">—</td></tr>` : `<tr><td class="lbl" colspan="7" style="color:var(--text-muted);font-style:italic;">No prior "${primaryLabel||'—'}" session on record to compare against yet.</td></tr>`}
+    <table class="rpt-table"><thead><tr><th></th><th>Duration</th><th>Distance</th><th>HSR</th><th>VHSD</th><th>Accel/Decel</th>${anyHrData?'<th>Avg HR</th>':''}${anyRedZoneData?'<th>Time in Red Zone</th>':''}</tr></thead><tbody>
+      <tr><td class="lbl">Today (squad avg)</td><td>${fmt(teamAvg.duration)} min</td><td>${fmt(teamAvg.distance)} m</td><td>${fmt(teamAvg.hsr)} m</td><td>${fmt(teamAvg.vhsd)} m</td><td>${fmt(teamAvg.accelDecel)}</td>${anyHrData?`<td>${teamAvg.avgHr!=null?fmt(teamAvg.avgHr)+' bpm':'—'}</td>`:''}${anyRedZoneData?`<td>${teamAvg.redZone!=null?fmt(teamAvg.redZone)+'%':'—'}</td>`:''}</tr>
+      <tr><td class="lbl">My Target</td><td>${targetInput('duration',targets.duration)} min</td><td>${targetInput('distance',targets.distance)} m</td><td>${targetInput('hsr',targets.hsr)} m</td><td>${targetInput('vhsd',targets.vhsd)} m</td><td>${targetInput('accelDecel',targets.accelDecel)}</td>${hrPlaceholder}</tr>
+      ${hasAnyTarget ? `<tr><td class="lbl">% of Target</td><td>${pctOfTarget('duration')}</td><td>${pctOfTarget('distance')}</td><td>${pctOfTarget('hsr')}</td><td>${pctOfTarget('vhsd')}</td><td>${pctOfTarget('accelDecel')}</td>${hrPlaceholder}</tr>` : ''}
+      ${ref ? `<tr><td class="lbl">Reference (${primaryLabel}, ${ref.date})</td><td>${fmt(ref.duration)} min</td><td>${fmt(ref.distance)} m</td><td>${fmt(ref.hsr)} m</td><td>${fmt(ref.vhsd)} m</td><td>${fmt(ref.accelDecel)}</td>${hrPlaceholder}</tr>
+      <tr><td class="lbl">Diff</td><td>${teamAvg.duration-ref.duration>=0?'+':''}${fmt(teamAvg.duration-ref.duration)} min</td><td>${teamAvg.distance-ref.distance>=0?'+':''}${fmt(teamAvg.distance-ref.distance)} m</td><td>${teamAvg.hsr-ref.hsr>=0?'+':''}${fmt(teamAvg.hsr-ref.hsr)} m</td><td>${teamAvg.vhsd-ref.vhsd>=0?'+':''}${fmt(teamAvg.vhsd-ref.vhsd)} m</td><td>${teamAvg.accelDecel-ref.accelDecel>=0?'+':''}${fmt(teamAvg.accelDecel-ref.accelDecel)}</td>${hrPlaceholder}</tr>
+      <tr><td class="lbl">% of Reference</td><td>${fmt(pctDiff(teamAvg.duration,ref.duration)+100)}%</td><td>${fmt(pctDiff(teamAvg.distance,ref.distance)+100)}%</td><td>${fmt(pctDiff(teamAvg.hsr,ref.hsr)+100)}%</td><td>${fmt(pctDiff(teamAvg.vhsd,ref.vhsd)+100)}%</td><td>${fmt(pctDiff(teamAvg.accelDecel,ref.accelDecel)+100)}%</td>${hrPlaceholder}</tr>` : `<tr><td class="lbl" colspan="${overviewCols}" style="color:var(--text-muted);font-style:italic;">No prior "${primaryLabel||'—'}" session on record to compare against yet.</td></tr>`}
     </tbody></table>`;
 
   // Renders one stats row given a {duration,n,distance,hsr,accelDecel,
@@ -2948,9 +2969,9 @@ function buildDailyReportHtml(dateStr, customTitle){
     const distPerMin = d.duration ? d.distance/d.duration : null;
     const hsrPerMin = d.duration ? d.hsr/d.duration : null;
     const accelDecelPerMin = d.duration ? d.accelDecel/d.duration : null;
-    return `<tr><td class="lbl"${indentPx?` style="padding-left:${indentPx}px;color:var(--text-muted);"`:''}>${label}</td><td>${fmt(avgDuration)} min</td><td>${fmt(medDistance)} m</td><td>${fmt(medHsr)} m</td><td>${fmt(medAccelDecel)}</td><td>${medHeartRate!=null?fmt(medHeartRate)+' bpm':'—'}</td><td>${fmt(distPerMin)} m/min</td><td>${fmt(hsrPerMin)} m/min</td><td>${fmt(accelDecelPerMin)}/min</td></tr>`;
+    return `<tr><td class="lbl"${indentPx?` style="padding-left:${indentPx}px;color:var(--text-muted);"`:''}>${label}</td><td>${fmt(avgDuration)} min</td><td>${fmt(medDistance)} m</td><td>${fmt(medHsr)} m</td><td>${fmt(medAccelDecel)}</td>${anyHrData?`<td>${medHeartRate!=null?fmt(medHeartRate)+' bpm':'—'}</td>`:''}<td>${fmt(distPerMin)} m/min</td><td>${fmt(hsrPerMin)} m/min</td><td>${fmt(accelDecelPerMin)}/min</td></tr>`;
   };
-  const drillTableHead = `<thead><tr><th>Drill</th><th>Duration</th><th>Median Distance</th><th>Median HSR</th><th>Median Accel/Decel</th><th>Median Heart Rate</th><th>Dist/min</th><th>HSR/min</th><th>Accel/Decel per min</th></tr></thead>`;
+  const drillTableHead = `<thead><tr><th>Drill</th><th>Duration</th><th>Median Distance</th><th>Median HSR</th><th>Median Accel/Decel</th>${anyHrData?'<th>Median Heart Rate</th>':''}<th>Dist/min</th><th>HSR/min</th><th>Accel/Decel per min</th></tr></thead>`;
 
   // Chronological order -- each title's position is set by its earliest
   // variant's actual start time, and variants within a title are sorted
@@ -2971,13 +2992,14 @@ function buildDailyReportHtml(dateStr, customTitle){
   const flagged = flagOutliersMulti(playerTotals.map(t=>({...t, pctBest: maxVelPctOfBest(athleteMap[t.id], t.maxVel), velConfidence: maxVelConfidence(athleteMap[t.id])})), ['distance','hsr','sprint','accelDecel']);
   const flaggedById = {}; flagged.forEach(t=>flaggedById[t.id]=t);
   const statusList = participationStatus(players, dateStr, playerTotals);
+  const playerRowCols = 7 + hrCols; // Duration/Distance/HSR/SprintDist/AccelDecel/MaxVel/%MAX + HR cols
   html += `<div class="rpt-section-title">Player-by-Player</div>
-    <table class="rpt-table"><thead><tr><th>Player</th><th>Status</th><th>Duration</th><th>Distance</th><th>HSR</th><th>Sprint Dist</th><th>Accel/Decel</th><th>Avg HR</th><th>Time in Red Zone</th><th>Max Vel</th><th>%MAX</th></tr></thead><tbody>
+    <table class="rpt-table"><thead><tr><th>Player</th><th>Status</th><th>Duration</th><th>Distance</th><th>HSR</th><th>Sprint Dist</th><th>Accel/Decel</th>${anyHrData?'<th>Avg HR</th>':''}${anyRedZoneData?'<th>Time in Red Zone</th>':''}<th>Max Vel</th><th>%MAX</th></tr></thead><tbody>
     ${statusList.sort((a,b)=>(flaggedById[b.id]?.distance||-1)-(flaggedById[a.id]?.distance||-1)).map(s=>{
       const t = flaggedById[s.id];
       const statusBadge = `<span style="color:${participationColor(s.label)};font-weight:700;">${s.label}</span>`;
       if (!t){
-        return `<tr style="color:var(--text-muted);"><td class="lbl">${s.name}</td><td>${statusBadge}</td><td colspan="8">—</td></tr>`;
+        return `<tr style="color:var(--text-muted);"><td class="lbl">${s.name}</td><td>${statusBadge}</td><td colspan="${playerRowCols}">—</td></tr>`;
       }
       const pctBestDisplay = t.pctBest!=null ? `${fmt(t.pctBest)}%${t.velConfidence==='low'?' <span title="Based on very few recorded max-velocity efforts — treat with caution until more sprint efforts are recorded.">⚠︎</span>':''}` : '—';
       return `<tr><td class="lbl">${s.name}</td><td>${statusBadge}</td>
@@ -2986,8 +3008,8 @@ function buildDailyReportHtml(dateStr, customTitle){
         <td style="background:${flagBg(t.flags.hsr)}">${fmt(t.hsr)} m${flagTag(t.flags.hsr)}</td>
         <td style="background:${flagBg(t.flags.sprint)}">${fmt(t.sprint)} m${flagTag(t.flags.sprint)}</td>
         <td style="background:${flagBg(t.flags.accelDecel)}">${fmt(t.accelDecel)}${flagTag(t.flags.accelDecel)}</td>
-        <td>${t.avgHr!=null?fmt(t.avgHr)+' bpm':'—'}</td>
-        <td>${t.redZone!=null?fmt(t.redZone)+'%':'—'}</td>
+        ${anyHrData?`<td>${t.avgHr!=null?fmt(t.avgHr)+' bpm':'—'}</td>`:''}
+        ${anyRedZoneData?`<td>${t.redZone!=null?fmt(t.redZone)+'%':'—'}</td>`:''}
         <td>${t.maxVel!=null?fmt(t.maxVel)+' km/h':'—'}</td>
         <td>${pctBestDisplay}</td></tr>`;
     }).join('')}
@@ -3084,6 +3106,15 @@ function setReportMode(m){
 }
 function setSessionType(typeKey, value){
   if (value) SESSION_TYPES[typeKey] = value; else delete SESSION_TYPES[typeKey];
+  persist();
+  renderReportContent();
+}
+function setDailyTarget(dateStr, field, value){
+  const num = value===''? null : (+value);
+  if (!DAILY_TARGETS[dateStr]) DAILY_TARGETS[dateStr] = {};
+  if (num==null || isNaN(num)) delete DAILY_TARGETS[dateStr][field];
+  else DAILY_TARGETS[dateStr][field] = num;
+  if (Object.keys(DAILY_TARGETS[dateStr]).length===0) delete DAILY_TARGETS[dateStr];
   persist();
   renderReportContent();
 }
