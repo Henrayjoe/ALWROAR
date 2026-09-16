@@ -282,6 +282,31 @@
   .rpt-table td { text-align:right; padding:9px 11px; border-bottom:1px solid #f1f2f4; }
   .rpt-table tbody tr:nth-child(even) { background:#fafbfc; }
   .rpt-table .lbl { font-weight:600; }
+  .drill-bar-legend { display:flex; gap:16px; font-size:11px; color:var(--text-muted); margin-bottom:8px; }
+  .drill-bar-legend span { display:inline-flex; align-items:center; gap:5px; }
+  .drill-bar-legend i { width:9px; height:9px; border-radius:2px; display:inline-block; }
+  .drill-bar-row { display:grid; grid-template-columns:120px 1fr; align-items:center; gap:10px; margin-bottom:9px; }
+  .drill-bar-name { font-size:12.5px; font-weight:600; color:var(--text-primary); }
+  .drill-bar-tracks { display:flex; flex-direction:column; gap:4px; }
+  .drill-bar-line { display:flex; align-items:center; gap:8px; }
+  .drill-bar-track { flex:1; height:11px; background:#f1f2f4; border-radius:3px; overflow:hidden; }
+  .drill-bar-fill { height:100%; border-radius:3px; }
+  .drill-bar-val { font-size:11px; color:var(--text-muted); width:64px; flex-shrink:0; text-align:right; }
+  .rpt-header-dual { display:flex; align-items:center; justify-content:space-between; gap:14px; border-bottom:2px solid var(--accent); padding-bottom:14px; margin-bottom:16px; }
+  .rpt-header-dual .rpt-header-main { text-align:center; }
+  .rpt-header-dual .rpt-club { text-align:center; }
+  .rpt-conditions { display:flex; gap:22px; justify-content:center; align-items:center; font-size:12.5px; color:var(--text-secondary); background:#f6f7f9; border-radius:8px; padding:8px 14px; margin-bottom:18px; flex-wrap:wrap; }
+  .rpt-conditions b { color:var(--text-primary); font-weight:700; }
+  .rpt-conditions input { border:1px solid var(--border); border-radius:4px; padding:2px 6px; font-size:12.5px; width:90px; }
+  .kpi-cards { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:22px; }
+  .kpi-card { border:1.5px solid var(--accent); border-radius:10px; padding:14px 10px; text-align:center; }
+  .kpi-card-label { font-size:10px; font-weight:800; letter-spacing:.05em; text-transform:uppercase; color:var(--text-muted); margin-bottom:8px; }
+  .kpi-card-value { font-size:28px; font-weight:800; color:var(--text-primary); line-height:1; }
+  .kpi-card-sub { font-size:10.5px; color:var(--text-muted); margin-top:3px; }
+  .kpi-card-divider { border:none; border-top:1px solid var(--border); margin:9px 0; }
+  .kpi-card-top-label { font-size:9px; font-weight:800; letter-spacing:.04em; color:var(--text-muted); }
+  .kpi-card-top-name { font-size:12px; font-weight:700; color:var(--accent); }
+  @media print { .kpi-cards { grid-template-columns:repeat(4,1fr); gap:8px; } .kpi-card { padding:8px 6px; } .kpi-card-value { font-size:20px; } }
   .rpt-print-hint { font-size:11px; color:var(--accent); font-weight:600; display:flex; align-items:center; gap:5px; }
   @media print {
     @page { size: A4 portrait; margin: 12mm; }
@@ -289,6 +314,7 @@
     #overlayReport { -webkit-print-color-adjust:exact; print-color-adjust:exact; color-adjust:exact; position:static; overflow:visible; background:#fff; padding:0; display:block; }
     #overlayReport .modal { box-shadow:none; max-width:100%; width:100%; margin:0; padding:0; overflow:visible; }
     .no-print { display:none !important; }
+    .print-only { display:inline !important; }
     .rpt-table { font-size:11px; }
     .rpt-table th { font-size:9.5px; padding:6px 7px; white-space:normal; }
     .rpt-table td { padding:6px 7px; }
@@ -335,7 +361,7 @@
     </div>
     <div class="alist" id="alist"><div style="padding:16px;font-size:12px;color:#7a8290;text-align:center">No players yet — add one, or import from a Google Sheet in Settings.</div></div>
     <div class="settings-bar"><span id="sheetStatus">No sheet imported</span><button class="btn-sm" onclick="showConfig()">⚙ Settings</button></div>
-    <div style="text-align:center;font-size:9.5px;color:#a3a9b4;padding:6px 4px 10px;letter-spacing:.02em;">Build 2026-09-16 10:42</div>
+    <div style="text-align:center;font-size:9.5px;color:#a3a9b4;padding:6px 4px 10px;letter-spacing:.02em;">Build 2026-09-16 12:15</div>
   </aside>
   <main class="main" id="main"></main>
 
@@ -773,6 +799,8 @@ function mapSonraTrainingRow(row){
       // deliberately ignore that field and derive Sprint from Zone 6 distance instead, same as VHSD.
       sprint_distance_m: row['Distance Zone 6 (Absolute)'],
       vhsd_distance_m: row['Distance Zone 6 (Absolute)'], // present once the export includes per-speed-zone distance; falls back to null on older exports without it
+      accel_count: pf(row['Accelerations (Absolute)'])||0,
+      decel_count: pf(row['Decelerations (Absolute)'])||0,
       accel_decel_count: (pf(row['Accelerations (Absolute)'])||0) + (pf(row['Decelerations (Absolute)'])||0),
       max_velocity_kmh: msToKmh(row['Max Speed']),
       avg_heart_rate: null, max_heart_rate: null, // not present in this export
@@ -796,6 +824,8 @@ function mapSonraTrainingRow(row){
     // our band definitions, so Sprint is derived from Zone 6 distance instead (same as VHSD).
     sprint_distance_m: row.distanceZ6Abs,
     vhsd_distance_m: row.distanceZ6Abs,
+    accel_count: pf(row.accelerationsRel)||0,
+    decel_count: pf(row.decelerationsRel)||0,
     accel_decel_count: (pf(row.accelerationsRel)||0) + (pf(row.decelerationsRel)||0),
     max_velocity_kmh: msToKmh(row.maxSpeed),
     avg_heart_rate: row.avgHeartrate, max_heart_rate: row.maxHeartrate,
@@ -1846,6 +1876,7 @@ let CONFIG = { athletesUrl: DEFAULT_ATHLETES_URL, resultsUrl: DEFAULT_RESULTS_UR
 let SETTINGS = { asymFlag: 10, stsThreshold: null, weeklyTargetMultiplier: 2.5 };
 let SESSION_TYPES = {}; // keyed by `${date}|${session_label}` -> 'principle'|'conditioning'|'tactical-2'|'tactical-1'
 let STATUS_OVERRIDES = {}; // keyed by `${date}|${playerId}` -> 'Full'|'Partial'|'Did Not Train'|'No GPS', coach-entered, overrides the sheet-derived status
+let SESSION_META = {}; // keyed by date -> {conditions, temperature}, coach-entered, all optional
 let athleteMap={}, nameIndex={}, selectedId=null, searchQ='', genderFilterVal='all', mode='individual';
 let refFrame = { trends:'league', scatter:'league', radar:'league', heatmap:'league' };
 let squadCollapsed = new Set();
@@ -1865,7 +1896,7 @@ let saveTimer=null, dataSaveTimer=null;
 function persist(){
   clearTimeout(saveTimer);
   saveTimer = setTimeout(async ()=>{
-    try{ await window.storage.set('roar-config', JSON.stringify({CONFIG,NORMS,SETTINGS,SESSION_TYPES,STATUS_OVERRIDES}), false); }
+    try{ await window.storage.set('roar-config', JSON.stringify({CONFIG,NORMS,SETTINGS,SESSION_TYPES,STATUS_OVERRIDES,SESSION_META}), false); }
     catch(e){ console.error('save failed', e); }
   }, 200);
 }
@@ -1890,6 +1921,7 @@ async function loadPersisted(){
       if (p.SETTINGS) SETTINGS = Object.assign(SETTINGS, p.SETTINGS);
       if (p.SESSION_TYPES) SESSION_TYPES = p.SESSION_TYPES;
       if (p.STATUS_OVERRIDES) STATUS_OVERRIDES = p.STATUS_OVERRIDES;
+      if (p.SESSION_META) SESSION_META = p.SESSION_META;
     }
   }catch(e){ /* nothing saved yet */ }
   try{
@@ -2837,6 +2869,24 @@ function flagOutliersMulti(rows, keys){
 }
 function flagBg(flag){ return flag==='high' ? 'rgba(200,72,61,0.08)' : flag==='low' ? 'rgba(61,111,176,0.08)' : 'transparent'; }
 function flagTag(flag){ return flag ? ` <span title="${flag==='high'?'Top 10% today':'Bottom 10% today'}" style="font-size:11px;font-weight:800;color:${flag==='high'?'#c8483d':'#3d6fb0'}">${flag==='high'?'▲':'▼'}</span>` : ''; }
+// Renders a "Average X + Y by drill" breakdown, matching the men's GPS
+// report style: one row per drill, two proportional bars per row (each
+// metric scaled against its own max across drills, not a shared scale,
+// since the two metrics are rarely the same order of magnitude).
+function drillBarSection(title, drillLabels, drillTotals, seriesA, seriesB){
+  const avgA = d=>d.n?seriesA.value(d)/d.n:0, avgB = d=>d.n?seriesB.value(d)/d.n:0;
+  const maxA = Math.max(1, ...drillLabels.map(l=>avgA(drillTotals[l])));
+  const maxB = Math.max(1, ...drillLabels.map(l=>avgB(drillTotals[l])));
+  return `<div class="rpt-section-title">${title}</div>
+    <div class="drill-bar-legend"><span><i style="background:${seriesA.color};"></i>${seriesA.label}</span><span><i style="background:${seriesB.color};"></i>${seriesB.label}</span></div>
+    ${drillLabels.map(l=>{
+      const d = drillTotals[l];
+      return `<div class="drill-bar-row"><div class="drill-bar-name">${l}</div><div class="drill-bar-tracks">
+        <div class="drill-bar-line"><div class="drill-bar-track"><div class="drill-bar-fill" style="width:${Math.min(100,(avgA(d)/maxA)*100)}%;background:${seriesA.color};"></div></div><div class="drill-bar-val">${fmt(avgA(d))}${seriesA.unit?' '+seriesA.unit:''}</div></div>
+        <div class="drill-bar-line"><div class="drill-bar-track"><div class="drill-bar-fill" style="width:${Math.min(100,(avgB(d)/maxB)*100)}%;background:${seriesB.color};"></div></div><div class="drill-bar-val">${fmt(avgB(d))}${seriesB.unit?' '+seriesB.unit:''}</div></div>
+      </div></div>`;
+    }).join('')}`;
+}
 // ============================================================
 // PRINTABLE REPORTS — a single day's squad training report (team
 // session overview, drill-by-drill, player-by-player) matching the
@@ -2864,6 +2914,14 @@ function participationStatus(players, dateStr, playerTotals){
 function setStatusOverride(dateStr, playerId, value){
   const key = `${dateStr}|${playerId}`;
   if (!value) delete STATUS_OVERRIDES[key]; else STATUS_OVERRIDES[key] = value;
+  persist();
+  renderReportContent();
+}
+function setSessionMeta(dateStr, field, value){
+  if (!SESSION_META[dateStr]) SESSION_META[dateStr] = {};
+  if (value==='' || value==null) delete SESSION_META[dateStr][field];
+  else SESSION_META[dateStr][field] = value;
+  if (Object.keys(SESSION_META[dateStr]).length===0) delete SESSION_META[dateStr];
   persist();
   renderReportContent();
 }
@@ -2915,10 +2973,11 @@ function daySquadBreakdown(players, dateStr){
     // Player totals: use gpsLoadRows so a whole-session row (if present)
     // is used alone rather than summed on top of its own constituent drills.
     const safeToday = gpsLoadRows(rowsToday);
-    const t = { id:a.id, name:a.name, duration:0, distance:0, hsr:0, sprint:0, vhsd:0, accelDecel:0, maxVel:null, redZoneWeighted:0, redZoneDur:0, hrWeighted:0, hrDur:0, participation:'' };
+    const t = { id:a.id, name:a.name, duration:0, distance:0, hsr:0, sprint:0, vhsd:0, accelDecel:0, accel:0, decel:0, maxVel:null, redZoneWeighted:0, redZoneDur:0, hrWeighted:0, hrDur:0, participation:'' };
     safeToday.forEach(e=>{
       t.duration += e.duration_min||0; t.distance += e.total_distance_m||0;
       t.hsr += e.hsr_distance_m||0; t.sprint += e.sprint_distance_m||0; t.vhsd += e.vhsd_distance_m||0; t.accelDecel += e.accel_decel_count||0;
+      t.accel += e.accel_count||0; t.decel += e.decel_count||0;
       if (e.max_velocity_kmh!=null) t.maxVel = Math.max(t.maxVel||0, e.max_velocity_kmh);
       if (!t.participation && e.participation) t.participation = e.participation;
       // Red Zone % and avg heart rate are both percentages/rates, not
@@ -2947,9 +3006,10 @@ function daySquadBreakdown(players, dateStr){
     // not first), so start time is the only field that's authoritative.
     rowsToday.filter(e=>e.drill_name).forEach(e=>{
       const isRehab = e.participation==='Rehab' || /^rehab/i.test((e.drill_title||e.drill_name||'').trim());
-      const stats = ()=>({ duration:0, n:0, distance:0, hsr:0, accelDecel:0, distances:[], accelDecels:[], hsrs:[], heartRates:[], startSec:null });
+      const stats = ()=>({ duration:0, n:0, distance:0, hsr:0, accelDecel:0, accel:0, decel:0, distances:[], accelDecels:[], hsrs:[], heartRates:[], startSec:null });
       const accumulate = (b, e)=>{
         b.duration += e.duration_min||0; b.n++; b.distance += e.total_distance_m||0; b.hsr += e.hsr_distance_m||0; b.accelDecel += e.accel_decel_count||0;
+        b.accel += e.accel_count||0; b.decel += e.decel_count||0;
         b.distances.push(e.total_distance_m); b.accelDecels.push(e.accel_decel_count);
         b.hsrs.push(e.hsr_distance_m); b.heartRates.push(e.avg_heart_rate);
         const sec = parseTimeToSeconds(e.drill_start_time);
@@ -2989,6 +3049,14 @@ function trainingSessionDates(players){
   return [...dates].sort();
 }
 function pctDiff(today, ref){ return (ref) ? ((today-ref)/ref)*100 : null; }
+function topPerformerName(playerTotals, field){
+  let best = null;
+  playerTotals.forEach(t=>{
+    const v = field==='workRate' ? (t.duration?t.distance/t.duration:0) : (t[field]||0);
+    if (!best || v>best.v) best = { name:t.name, v };
+  });
+  return best ? best.name : '—';
+}
 function buildDailyReportHtml(dateStr, customTitle){
   const players = Object.values(athleteMap).filter(a=>genderFilterVal==='all'||a.gender===genderFilterVal);
   const { playerTotals, drillTotals, rehabByPlayer } = daySquadBreakdown(players, dateStr);
@@ -3010,11 +3078,27 @@ function buildDailyReportHtml(dateStr, customTitle){
   const redZoneVals = playerTotals.filter(t=>t.redZone!=null);
   const hrVals = playerTotals.filter(t=>t.avgHr!=null);
   const teamAvg = { duration:teamTotals.duration/avgN, distance:teamTotals.distance/avgN, hsr:teamTotals.hsr/avgN, sprint:teamTotals.sprint/avgN, vhsd:teamTotals.vhsd/avgN, accelDecel:teamTotals.accelDecel/avgN, redZone: redZoneVals.length ? redZoneVals.reduce((s,t)=>s+t.redZone,0)/redZoneVals.length : null, avgHr: hrVals.length ? hrVals.reduce((s,t)=>s+t.avgHr,0)/hrVals.length : null };
+  teamAvg.workRate = teamAvg.duration ? teamAvg.distance/teamAvg.duration : null;
   const ref = primaryLabel ? findReferenceSession(athleteMap[playerTotals[0].id], dateStr, primaryLabel) : null;
   const md = matchDemandReference(players);
 
   const genDate = new Date().toLocaleDateString('en-AU', {day:'numeric', month:'short', year:'numeric'});
-  let html = `<div class="rpt-header">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">Brisbane Roar · A-League Women</div><div class="rpt-title">${customTitle || 'Team Training Report'}</div><div class="rpt-sub">${dateStr}${primaryLabel?' · '+primaryLabel:''}</div></div><div class="rpt-header-meta"><b>Henri Joensuu</b>Performance Coach<br>Generated ${genDate}</div></div>`;
+  const meta = SESSION_META[dateStr] || {};
+  let html = `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">${customTitle || 'Brisbane Roar Training Report'}</div><div class="rpt-sub">DATE: ${dateStr}${primaryLabel?'&nbsp;&nbsp;SESSION: '+primaryLabel:''}</div></div>${ROAR_LOGO_SVG}</div>
+  <div class="rpt-conditions">
+    <span class="no-print">☀ Conditions: <input type="text" placeholder="e.g. Overcast" value="${meta.conditions||''}" onchange="setSessionMeta('${dateStr}','conditions',this.value)"></span>
+    <span class="print-only" style="display:none;">☀ Conditions: <b>${meta.conditions||'—'}</b></span>
+    <span class="no-print">🌡 Temperature: <input type="text" placeholder="e.g. 21" value="${meta.temperature||''}" onchange="setSessionMeta('${dateStr}','temperature',this.value)">°</span>
+    <span class="print-only" style="display:none;">🌡 Temperature: <b>${meta.temperature?meta.temperature+'°':'—'}</b></span>
+    <span>⏱ Duration: <b>${fmt(teamAvg.duration)}min</b></span>
+    <span style="margin-left:auto;color:var(--text-muted);font-size:11px;">Henri Joensuu · Performance Coach · Generated ${genDate}</span>
+  </div>
+  <div class="kpi-cards">
+    <div class="kpi-card"><div class="kpi-card-label">Total Distance (m)</div><div class="kpi-card-value">${fmt(teamAvg.distance)}</div><div class="kpi-card-sub">Full Training Average</div><hr class="kpi-card-divider"><div class="kpi-card-top-label">TOP PERFORMER</div><div class="kpi-card-top-name">${topPerformerName(playerTotals,'distance')}</div></div>
+    <div class="kpi-card"><div class="kpi-card-label">Work Rate (m/min)</div><div class="kpi-card-value">${fmt(teamAvg.workRate)}</div><div class="kpi-card-sub">Full Training Average</div><hr class="kpi-card-divider"><div class="kpi-card-top-label">TOP PERFORMER</div><div class="kpi-card-top-name">${topPerformerName(playerTotals,'workRate')}</div></div>
+    <div class="kpi-card"><div class="kpi-card-label">HID (m)</div><div class="kpi-card-value">${fmt(teamAvg.hsr)}</div><div class="kpi-card-sub">Full Training Average</div><hr class="kpi-card-divider"><div class="kpi-card-top-label">TOP PERFORMER</div><div class="kpi-card-top-name">${topPerformerName(playerTotals,'hsr')}</div></div>
+    <div class="kpi-card"><div class="kpi-card-label">SD (m)</div><div class="kpi-card-value">${fmt(teamAvg.sprint)}</div><div class="kpi-card-sub">Full Training Average</div><hr class="kpi-card-divider"><div class="kpi-card-top-label">TOP PERFORMER</div><div class="kpi-card-top-name">${topPerformerName(playerTotals,'sprint')}</div></div>
+  </div>`;
 
   // Session type tagging + target breakdown
   const typeKey = dateStr+'|'+primaryLabel;
@@ -3083,6 +3167,18 @@ function buildDailyReportHtml(dateStr, customTitle){
     ${drillLabels.map(label=>drillStatRow(label, drillTotals[label], 0)).join('')}
     </tbody></table>`;
 
+  if (drillLabels.length){
+    html += drillBarSection('Average Distance + HID by Drill', drillLabels, drillTotals,
+      {value:d=>d.distance, label:'Distance', color:'#F26522', unit:'m'},
+      {value:d=>d.hsr, label:'HID', color:'#3d6fb0', unit:'m'});
+    html += drillBarSection('Average Accel + Decel by Drill', drillLabels, drillTotals,
+      {value:d=>d.accel, label:'Accelerations', color:'#F26522', unit:''},
+      {value:d=>d.decel, label:'Decelerations', color:'#3d6fb0', unit:''});
+    html += drillBarSection('Average Work Rate + Duration by Drill', drillLabels, drillTotals,
+      {value:d=>d.duration?(d.distance/d.duration)*d.n:0, label:'Work Rate (m/min)', color:'#F26522', unit:'m/min'},
+      {value:d=>d.duration, label:'Duration (min)', color:'#3d6fb0', unit:'min'});
+  }
+
   const rehabPlayers = Object.keys(rehabByPlayer);
   if (rehabPlayers.length){
     html += `<div class="rpt-section-title">Rehab</div>
@@ -3096,16 +3192,17 @@ function buildDailyReportHtml(dateStr, customTitle){
       </tbody></table>`;
   }
 
-  const flagged = flagOutliersMulti(playerTotals, ['distance','hsr','sprint','accelDecel']);
+  playerTotals.forEach(t=>{ t.workRate = t.duration ? t.distance/t.duration : 0; });
+  const flagged = flagOutliersMulti(playerTotals, ['distance','hsr','sprint','workRate','accel','decel']);
   const flaggedById = {}; flagged.forEach(t=>flaggedById[t.id]=t);
   const statusList = participationStatus(players, dateStr, playerTotals);
-  const playerRowCols = 6 + hrCols; // Duration/Distance/HSR/SprintDist/AccelDecel/MaxVel + HR cols
+  const playerRowCols = 8 + hrCols; // Duration/Distance/WorkRate/HID/SD/Speed/Acc/Dec + HR cols
   const statusSelect = (s)=>`<select onchange="setStatusOverride('${dateStr}','${s.id}',this.value)" style="font-size:12.5px;font-weight:700;color:${participationColor(s.label)};border:1px solid var(--border);border-radius:4px;padding:3px 5px;background:#fff;">
       <option value="" ${!s.override?'selected':''}>Auto (${s.raw})</option>
       ${STATUS_OPTIONS.map(o=>`<option value="${o}" ${s.override===o?'selected':''}>${o}</option>`).join('')}
     </select>`;
   html += `<div class="rpt-section-title">Player-by-Player</div>
-    <table class="rpt-table"><thead><tr><th>Player</th><th>Status</th><th>Duration</th><th>Distance</th><th>HSR</th><th>Sprint Dist</th><th>Accel/Decel</th>${anyHrData?'<th>Avg HR</th>':''}${anyRedZoneData?'<th>Time in Red Zone</th>':''}<th>Max Vel</th></tr></thead><tbody>
+    <table class="rpt-table"><thead><tr><th>Name</th><th>Status</th><th>Training Time</th><th>Total Distance</th><th>Work Rate</th><th>HID</th><th>SD</th>${anyHrData?'<th>Avg HR</th>':''}${anyRedZoneData?'<th>Time in Red Zone</th>':''}<th>Speed</th><th>Acc</th><th>Dec</th></tr></thead><tbody>
     ${statusList.sort((a,b)=>(flaggedById[b.id]?.distance||-1)-(flaggedById[a.id]?.distance||-1)).map(s=>{
       const t = flaggedById[s.id];
       if (!t){
@@ -3114,12 +3211,14 @@ function buildDailyReportHtml(dateStr, customTitle){
       return `<tr><td class="lbl">${s.name}</td><td>${statusSelect(s)}</td>
         <td>${fmt(t.duration)} min</td>
         <td style="background:${flagBg(t.flags.distance)}">${fmt(t.distance)} m${flagTag(t.flags.distance)}</td>
+        <td style="background:${flagBg(t.flags.workRate)}">${fmt(t.workRate)} m/min${flagTag(t.flags.workRate)}</td>
         <td style="background:${flagBg(t.flags.hsr)}">${fmt(t.hsr)} m${flagTag(t.flags.hsr)}</td>
         <td style="background:${flagBg(t.flags.sprint)}">${fmt(t.sprint)} m${flagTag(t.flags.sprint)}</td>
-        <td style="background:${flagBg(t.flags.accelDecel)}">${fmt(t.accelDecel)}${flagTag(t.flags.accelDecel)}</td>
         ${anyHrData?`<td>${t.avgHr!=null?fmt(t.avgHr)+' bpm':'—'}</td>`:''}
         ${anyRedZoneData?`<td>${t.redZone!=null?fmt(t.redZone)+'%':'—'}</td>`:''}
-        <td>${t.maxVel!=null?fmt(t.maxVel)+' km/h':'—'}</td></tr>`;
+        <td>${t.maxVel!=null?fmt(t.maxVel)+' km/h':'—'}</td>
+        <td style="background:${flagBg(t.flags.accel)}">${fmt(t.accel)}${flagTag(t.flags.accel)}</td>
+        <td style="background:${flagBg(t.flags.decel)}">${fmt(t.decel)}${flagTag(t.flags.decel)}</td></tr>`;
     }).join('')}
     </tbody></table>
     <div class="chart-note"><span>▪ Each column's top/bottom 10% is flagged independently. Status defaults to the GPS sheet's Participation column ("Did Not Train" = no data recorded) — use the dropdown to override manually for any player/date; overrides are saved automatically.</span></div>`;
