@@ -210,7 +210,7 @@
   .chart-wrap { background:var(--surface); box-shadow:var(--shadow-sm); border-radius:var(--radius); padding:14px 16px; transition:box-shadow .22s var(--ease); }
   .chart-wrap:hover { box-shadow:var(--shadow-md); }
   .chart-title { font-size:11px; font-weight:600; color:var(--text-secondary); text-transform:uppercase; letter-spacing:.06em; margin-bottom:8px; }
-  .chart-note { font-size:11px; color:var(--text-muted); display:flex; gap:16px; flex-wrap:wrap; }
+  .chart-note { font-size:12px; color:var(--text-muted); display:flex; gap:16px; flex-wrap:wrap; }
   .quad-body { padding:18px 20px; }
   .quad-ctrl-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:6px; }
   .control-label { font-size:11px; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:.06em; margin-right:2px; }
@@ -267,19 +267,21 @@
   .row-item .ri-name{flex:1;font-weight:600;}
   .row-item .ri-meta{font-size:11px;color:var(--text-muted);}
   .rpt-controls { display:flex; gap:10px; align-items:center; margin-bottom:18px; flex-wrap:wrap; }
-  .rpt-header { display:flex; align-items:center; gap:14px; border-bottom:2px solid var(--accent); padding-bottom:12px; margin-bottom:18px; }
+  .rpt-header { display:flex; align-items:center; gap:14px; border-bottom:2px solid var(--accent); padding-bottom:14px; margin-bottom:22px; }
   .rpt-logo { width:44px; height:auto; flex-shrink:0; }
   .rpt-header-main { flex:1; min-width:0; }
-  .rpt-club { font-size:10.5px; font-weight:800; letter-spacing:.08em; color:var(--accent); text-transform:uppercase; margin-bottom:2px; }
-  .rpt-header-meta { text-align:right; font-size:11px; color:var(--text-muted); line-height:1.55; white-space:nowrap; flex-shrink:0; }
-  .rpt-header-meta b { color:var(--text-primary); display:block; font-size:12.5px; font-weight:700; }
-  .rpt-title { font-size:19px; font-weight:800; }
-  .rpt-sub { font-size:12.5px; color:var(--text-muted); margin-top:2px; }
-  .rpt-section-title { font-size:12.5px; font-weight:800; text-transform:uppercase; letter-spacing:.05em; color:var(--text-secondary); margin:22px 0 8px; }
-  .rpt-table { width:100%; border-collapse:collapse; font-size:12px; }
-  .rpt-table th { text-align:right; font-size:10px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-muted); padding:6px 8px; border-bottom:1px solid var(--border); }
+  .rpt-club { font-size:11.5px; font-weight:800; letter-spacing:.08em; color:var(--accent); text-transform:uppercase; margin-bottom:3px; }
+  .rpt-header-meta { text-align:right; font-size:12px; color:var(--text-muted); line-height:1.6; white-space:nowrap; flex-shrink:0; }
+  .rpt-header-meta b { color:var(--text-primary); display:block; font-size:13.5px; font-weight:700; }
+  .rpt-title { font-size:21px; font-weight:800; }
+  .rpt-sub { font-size:13.5px; color:var(--text-muted); margin-top:3px; }
+  .rpt-section-title { font-size:13.5px; font-weight:800; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); margin:28px 0 10px; padding-left:9px; border-left:3px solid var(--accent); }
+  .rpt-table { width:100%; border-collapse:collapse; font-size:13.5px; }
+  .rpt-table th { text-align:right; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; color:var(--text-muted); padding:9px 11px; border-bottom:2px solid var(--border); }
   .rpt-table th:first-child, .rpt-table td:first-child { text-align:left; }
-  .rpt-table td { text-align:right; padding:6px 8px; border-bottom:1px solid #f1f2f4; }
+  .rpt-table td { text-align:right; padding:9px 11px; border-bottom:1px solid #f1f2f4; }
+  .rpt-table tbody tr:nth-child(even) { background:#fafbfc; }
+  .rpt-table .lbl { font-weight:600; }
   .rpt-print-hint { font-size:11px; color:var(--accent); font-weight:600; display:flex; align-items:center; gap:5px; }
   @media print {
     @page { size: A4 portrait; margin: 12mm; }
@@ -287,15 +289,15 @@
     #overlayReport { -webkit-print-color-adjust:exact; print-color-adjust:exact; color-adjust:exact; position:static; overflow:visible; background:#fff; padding:0; display:block; }
     #overlayReport .modal { box-shadow:none; max-width:100%; width:100%; margin:0; padding:0; overflow:visible; }
     .no-print { display:none !important; }
-    .rpt-table { font-size:10px; }
-    .rpt-table th { font-size:8.5px; padding:4px 5px; white-space:normal; }
-    .rpt-table td { padding:4px 5px; }
+    .rpt-table { font-size:11px; }
+    .rpt-table th { font-size:9.5px; padding:6px 7px; white-space:normal; }
+    .rpt-table td { padding:6px 7px; }
     .rpt-table th:first-child, .rpt-table td:first-child { width:16%; }
-    .rpt-section-title { font-size:11px; margin:12px 0 5px; page-break-after:avoid; break-after:avoid; }
+    .rpt-section-title { font-size:12px; margin:16px 0 7px; page-break-after:avoid; break-after:avoid; }
     .rpt-table thead { display:table-header-group; }
     .rpt-table tr { page-break-inside:avoid; break-inside:avoid; }
     canvas { max-width:100% !important; page-break-inside:avoid; break-inside:avoid; }
-    .rpt-table select { -webkit-appearance:none; -moz-appearance:none; appearance:none; border:none !important; background:none !important; padding:0 !important; font-size:9px !important; }
+    .rpt-table select { -webkit-appearance:none; -moz-appearance:none; appearance:none; border:none !important; background:none !important; padding:0 !important; font-size:10px !important; }
     .rpt-table input[type="number"] { -moz-appearance:textfield; border:none !important; padding:0 !important; }
     .rpt-table input[type="number"]::-webkit-inner-spin-button, .rpt-table input[type="number"]::-webkit-outer-spin-button { -webkit-appearance:none; margin:0; }
   }
@@ -415,7 +417,7 @@
   </div>
 </div>
 <div class="overlay" id="overlayReport">
-  <div class="modal" style="max-width:920px;">
+  <div class="modal" style="max-width:980px;">
     <button class="close no-print" data-close>&times;</button>
     <div class="rpt-controls no-print">
       <div class="lb-mode-toggle" id="reportModeToggle">
@@ -1843,7 +1845,6 @@ const DEFAULT_GAME_GPS_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vR
 let CONFIG = { athletesUrl: DEFAULT_ATHLETES_URL, resultsUrl: DEFAULT_RESULTS_URL, trainingGpsUrl: DEFAULT_TRAINING_GPS_URL, gameGpsUrl: DEFAULT_GAME_GPS_URL };
 let SETTINGS = { asymFlag: 10, stsThreshold: null, weeklyTargetMultiplier: 2.5 };
 let SESSION_TYPES = {}; // keyed by `${date}|${session_label}` -> 'principle'|'conditioning'|'tactical-2'|'tactical-1'
-let DAILY_TARGETS = {}; // keyed by date -> {duration,distance,hsr,accelDecel,vhsd}, coach-entered, all optional
 let STATUS_OVERRIDES = {}; // keyed by `${date}|${playerId}` -> 'Full'|'Partial'|'Did Not Train'|'No GPS', coach-entered, overrides the sheet-derived status
 let athleteMap={}, nameIndex={}, selectedId=null, searchQ='', genderFilterVal='all', mode='individual';
 let refFrame = { trends:'league', scatter:'league', radar:'league', heatmap:'league' };
@@ -1864,7 +1865,7 @@ let saveTimer=null, dataSaveTimer=null;
 function persist(){
   clearTimeout(saveTimer);
   saveTimer = setTimeout(async ()=>{
-    try{ await window.storage.set('roar-config', JSON.stringify({CONFIG,NORMS,SETTINGS,SESSION_TYPES,DAILY_TARGETS,STATUS_OVERRIDES}), false); }
+    try{ await window.storage.set('roar-config', JSON.stringify({CONFIG,NORMS,SETTINGS,SESSION_TYPES,STATUS_OVERRIDES}), false); }
     catch(e){ console.error('save failed', e); }
   }, 200);
 }
@@ -1888,7 +1889,6 @@ async function loadPersisted(){
       if (p.NORMS) NORMS = p.NORMS;
       if (p.SETTINGS) SETTINGS = Object.assign(SETTINGS, p.SETTINGS);
       if (p.SESSION_TYPES) SESSION_TYPES = p.SESSION_TYPES;
-      if (p.DAILY_TARGETS) DAILY_TARGETS = p.DAILY_TARGETS;
       if (p.STATUS_OVERRIDES) STATUS_OVERRIDES = p.STATUS_OVERRIDES;
     }
   }catch(e){ /* nothing saved yet */ }
@@ -2836,7 +2836,7 @@ function flagOutliersMulti(rows, keys){
   return result;
 }
 function flagBg(flag){ return flag==='high' ? 'rgba(200,72,61,0.08)' : flag==='low' ? 'rgba(61,111,176,0.08)' : 'transparent'; }
-function flagTag(flag){ return flag ? ` <span style="font-size:9px;color:${flag==='high'?'#c8483d':'#3d6fb0'}">(${flag==='high'?'top':'bottom'} 10%)</span>` : ''; }
+function flagTag(flag){ return flag ? ` <span title="${flag==='high'?'Top 10% today':'Bottom 10% today'}" style="font-size:11px;font-weight:800;color:${flag==='high'?'#c8483d':'#3d6fb0'}">${flag==='high'?'▲':'▼'}</span>` : ''; }
 // ============================================================
 // PRINTABLE REPORTS — a single day's squad training report (team
 // session overview, drill-by-drill, player-by-player) matching the
@@ -3036,11 +3036,6 @@ function buildDailyReportHtml(dateStr, customTitle){
       </tbody></table>`;
   }
 
-  const targets = DAILY_TARGETS[dateStr] || {};
-  const targetInput = (field, val)=>`<input type="number" step="any" placeholder="—" value="${val!=null?val:''}" style="width:56px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;font-size:11px;" onchange="setDailyTarget('${dateStr}','${field}',this.value)">`;
-  const hasAnyTarget = Object.keys(targets).length>0;
-  const pctOfTarget = (field, unit)=> targets[field]!=null ? `${fmt(pctDiff(teamAvg[field],targets[field])+100)}%` : '—';
-
   // Avg HR / Time in Red Zone columns only appear if someone actually had
   // a monitor on for this session -- otherwise it's just a column of dashes.
   const hrCols = (anyHrData?1:0) + (anyRedZoneData?1:0);
@@ -3050,8 +3045,6 @@ function buildDailyReportHtml(dateStr, customTitle){
   html += `<div class="rpt-section-title">Session Overview</div>
     <table class="rpt-table"><thead><tr><th></th><th>Duration</th><th>Distance</th><th>HSR</th><th>VHSD</th><th>Accel/Decel</th>${anyHrData?'<th>Avg HR</th>':''}${anyRedZoneData?'<th>Time in Red Zone</th>':''}</tr></thead><tbody>
       <tr><td class="lbl">Today (squad avg)</td><td>${fmt(teamAvg.duration)} min</td><td>${fmt(teamAvg.distance)} m</td><td>${fmt(teamAvg.hsr)} m</td><td>${fmt(teamAvg.vhsd)} m</td><td>${fmt(teamAvg.accelDecel)}</td>${anyHrData?`<td>${teamAvg.avgHr!=null?fmt(teamAvg.avgHr)+' bpm':'—'}</td>`:''}${anyRedZoneData?`<td>${teamAvg.redZone!=null?fmt(teamAvg.redZone)+'%':'—'}</td>`:''}</tr>
-      <tr><td class="lbl">My Target</td><td>${targetInput('duration',targets.duration)} min</td><td>${targetInput('distance',targets.distance)} m</td><td>${targetInput('hsr',targets.hsr)} m</td><td>${targetInput('vhsd',targets.vhsd)} m</td><td>${targetInput('accelDecel',targets.accelDecel)}</td>${hrPlaceholder}</tr>
-      ${hasAnyTarget ? `<tr><td class="lbl">% of Target</td><td>${pctOfTarget('duration')}</td><td>${pctOfTarget('distance')}</td><td>${pctOfTarget('hsr')}</td><td>${pctOfTarget('vhsd')}</td><td>${pctOfTarget('accelDecel')}</td>${hrPlaceholder}</tr>` : ''}
       ${ref ? `<tr><td class="lbl">Reference (${primaryLabel}, ${ref.date})</td><td>${fmt(ref.duration)} min</td><td>${fmt(ref.distance)} m</td><td>${fmt(ref.hsr)} m</td><td>${fmt(ref.vhsd)} m</td><td>${fmt(ref.accelDecel)}</td>${hrPlaceholder}</tr>
       <tr><td class="lbl">Diff</td><td>${teamAvg.duration-ref.duration>=0?'+':''}${fmt(teamAvg.duration-ref.duration)} min</td><td>${teamAvg.distance-ref.distance>=0?'+':''}${fmt(teamAvg.distance-ref.distance)} m</td><td>${teamAvg.hsr-ref.hsr>=0?'+':''}${fmt(teamAvg.hsr-ref.hsr)} m</td><td>${teamAvg.vhsd-ref.vhsd>=0?'+':''}${fmt(teamAvg.vhsd-ref.vhsd)} m</td><td>${teamAvg.accelDecel-ref.accelDecel>=0?'+':''}${fmt(teamAvg.accelDecel-ref.accelDecel)}</td>${hrPlaceholder}</tr>
       <tr><td class="lbl">% of Reference</td><td>${fmt(pctDiff(teamAvg.duration,ref.duration)+100)}%</td><td>${fmt(pctDiff(teamAvg.distance,ref.distance)+100)}%</td><td>${fmt(pctDiff(teamAvg.hsr,ref.hsr)+100)}%</td><td>${fmt(pctDiff(teamAvg.vhsd,ref.vhsd)+100)}%</td><td>${fmt(pctDiff(teamAvg.accelDecel,ref.accelDecel)+100)}%</td>${hrPlaceholder}</tr>` : `<tr><td class="lbl" colspan="${overviewCols}" style="color:var(--text-muted);font-style:italic;">No prior "${primaryLabel||'—'}" session on record to compare against yet.</td></tr>`}
@@ -3107,7 +3100,7 @@ function buildDailyReportHtml(dateStr, customTitle){
   const flaggedById = {}; flagged.forEach(t=>flaggedById[t.id]=t);
   const statusList = participationStatus(players, dateStr, playerTotals);
   const playerRowCols = 6 + hrCols; // Duration/Distance/HSR/SprintDist/AccelDecel/MaxVel + HR cols
-  const statusSelect = (s)=>`<select onchange="setStatusOverride('${dateStr}','${s.id}',this.value)" style="font-size:11px;font-weight:700;color:${participationColor(s.label)};border:1px solid var(--border);border-radius:4px;padding:2px 4px;background:#fff;">
+  const statusSelect = (s)=>`<select onchange="setStatusOverride('${dateStr}','${s.id}',this.value)" style="font-size:12.5px;font-weight:700;color:${participationColor(s.label)};border:1px solid var(--border);border-radius:4px;padding:3px 5px;background:#fff;">
       <option value="" ${!s.override?'selected':''}>Auto (${s.raw})</option>
       ${STATUS_OPTIONS.map(o=>`<option value="${o}" ${s.override===o?'selected':''}>${o}</option>`).join('')}
     </select>`;
@@ -3221,15 +3214,6 @@ function setReportMode(m){
 }
 function setSessionType(typeKey, value){
   if (value) SESSION_TYPES[typeKey] = value; else delete SESSION_TYPES[typeKey];
-  persist();
-  renderReportContent();
-}
-function setDailyTarget(dateStr, field, value){
-  const num = value===''? null : (+value);
-  if (!DAILY_TARGETS[dateStr]) DAILY_TARGETS[dateStr] = {};
-  if (num==null || isNaN(num)) delete DAILY_TARGETS[dateStr][field];
-  else DAILY_TARGETS[dateStr][field] = num;
-  if (Object.keys(DAILY_TARGETS[dateStr]).length===0) delete DAILY_TARGETS[dateStr];
   persist();
   renderReportContent();
 }
