@@ -330,7 +330,7 @@
     </div>
     <div class="alist" id="alist"><div style="padding:16px;font-size:12px;color:#7a8290;text-align:center">No players yet — add one, or import from a Google Sheet in Settings.</div></div>
     <div class="settings-bar"><span id="sheetStatus">No sheet imported</span><button class="btn-sm" onclick="showConfig()">⚙ Settings</button></div>
-    <div style="text-align:center;font-size:9.5px;color:#a3a9b4;padding:6px 4px 10px;letter-spacing:.02em;">Build 2026-09-15 16:20</div>
+    <div style="text-align:center;font-size:9.5px;color:#a3a9b4;padding:6px 4px 10px;letter-spacing:.02em;">Build 2026-09-16 10:42</div>
   </aside>
   <main class="main" id="main"></main>
 
@@ -761,7 +761,12 @@ function mapSonraTrainingRow(row){
       drill_start_time: row['Drill Start Time'] || '',
       duration_min: totalTimeSec!=null ? totalTimeSec/60 : null,
       total_distance_m: row['Total Distance'],
-      hsr_distance_m: row['High Speed Running (Absolute)'], sprint_distance_m: row['Sprint Distance'],
+      hsr_distance_m: row['High Speed Running (Absolute)'],
+      // Sonra's own "Sprint Distance" export column does not reconcile with our band definitions
+      // (physio-confirmed: Sprint = Zone 6, >=6.9m/s/25km/h; HSM = Zones 5+6, >=5.5m/s/20km/h --
+      // so Sprint should always be <= HSM, but the raw export field regularly exceeds it). We
+      // deliberately ignore that field and derive Sprint from Zone 6 distance instead, same as VHSD.
+      sprint_distance_m: row['Distance Zone 6 (Absolute)'],
       vhsd_distance_m: row['Distance Zone 6 (Absolute)'], // present once the export includes per-speed-zone distance; falls back to null on older exports without it
       accel_decel_count: (pf(row['Accelerations (Absolute)'])||0) + (pf(row['Decelerations (Absolute)'])||0),
       max_velocity_kmh: msToKmh(row['Max Speed']),
@@ -781,7 +786,10 @@ function mapSonraTrainingRow(row){
     drill_practice: isEntireSession ? '' : (row.drillPractice && row.drillPractice!==row.drillTitle ? row.drillPractice : ''),
     drill_start_time: row.drillStartTime || '',
     duration_min: row.totaltimeinMinutes, total_distance_m: row.distanceTotal,
-    hsr_distance_m: row.highSpeedRunningAbs, sprint_distance_m: row.sprintDistance,
+    hsr_distance_m: row.highSpeedRunningAbs,
+    // See simplified-export branch above: Sonra's raw sprintDistance field doesn't reconcile with
+    // our band definitions, so Sprint is derived from Zone 6 distance instead (same as VHSD).
+    sprint_distance_m: row.distanceZ6Abs,
     vhsd_distance_m: row.distanceZ6Abs,
     accel_decel_count: (pf(row.accelerationsRel)||0) + (pf(row.decelerationsRel)||0),
     max_velocity_kmh: msToKmh(row.maxSpeed),
