@@ -280,7 +280,7 @@
   .rpt-table th { text-align:right; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; color:var(--text-muted); padding:9px 11px; border-bottom:2px solid var(--border); }
   .rpt-table th:first-child, .rpt-table td:first-child { text-align:left; }
   .rpt-table td { text-align:right; padding:9px 11px; border-bottom:1px solid #f1f2f4; }
-  .rpt-table tbody tr:nth-child(even) { background:#fafbfc; }
+  .rpt-table tbody tr:nth-child(odd) { background:#fdf1ea; }
   .rpt-table .lbl { font-weight:600; }
   .drill-bar-legend { display:flex; gap:16px; font-size:11px; color:var(--text-muted); margin-bottom:8px; }
   .drill-bar-legend span { display:inline-flex; align-items:center; gap:5px; }
@@ -361,7 +361,7 @@
     </div>
     <div class="alist" id="alist"><div style="padding:16px;font-size:12px;color:#7a8290;text-align:center">No players yet — add one, or import from a Google Sheet in Settings.</div></div>
     <div class="settings-bar"><span id="sheetStatus">No sheet imported</span><button class="btn-sm" onclick="showConfig()">⚙ Settings</button></div>
-    <div style="text-align:center;font-size:9.5px;color:#a3a9b4;padding:6px 4px 10px;letter-spacing:.02em;">Build 2026-09-16 12:15</div>
+    <div style="text-align:center;font-size:9.5px;color:#a3a9b4;padding:6px 4px 10px;letter-spacing:.02em;">Build 2026-09-16 14:05</div>
   </aside>
   <main class="main" id="main"></main>
 
@@ -761,15 +761,26 @@ function gameGpsKey(r){ return [r.date, r.opponent||''].join('|'); }
 function isSonraFormat(row){
   return row && (
     (('distanceTotal' in row) && ('playerName' in row)) ||
+    (('distanceTotal' in row) && ('playerDisplayName' in row)) ||
     (('Total Distance' in row) && ('Player Display Name' in row))
   );
 }
 function sonraDateToISO(d){
   if (!d) return null;
+  if (/^\d{4}-\d{2}-\d{2}/.test(d)) return d.slice(0,10); // already ISO (some export variants use this)
   const parts = d.split('/');
   if (parts.length!==3) return d;
   const [dd,mm,yyyy] = parts;
   return `${yyyy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`;
+}
+// Sonra's whole-session pseudo-row (as opposed to a real named drill) has
+// gone by more than one label across export variants seen in practice --
+// "Entire Session" in some, "Full Session" in others. Both mean the same
+// thing: this one row already covers the whole session, so it should
+// replace summing the individual drills, not add on top of them.
+function isWholeSessionTitle(title){
+  const t = (title||'').trim().toLowerCase();
+  return t==='entire session' || t==='full session';
 }
 // Sonra's "Max Speed" export field is in m/s, not km/h despite the internal
 // schema field being named max_velocity_kmh -- convert at the mapping
@@ -780,7 +791,7 @@ function mapSonraTrainingRow(row){
   if ('Total Distance' in row){
     // Simplified human-readable export
     const title = (row['Drill Title']||'').trim();
-    const isEntireSession = title.toLowerCase()==='entire session';
+    const isEntireSession = isWholeSessionTitle(title);
     const totalTimeSec = parseTimeToSeconds(row['Total Time']);
     return {
       date: sonraDateToISO(row['Session Date']),
@@ -808,8 +819,49 @@ function mapSonraTrainingRow(row){
       participation: 'Full', // no Participation column in this export -- everyone defaults to Full
     };
   }
+  if ('playerDisplayName' in row){
+    // Lightweight camelCase export -- the leanest of the three variants seen
+    // in practice: no per-speed-zone distance breakdown at all (so Sprint
+    // can't be corrected against Zone 6 the way the other two variants are;
+    // it falls back to the raw sprintDistance field here, same as the
+    // club's own reference reports do on this export), and no drill start
+    // time column (drills are ordered by row order instead, which matches
+    // recording order in every sheet seen so far). Rehab/individual work
+    // has no Participation column either -- it's signalled by the drill
+    // title itself starting with "Rehab", same convention as the other
+    // variants use for naming rehab drills.
+    const title = (row.drillTitle||'').trim();
+    const isEntireSession = isWholeSessionTitle(title);
+    const isRehabRow = /^rehab/i.test(title);
+    const totalTimeSec = parseTimeToSeconds(row.totalTime);
+    return {
+      date: sonraDateToISO(row.sessionDate),
+      session_label: row.sessionTitle || '',
+      player_name: row.playerDisplayName,
+      drill_name: isEntireSession ? '' : title,
+      drill_title: isEntireSession ? '' : title,
+      drill_practice: '',
+      drill_start_time: '',
+      duration_min: totalTimeSec!=null ? totalTimeSec/60 : null,
+      total_distance_m: row.distanceTotal,
+      hsr_distance_m: row.highSpeedRunningAbs,
+      sprint_distance_m: row.sprintDistance, // no zone-6 field in this export to derive a corrected figure from
+      vhsd_distance_m: null, // not available in this export
+      accel_count: pf(row.accelerationsAbs)||0,
+      decel_count: pf(row.decelerationsAbs)||0,
+      accel_decel_count: (pf(row.accelerationsAbs)||0) + (pf(row.decelerationsAbs)||0),
+      // Unlike the other two Sonra export variants, this one's maxSpeed
+      // field is already in km/h, not m/s -- confirmed against the club's
+      // own reference report (e.g. 26.85 in this export = 26.9 km/h shown
+      // there, not the ~96.7 km/h a m/s->km/h conversion would produce).
+      max_velocity_kmh: pf(row.maxSpeed),
+      avg_heart_rate: null, max_heart_rate: null,
+      pct_time_red_zone: null,
+      participation: isRehabRow ? 'Rehab' : 'Full',
+    };
+  }
   const practice = row.drillPractice && row.drillPractice!==row.drillTitle ? ` (${row.drillPractice})` : '';
-  const isEntireSession = (row.drillTitle||'').trim().toLowerCase()==='entire session';
+  const isEntireSession = isWholeSessionTitle(row.drillTitle);
   return {
     date: sonraDateToISO(row.sessionDate),
     session_label: row.sessionType || '',
@@ -843,11 +895,26 @@ function gpsLoadRows(trainingGps){
   const byKey = {};
   (trainingGps||[]).forEach(e=>{
     const key = e.date+'|'+(e.session_label||'');
-    if (!byKey[key]) byKey[key] = { whole:null, drills:[] };
-    if (!e.drill_name) byKey[key].whole = e; else byKey[key].drills.push(e);
+    if (!byKey[key]) byKey[key] = { whole:null, rehab:[], drills:[] };
+    const g = byKey[key];
+    if (!e.drill_name) g.whole = e;
+    else if (/^rehab/i.test(e.drill_title||e.drill_name||'')) g.rehab.push(e);
+    else g.drills.push(e);
   });
   const out = [];
-  Object.values(byKey).forEach(g=>{ if (g.whole) out.push(g.whole); else out.push(...g.drills); });
+  Object.values(byKey).forEach(g=>{
+    if (g.whole){ out.push(g.whole); return; }
+    // No explicit whole-session row. If rehab/individual work covers most of
+    // the group's recorded time, it's standing in for the whole session
+    // (e.g. a player who did the team warm-up then went to individual
+    // rehab for the rest) -- count that alone, not summed on top of the
+    // smaller squad drills. If rehab is only a small supplement alongside
+    // a normal full session's worth of drills, sum everything as usual.
+    const rehabDur = g.rehab.reduce((s,e)=>s+(e.duration_min||0),0);
+    const totalDur = rehabDur + g.drills.reduce((s,e)=>s+(e.duration_min||0),0);
+    if (g.rehab.length && totalDur>0 && rehabDur/totalDur>0.5) out.push(...g.rehab);
+    else out.push(...g.rehab, ...g.drills);
+  });
   return out;
 }
 function mergeTrainingGpsFromSheet(rows){
@@ -863,7 +930,7 @@ function mergeTrainingGpsFromSheet(rows){
       date: r.date, session_label: r.session_label||'', drill_name: r.drill_name||'', drill_title: r.drill_title||'', drill_practice: r.drill_practice||'', drill_start_time: r.drill_start_time||'',
       duration_min: pf(r.duration_min), total_distance_m: pf(r.total_distance_m),
       hsr_distance_m: pf(r.hsr_distance_m), sprint_distance_m: pf(r.sprint_distance_m), vhsd_distance_m: pf(r.vhsd_distance_m),
-      accel_decel_count: pf(r.accel_decel_count), max_velocity_kmh: pf(r.max_velocity_kmh),
+      accel_decel_count: pf(r.accel_decel_count), accel_count: pf(r.accel_count), decel_count: pf(r.decel_count), max_velocity_kmh: pf(r.max_velocity_kmh),
       avg_heart_rate: pf(r.avg_heart_rate), max_heart_rate: pf(r.max_heart_rate), pct_time_red_zone: pf(r.pct_time_red_zone),
       participation: r.participation || '',
     };
@@ -2873,14 +2940,14 @@ function flagTag(flag){ return flag ? ` <span title="${flag==='high'?'Top 10% to
 // report style: one row per drill, two proportional bars per row (each
 // metric scaled against its own max across drills, not a shared scale,
 // since the two metrics are rarely the same order of magnitude).
-function drillBarSection(title, drillLabels, drillTotals, seriesA, seriesB){
+function drillBarSection(title, drillLabels, drillTotals, seriesA, seriesB, fullSessionD){
+  const rows = fullSessionD ? [{label:'Full Session', d:fullSessionD}, ...drillLabels.map(l=>({label:l, d:drillTotals[l]}))] : drillLabels.map(l=>({label:l, d:drillTotals[l]}));
   const avgA = d=>d.n?seriesA.value(d)/d.n:0, avgB = d=>d.n?seriesB.value(d)/d.n:0;
-  const maxA = Math.max(1, ...drillLabels.map(l=>avgA(drillTotals[l])));
-  const maxB = Math.max(1, ...drillLabels.map(l=>avgB(drillTotals[l])));
+  const maxA = Math.max(1, ...rows.map(r=>avgA(r.d)));
+  const maxB = Math.max(1, ...rows.map(r=>avgB(r.d)));
   return `<div class="rpt-section-title">${title}</div>
     <div class="drill-bar-legend"><span><i style="background:${seriesA.color};"></i>${seriesA.label}</span><span><i style="background:${seriesB.color};"></i>${seriesB.label}</span></div>
-    ${drillLabels.map(l=>{
-      const d = drillTotals[l];
+    ${rows.map(({label:l,d})=>{
       return `<div class="drill-bar-row"><div class="drill-bar-name">${l}</div><div class="drill-bar-tracks">
         <div class="drill-bar-line"><div class="drill-bar-track"><div class="drill-bar-fill" style="width:${Math.min(100,(avgA(d)/maxA)*100)}%;background:${seriesA.color};"></div></div><div class="drill-bar-val">${fmt(avgA(d))}${seriesA.unit?' '+seriesA.unit:''}</div></div>
         <div class="drill-bar-line"><div class="drill-bar-track"><div class="drill-bar-fill" style="width:${Math.min(100,(avgB(d)/maxB)*100)}%;background:${seriesB.color};"></div></div><div class="drill-bar-val">${fmt(avgB(d))}${seriesB.unit?' '+seriesB.unit:''}</div></div>
@@ -3073,18 +3140,32 @@ function buildDailyReportHtml(dateStr, customTitle){
     return row ? row.session_label : '';
   }).filter(Boolean))];
   const primaryLabel = labelsUsed[0] || '';
-  const teamTotals = playerTotals.reduce((acc,t)=>({ duration:acc.duration+t.duration, distance:acc.distance+t.distance, hsr:acc.hsr+t.hsr, sprint:acc.sprint+t.sprint, vhsd:acc.vhsd+(t.vhsd||0), accelDecel:acc.accelDecel+t.accelDecel }), {duration:0,distance:0,hsr:0,sprint:0,vhsd:0,accelDecel:0});
-  const avgN = playerTotals.length;
-  const redZoneVals = playerTotals.filter(t=>t.redZone!=null);
-  const hrVals = playerTotals.filter(t=>t.avgHr!=null);
-  const teamAvg = { duration:teamTotals.duration/avgN, distance:teamTotals.distance/avgN, hsr:teamTotals.hsr/avgN, sprint:teamTotals.sprint/avgN, vhsd:teamTotals.vhsd/avgN, accelDecel:teamTotals.accelDecel/avgN, redZone: redZoneVals.length ? redZoneVals.reduce((s,t)=>s+t.redZone,0)/redZoneVals.length : null, avgHr: hrVals.length ? hrVals.reduce((s,t)=>s+t.avgHr,0)/hrVals.length : null };
+  const statusList = participationStatus(players, dateStr, playerTotals);
+  const statusById = {}; statusList.forEach(s=>statusById[s.id]=s.label);
+  // Rehab, Modified and No GPS players still get their own row in
+  // Player-by-Player, but -- same rule the club's own reports use -- they
+  // don't count toward the squad averages or KPI cards; a rehab session's
+  // very different load profile would otherwise distort what "average"
+  // means for everyone else.
+  const avgEligible = playerTotals.filter(t=>['full','partial'].includes((statusById[t.id]||'').toLowerCase()));
+  const teamTotals = avgEligible.reduce((acc,t)=>({ duration:acc.duration+t.duration, distance:acc.distance+t.distance, hsr:acc.hsr+t.hsr, sprint:acc.sprint+t.sprint, vhsd:acc.vhsd+(t.vhsd||0), accelDecel:acc.accelDecel+t.accelDecel, accel:acc.accel+(t.accel||0), decel:acc.decel+(t.decel||0) }), {duration:0,distance:0,hsr:0,sprint:0,vhsd:0,accelDecel:0,accel:0,decel:0});
+  const avgN = avgEligible.length || 1;
+  const redZoneVals = avgEligible.filter(t=>t.redZone!=null);
+  const hrVals = avgEligible.filter(t=>t.avgHr!=null);
+  const teamAvg = { duration:teamTotals.duration/avgN, distance:teamTotals.distance/avgN, hsr:teamTotals.hsr/avgN, sprint:teamTotals.sprint/avgN, vhsd:teamTotals.vhsd/avgN, accelDecel:teamTotals.accelDecel/avgN, accel:teamTotals.accel/avgN, decel:teamTotals.decel/avgN, redZone: redZoneVals.length ? redZoneVals.reduce((s,t)=>s+t.redZone,0)/redZoneVals.length : null, avgHr: hrVals.length ? hrVals.reduce((s,t)=>s+t.avgHr,0)/hrVals.length : null };
   teamAvg.workRate = teamAvg.duration ? teamAvg.distance/teamAvg.duration : null;
   const ref = primaryLabel ? findReferenceSession(athleteMap[playerTotals[0].id], dateStr, primaryLabel) : null;
   const md = matchDemandReference(players);
 
   const genDate = new Date().toLocaleDateString('en-AU', {day:'numeric', month:'short', year:'numeric'});
   const meta = SESSION_META[dateStr] || {};
-  let html = `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">${customTitle || 'Brisbane Roar Training Report'}</div><div class="rpt-sub">DATE: ${dateStr}${primaryLabel?'&nbsp;&nbsp;SESSION: '+primaryLabel:''}</div></div>${ROAR_LOGO_SVG}</div>
+  // Some export formats leave the session-title column carrying the date
+  // itself rather than a real label (e.g. "MD+3") -- showing that would
+  // just duplicate the DATE field next to it, so treat a date-shaped label
+  // as no label at all and fall back to the coach's own manual entry.
+  const sheetLabelUsable = primaryLabel && !/^\d{4}-\d{2}-\d{2}/.test(primaryLabel) && !/^\d{1,2}\/\d{1,2}\/\d{2,4}/.test(primaryLabel);
+  const displaySessionLabel = meta.sessionLabel || (sheetLabelUsable ? primaryLabel : '');
+  let html = `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">${customTitle || 'ALW Brisbane Roar 2026/2027'}</div><div class="rpt-sub">DATE: ${dateStr}&nbsp;&nbsp;<span class="no-print">SESSION: <input type="text" placeholder="e.g. MD+3" value="${meta.sessionLabel||''}" style="width:90px;" onchange="setSessionMeta('${dateStr}','sessionLabel',this.value)"></span><span class="print-only" style="display:none;">SESSION: ${displaySessionLabel||'—'}</span></div></div>${ROAR_LOGO_SVG}</div>
   <div class="rpt-conditions">
     <span class="no-print">☀ Conditions: <input type="text" placeholder="e.g. Overcast" value="${meta.conditions||''}" onchange="setSessionMeta('${dateStr}','conditions',this.value)"></span>
     <span class="print-only" style="display:none;">☀ Conditions: <b>${meta.conditions||'—'}</b></span>
@@ -3094,10 +3175,10 @@ function buildDailyReportHtml(dateStr, customTitle){
     <span style="margin-left:auto;color:var(--text-muted);font-size:11px;">Henri Joensuu · Performance Coach · Generated ${genDate}</span>
   </div>
   <div class="kpi-cards">
-    <div class="kpi-card"><div class="kpi-card-label">Total Distance (m)</div><div class="kpi-card-value">${fmt(teamAvg.distance)}</div><div class="kpi-card-sub">Full Training Average</div><hr class="kpi-card-divider"><div class="kpi-card-top-label">TOP PERFORMER</div><div class="kpi-card-top-name">${topPerformerName(playerTotals,'distance')}</div></div>
-    <div class="kpi-card"><div class="kpi-card-label">Work Rate (m/min)</div><div class="kpi-card-value">${fmt(teamAvg.workRate)}</div><div class="kpi-card-sub">Full Training Average</div><hr class="kpi-card-divider"><div class="kpi-card-top-label">TOP PERFORMER</div><div class="kpi-card-top-name">${topPerformerName(playerTotals,'workRate')}</div></div>
-    <div class="kpi-card"><div class="kpi-card-label">HID (m)</div><div class="kpi-card-value">${fmt(teamAvg.hsr)}</div><div class="kpi-card-sub">Full Training Average</div><hr class="kpi-card-divider"><div class="kpi-card-top-label">TOP PERFORMER</div><div class="kpi-card-top-name">${topPerformerName(playerTotals,'hsr')}</div></div>
-    <div class="kpi-card"><div class="kpi-card-label">SD (m)</div><div class="kpi-card-value">${fmt(teamAvg.sprint)}</div><div class="kpi-card-sub">Full Training Average</div><hr class="kpi-card-divider"><div class="kpi-card-top-label">TOP PERFORMER</div><div class="kpi-card-top-name">${topPerformerName(playerTotals,'sprint')}</div></div>
+    <div class="kpi-card"><div class="kpi-card-label">Total Distance (m)</div><div class="kpi-card-value">${fmt(teamAvg.distance)}</div><div class="kpi-card-sub">Full Training Average</div></div>
+    <div class="kpi-card"><div class="kpi-card-label">Work Rate (m/min)</div><div class="kpi-card-value">${fmt(teamAvg.workRate)}</div><div class="kpi-card-sub">Full Training Average</div></div>
+    <div class="kpi-card"><div class="kpi-card-label">HID (m)</div><div class="kpi-card-value">${fmt(teamAvg.hsr)}</div><div class="kpi-card-sub">Full Training Average</div></div>
+    <div class="kpi-card"><div class="kpi-card-label">SD (m)</div><div class="kpi-card-value">${fmt(teamAvg.sprint)}</div><div class="kpi-card-sub">Full Training Average</div></div>
   </div>`;
 
   // Session type tagging + target breakdown
@@ -3168,15 +3249,16 @@ function buildDailyReportHtml(dateStr, customTitle){
     </tbody></table>`;
 
   if (drillLabels.length){
-    html += drillBarSection('Average Distance + HID by Drill', drillLabels, drillTotals,
+    const fsD = { n:1, distance:teamAvg.distance, hsr:teamAvg.hsr, accel:teamAvg.accel, decel:teamAvg.decel, duration:teamAvg.duration };
+    html += drillBarSection('Average Total Distance + High Speed', drillLabels, drillTotals,
       {value:d=>d.distance, label:'Distance', color:'#F26522', unit:'m'},
-      {value:d=>d.hsr, label:'HID', color:'#3d6fb0', unit:'m'});
-    html += drillBarSection('Average Accel + Decel by Drill', drillLabels, drillTotals,
-      {value:d=>d.accel, label:'Accelerations', color:'#F26522', unit:''},
-      {value:d=>d.decel, label:'Decelerations', color:'#3d6fb0', unit:''});
-    html += drillBarSection('Average Work Rate + Duration by Drill', drillLabels, drillTotals,
+      {value:d=>d.hsr, label:'HID', color:'#3d6fb0', unit:'m'}, fsD);
+    html += drillBarSection('Average Work Rate + Drill Duration', drillLabels, drillTotals,
       {value:d=>d.duration?(d.distance/d.duration)*d.n:0, label:'Work Rate (m/min)', color:'#F26522', unit:'m/min'},
-      {value:d=>d.duration, label:'Duration (min)', color:'#3d6fb0', unit:'min'});
+      {value:d=>d.duration, label:'Duration (min)', color:'#3d6fb0', unit:'min'}, fsD);
+    html += drillBarSection('Average Accelerations + Decelerations', drillLabels, drillTotals,
+      {value:d=>d.accel, label:'Accelerations', color:'#F26522', unit:''},
+      {value:d=>d.decel, label:'Decelerations', color:'#3d6fb0', unit:''}, fsD);
   }
 
   const rehabPlayers = Object.keys(rehabByPlayer);
@@ -3195,7 +3277,6 @@ function buildDailyReportHtml(dateStr, customTitle){
   playerTotals.forEach(t=>{ t.workRate = t.duration ? t.distance/t.duration : 0; });
   const flagged = flagOutliersMulti(playerTotals, ['distance','hsr','sprint','workRate','accel','decel']);
   const flaggedById = {}; flagged.forEach(t=>flaggedById[t.id]=t);
-  const statusList = participationStatus(players, dateStr, playerTotals);
   const playerRowCols = 8 + hrCols; // Duration/Distance/WorkRate/HID/SD/Speed/Acc/Dec + HR cols
   const statusSelect = (s)=>`<select onchange="setStatusOverride('${dateStr}','${s.id}',this.value)" style="font-size:12.5px;font-weight:700;color:${participationColor(s.label)};border:1px solid var(--border);border-radius:4px;padding:3px 5px;background:#fff;">
       <option value="" ${!s.override?'selected':''}>Auto (${s.raw})</option>
@@ -3221,7 +3302,7 @@ function buildDailyReportHtml(dateStr, customTitle){
         <td style="background:${flagBg(t.flags.decel)}">${fmt(t.decel)}${flagTag(t.flags.decel)}</td></tr>`;
     }).join('')}
     </tbody></table>
-    <div class="chart-note"><span>▪ Each column's top/bottom 10% is flagged independently. Status defaults to the GPS sheet's Participation column ("Did Not Train" = no data recorded) — use the dropdown to override manually for any player/date; overrides are saved automatically.</span></div>`;
+    <div class="chart-note"><span>▪ Note: Rehab/Modified/No GPS players are not included in squad averages.</span> <span>▪ Each column's top/bottom 10% is flagged independently. Status defaults to the GPS sheet's Participation column ("Did Not Train" = no data recorded) — use the dropdown to override manually for any player/date; overrides are saved automatically.</span></div>`;
 
   return html;
 }
