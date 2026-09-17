@@ -371,7 +371,7 @@
     </div>
     <div class="alist" id="alist"><div style="padding:16px;font-size:12px;color:#7a8290;text-align:center">No players yet — add one, or import from a Google Sheet in Settings.</div></div>
     <div class="settings-bar"><span id="sheetStatus">No sheet imported</span><button class="btn-sm" onclick="showConfig()">⚙ Settings</button></div>
-    <div style="text-align:center;font-size:9.5px;color:#a3a9b4;padding:6px 4px 10px;letter-spacing:.02em;">Build 2026-09-17 11:05</div>
+    <div style="text-align:center;font-size:9.5px;color:#a3a9b4;padding:6px 4px 10px;letter-spacing:.02em;">Build 2026-09-17 11:40</div>
   </aside>
   <main class="main" id="main"></main>
 
@@ -1939,7 +1939,7 @@ function densityCloud(pointsPx, w, h, bandwidth){
 
 
 // ============================================================
-// PERSISTED CONFIG (window.storage — never localStorage)
+// PERSISTED CONFIG (window.storage when available, localStorage fallback)
 // ============================================================
 // Default sheet URLs — pre-filled so the dashboard never starts empty
 // even in a fresh browser/storage. Change these in Settings → Sheet if
@@ -1970,19 +1970,46 @@ function setRefFrame(scope, val){
   if (scope==='radar') drawRadar();
   if (scope==='heatmap') buildSquadTable();
 }
+// Storage abstraction: prefers window.storage (only available inside
+// Claude's own artifact runtime) but falls back to localStorage whenever
+// that isn't there -- e.g. this file downloaded and opened directly in a
+// browser, or hosted elsewhere. Without this fallback every save silently
+// no-ops (window.storage is undefined, the call throws, the catch block
+// swallows it) and everything -- config, roster data, photos -- reverts
+// on refresh with no visible error. Once engaged for a key, get/set for
+// that same key stay on whichever backend actually has the data, so nothing
+// written by one backend gets silently missed by checking the other.
+async function storageSet(key, valueStr){
+  let usedRemote = false;
+  try{
+    if (window.storage && window.storage.set){ await window.storage.set(key, valueStr, false); usedRemote = true; }
+  }catch(e){ console.warn(`window.storage unavailable for "${key}", using localStorage instead`, e); }
+  if (!usedRemote){
+    try{ localStorage.setItem('roar-local-'+key, valueStr); }
+    catch(e){ console.error(`could not save "${key}" to localStorage either`, e); }
+  }
+}
+async function storageGet(key){
+  try{
+    if (window.storage && window.storage.get){
+      const res = await window.storage.get(key, false);
+      if (res && res.value) return res.value;
+    }
+  }catch(e){ /* fall through to localStorage below */ }
+  try{ return localStorage.getItem('roar-local-'+key); }
+  catch(e){ return null; }
+}
 let saveTimer=null, dataSaveTimer=null;
 function persist(){
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(async ()=>{
-    try{ await window.storage.set('roar-config', JSON.stringify({CONFIG,NORMS,SETTINGS,SESSION_TYPES,STATUS_OVERRIDES,SESSION_META}), false); }
-    catch(e){ console.error('save failed', e); }
+  saveTimer = setTimeout(()=>{
+    storageSet('roar-config', JSON.stringify({CONFIG,NORMS,SETTINGS,SESSION_TYPES,STATUS_OVERRIDES,SESSION_META}));
   }, 200);
 }
 function persistData(){
   clearTimeout(dataSaveTimer);
-  dataSaveTimer = setTimeout(async ()=>{
-    try{ await window.storage.set('roar-data', JSON.stringify({athletes:Object.values(athleteMap)}), false); }
-    catch(e){ console.error('data save failed', e); }
+  dataSaveTimer = setTimeout(()=>{
+    storageSet('roar-data', JSON.stringify({athletes:Object.values(athleteMap)}));
   }, 200);
 }
 // Photos live in their own key, not bundled into roar-data or roar-config --
@@ -1990,9 +2017,8 @@ function persistData(){
 // adding image data to it risks pushing a single key over its size limit
 // as the season's history grows. Kept separate and small (each photo is
 // downscaled to a 300x300 JPEG before it ever gets here).
-async function persistPhotos(){
-  try{ await window.storage.set('roar-photos', JSON.stringify(PLAYER_PHOTOS), false); }
-  catch(e){ console.error('photo save failed', e); }
+function persistPhotos(){
+  storageSet('roar-photos', JSON.stringify(PLAYER_PHOTOS));
 }
 // Reads the selected file, center-crops and downscales it to a 300x300
 // JPEG on an offscreen canvas (keeps each stored photo well under the
@@ -2031,9 +2057,9 @@ function removePlayerPhoto(athleteId){
 }
 async function loadPersisted(){
   try{
-    const res = await window.storage.get('roar-config', false);
-    if (res && res.value){
-      const p = JSON.parse(res.value);
+    const raw = await storageGet('roar-config');
+    if (raw){
+      const p = JSON.parse(raw);
       if (p.CONFIG) CONFIG = p.CONFIG;
       if (!CONFIG.athletesUrl) CONFIG.athletesUrl = DEFAULT_ATHLETES_URL;
       if (!CONFIG.resultsUrl) CONFIG.resultsUrl = DEFAULT_RESULTS_URL;
@@ -2047,13 +2073,13 @@ async function loadPersisted(){
     }
   }catch(e){ /* nothing saved yet */ }
   try{
-    const res = await window.storage.get('roar-photos', false);
-    if (res && res.value) PLAYER_PHOTOS = JSON.parse(res.value);
+    const raw = await storageGet('roar-photos');
+    if (raw) PLAYER_PHOTOS = JSON.parse(raw);
   }catch(e){ /* nothing saved yet */ }
   try{
-    const res = await window.storage.get('roar-data', false);
-    if (res && res.value){
-      const p = JSON.parse(res.value);
+    const raw = await storageGet('roar-data');
+    if (raw){
+      const p = JSON.parse(raw);
       athleteMap={}; nameIndex={};
       (p.athletes||[]).forEach(a=>{
         athleteMap[a.id]=a;
