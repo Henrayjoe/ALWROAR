@@ -81,8 +81,8 @@
   .aitem:hover { background:var(--surface-alt); }
   .aitem.active { background:var(--accent-light); border-left-color:var(--accent); }
   .aitem:hover:not(.active) { background:#f7f7f8; }
-  .av { width:32px; height:32px; border-radius:50%; background:linear-gradient(145deg,#fff,var(--accent-light)); color:var(--accent); display:flex; align-items:center; justify-content:center; font-size:10.5px; font-weight:800; letter-spacing:.02em; flex-shrink:0; box-shadow:inset 0 0 0 1.5px rgba(242,101,34,0.18); transition:transform .18s var(--ease); overflow:hidden; position:relative; }
-  .av img, .pav img { width:100%; height:100%; object-fit:cover; border-radius:50%; }
+  .av { width:32px; height:32px; border-radius:8px; background:linear-gradient(145deg,#fff,var(--accent-light)); color:var(--accent); display:flex; align-items:center; justify-content:center; font-size:10.5px; font-weight:800; letter-spacing:.02em; flex-shrink:0; box-shadow:inset 0 0 0 1.5px rgba(242,101,34,0.18); transition:transform .18s var(--ease); overflow:hidden; position:relative; }
+  .av img, .pav img { width:100%; height:100%; object-fit:cover; border-radius:inherit; }
   .aitem.active .av { background:linear-gradient(145deg,#ff7a3d,#e0530f); color:#fff; box-shadow:0 2px 6px rgba(242,101,34,0.35); }
   .aitem:hover .av { transform:scale(1.06); }
   .ameta { flex:1; min-width:0; }
@@ -109,7 +109,7 @@
   .hint { font-size:11px; color:var(--text-muted); margin-top:8px; line-height:1.6; }
   .profile-card { background:var(--surface); box-shadow:var(--shadow-md); border-radius:var(--radius-lg); padding:22px 24px; display:flex; gap:24px; align-items:center; }
   .pav-wrap { position:relative; display:inline-block; flex-shrink:0; }
-  .pav { width:150px; height:150px; border-radius:50%; background:linear-gradient(145deg,#fff5ee,var(--accent-light)); color:var(--accent); display:flex; align-items:center; justify-content:center; font-size:42px; font-weight:800; letter-spacing:.02em; flex-shrink:0; box-shadow:inset 0 0 0 3px rgba(242,101,34,0.16), var(--shadow-md); overflow:hidden; }
+  .pav { width:150px; height:150px; border-radius:20px; background:linear-gradient(145deg,#fff5ee,var(--accent-light)); color:var(--accent); display:flex; align-items:center; justify-content:center; font-size:42px; font-weight:800; letter-spacing:.02em; flex-shrink:0; box-shadow:inset 0 0 0 3px rgba(242,101,34,0.16), var(--shadow-md); overflow:hidden; }
   .photo-edit-btn { position:absolute; bottom:4px; right:4px; width:34px; height:34px; border-radius:50%; background:var(--accent); color:#fff; display:flex; align-items:center; justify-content:center; font-size:16px; cursor:pointer; box-shadow:0 2px 6px rgba(0,0,0,0.3); border:3px solid #fff; }
   .photo-edit-btn:hover { background:#d9540f; }
   .pinfo h2    { font-size:23px; font-weight:800; letter-spacing:-.025em; }
@@ -371,7 +371,7 @@
     </div>
     <div class="alist" id="alist"><div style="padding:16px;font-size:12px;color:#7a8290;text-align:center">No players yet — add one, or import from a Google Sheet in Settings.</div></div>
     <div class="settings-bar"><span id="sheetStatus">No sheet imported</span><button class="btn-sm" onclick="showConfig()">⚙ Settings</button></div>
-    <div style="text-align:center;font-size:9.5px;color:#a3a9b4;padding:6px 4px 10px;letter-spacing:.02em;">Build 2026-09-17 12:05</div>
+    <div style="text-align:center;font-size:9.5px;color:#a3a9b4;padding:6px 4px 10px;letter-spacing:.02em;">Build 2026-09-17 12:20</div>
   </aside>
   <main class="main" id="main"></main>
 
