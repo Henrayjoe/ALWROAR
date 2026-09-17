@@ -82,7 +82,7 @@
   .aitem.active { background:var(--accent-light); border-left-color:var(--accent); }
   .aitem:hover:not(.active) { background:#f7f7f8; }
   .av { width:32px; height:32px; border-radius:8px; background:linear-gradient(145deg,#fff,var(--accent-light)); color:var(--accent); display:flex; align-items:center; justify-content:center; font-size:10.5px; font-weight:800; letter-spacing:.02em; flex-shrink:0; box-shadow:inset 0 0 0 1.5px rgba(242,101,34,0.18); transition:transform .18s var(--ease); overflow:hidden; position:relative; }
-  .av img, .pav img { width:100%; height:100%; object-fit:cover; border-radius:inherit; }
+  .av img, .pav img { width:100%; height:100%; object-fit:cover; object-position:50% 18%; border-radius:inherit; }
   .aitem.active .av { background:linear-gradient(145deg,#ff7a3d,#e0530f); color:#fff; box-shadow:0 2px 6px rgba(242,101,34,0.35); }
   .aitem:hover .av { transform:scale(1.06); }
   .ameta { flex:1; min-width:0; }
@@ -371,7 +371,7 @@
     </div>
     <div class="alist" id="alist"><div style="padding:16px;font-size:12px;color:#7a8290;text-align:center">No players yet — add one, or import from a Google Sheet in Settings.</div></div>
     <div class="settings-bar"><span id="sheetStatus">No sheet imported</span><button class="btn-sm" onclick="showConfig()">⚙ Settings</button></div>
-    <div style="text-align:center;font-size:9.5px;color:#a3a9b4;padding:6px 4px 10px;letter-spacing:.02em;">Build 2026-09-17 12:20</div>
+    <div style="text-align:center;font-size:9.5px;color:#a3a9b4;padding:6px 4px 10px;letter-spacing:.02em;">Build 2026-09-17 12:40</div>
   </aside>
   <main class="main" id="main"></main>
 
@@ -2020,10 +2020,14 @@ function persistData(){
 function persistPhotos(){
   storageSet('roar-photos', JSON.stringify(PLAYER_PHOTOS));
 }
-// Reads the selected file, center-crops and downscales it to a 300x300
-// JPEG on an offscreen canvas (keeps each stored photo well under the
-// per-key size limit regardless of the original file size), then saves
-// and re-renders wherever that player's avatar appears.
+// Reads the selected file and downscales it (preserving its original
+// aspect ratio, no cropping) on an offscreen canvas, capping the longer
+// side at 500px -- keeps each stored photo well under the per-key size
+// limit regardless of the original file's size. Cropping to a square
+// happens at DISPLAY time instead (CSS object-fit, top-weighted -- see
+// .av img/.pav img), not baked into the stored file -- a hard center-crop
+// here would clip faces whenever a photo isn't perfectly centered
+// vertically, which is most of them.
 function handlePhotoUpload(athleteId, inputEl){
   const file = inputEl.files && inputEl.files[0];
   if (!file) return;
@@ -2031,14 +2035,14 @@ function handlePhotoUpload(athleteId, inputEl){
   reader.onload = (e)=>{
     const img = new Image();
     img.onload = ()=>{
-      const size = 300;
+      const maxSide = 500;
+      const scale = Math.min(1, maxSide/Math.max(img.width, img.height));
+      const w = Math.round(img.width*scale), h = Math.round(img.height*scale);
       const canvas = document.createElement('canvas');
-      canvas.width = size; canvas.height = size;
+      canvas.width = w; canvas.height = h;
       const ctx = canvas.getContext('2d');
-      const s = Math.min(img.width, img.height);
-      const sx = (img.width-s)/2, sy = (img.height-s)/2;
-      ctx.drawImage(img, sx, sy, s, s, 0, 0, size, size);
-      PLAYER_PHOTOS[athleteId] = canvas.toDataURL('image/jpeg', 0.85);
+      ctx.drawImage(img, 0, 0, w, h);
+      PLAYER_PHOTOS[athleteId] = canvas.toDataURL('image/jpeg', 0.88);
       persistPhotos();
       renderSidebar();
       if (selectedId===athleteId) renderIndividual();
