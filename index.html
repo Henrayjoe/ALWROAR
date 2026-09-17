@@ -277,21 +277,25 @@
   .rpt-sub { font-size:13.5px; color:var(--text-muted); margin-top:3px; }
   .rpt-section-title { font-size:13.5px; font-weight:800; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); margin:28px 0 10px; padding-left:9px; border-left:3px solid var(--accent); }
   .rpt-table { width:100%; border-collapse:collapse; font-size:13.5px; }
-  .rpt-table th { text-align:right; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; color:var(--text-muted); padding:9px 11px; border-bottom:2px solid var(--border); }
-  .rpt-table th:first-child, .rpt-table td:first-child { text-align:left; }
-  .rpt-table td { text-align:right; padding:9px 11px; border-bottom:1px solid #f1f2f4; }
+  .rpt-table th { text-align:right; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; color:var(--text-muted); padding:6px 9px; border-bottom:2px solid var(--border); }
+  .rpt-table th:first-child, .rpt-table td:first-child { text-align:left; white-space:nowrap; }
+  .rpt-table td { text-align:right; padding:5px 9px; border-bottom:1px solid #f1f2f4; }
   .rpt-table tbody tr:nth-child(odd) { background:#fdf1ea; }
   .rpt-table .lbl { font-weight:600; }
-  .drill-bar-legend { display:flex; gap:16px; font-size:11px; color:var(--text-muted); margin-bottom:8px; }
+  .drill-bar-legend { display:flex; gap:16px; font-size:11px; color:var(--text-muted); margin-bottom:10px; }
   .drill-bar-legend span { display:inline-flex; align-items:center; gap:5px; }
   .drill-bar-legend i { width:9px; height:9px; border-radius:2px; display:inline-block; }
-  .drill-bar-row { display:grid; grid-template-columns:120px 1fr; align-items:center; gap:10px; margin-bottom:9px; }
-  .drill-bar-name { font-size:12.5px; font-weight:600; color:var(--text-primary); }
-  .drill-bar-tracks { display:flex; flex-direction:column; gap:4px; }
-  .drill-bar-line { display:flex; align-items:center; gap:8px; }
-  .drill-bar-track { flex:1; height:11px; background:#f1f2f4; border-radius:3px; overflow:hidden; }
-  .drill-bar-fill { height:100%; border-radius:3px; }
-  .drill-bar-val { font-size:11px; color:var(--text-muted); width:64px; flex-shrink:0; text-align:right; }
+  .drill-bar-row { display:grid; grid-template-columns:110px 1fr; align-items:center; gap:10px; margin-bottom:7px; }
+  .drill-bar-name { font-size:12px; font-weight:600; color:var(--text-primary); }
+  .drill-bar-tracks { display:flex; flex-direction:column; gap:3px; }
+  .drill-bar-line { position:relative; height:14px; }
+  .drill-bar-track { position:absolute; inset:0; background:#f1f2f4; border-radius:3px; }
+  .drill-bar-fill { position:absolute; top:0; left:0; height:100%; border-radius:3px; }
+  .drill-bar-val { position:absolute; top:0; height:100%; display:flex; align-items:center; font-size:10.5px; font-weight:600; color:var(--text-secondary); padding-left:5px; white-space:nowrap; }
+  .drill-bar-axis { display:grid; grid-template-columns:110px 1fr; gap:10px; margin-top:2px; margin-bottom:16px; }
+  .drill-bar-axis-ticks { position:relative; height:14px; border-top:1px solid var(--border); }
+  .drill-bar-axis-tick { position:absolute; top:3px; font-size:10px; color:var(--text-muted); transform:translateX(-50%); }
+  .drill-bar-axis-tick:first-child { transform:none; }
   .rpt-header-dual { display:flex; align-items:center; justify-content:space-between; gap:14px; border-bottom:2px solid var(--accent); padding-bottom:14px; margin-bottom:16px; }
   .rpt-header-dual .rpt-header-main { text-align:center; }
   .rpt-header-dual .rpt-club { text-align:center; }
@@ -318,9 +322,9 @@
     .print-only { display:inline !important; }
     .no-data-row { display:none !important; }
     .rpt-table { font-size:11px; }
-    .rpt-table th { font-size:9.5px; padding:6px 7px; white-space:normal; }
-    .rpt-table td { padding:6px 7px; }
-    .rpt-table th:first-child, .rpt-table td:first-child { width:16%; }
+    .rpt-table th { font-size:9.5px; padding:5px 6px; white-space:normal; }
+    .rpt-table td { padding:4px 6px; }
+    .rpt-table th:first-child, .rpt-table td:first-child { white-space:nowrap; }
     .rpt-section-title { font-size:12px; margin:16px 0 7px; page-break-after:avoid; break-after:avoid; }
     .rpt-table thead { display:table-header-group; }
     .rpt-table tr { page-break-inside:avoid; break-inside:avoid; }
@@ -363,7 +367,7 @@
     </div>
     <div class="alist" id="alist"><div style="padding:16px;font-size:12px;color:#7a8290;text-align:center">No players yet — add one, or import from a Google Sheet in Settings.</div></div>
     <div class="settings-bar"><span id="sheetStatus">No sheet imported</span><button class="btn-sm" onclick="showConfig()">⚙ Settings</button></div>
-    <div style="text-align:center;font-size:9.5px;color:#a3a9b4;padding:6px 4px 10px;letter-spacing:.02em;">Build 2026-09-17 09:30</div>
+    <div style="text-align:center;font-size:9.5px;color:#a3a9b4;padding:6px 4px 10px;letter-spacing:.02em;">Build 2026-09-17 10:20</div>
   </aside>
   <main class="main" id="main"></main>
 
@@ -2950,19 +2954,40 @@ function flagTag(flag){ return flag ? ` <span title="${flag==='high'?'Top 10% to
 // report style: one row per drill, two proportional bars per row (each
 // metric scaled against its own max across drills, not a shared scale,
 // since the two metrics are rarely the same order of magnitude).
+// "Nice" round axis ceiling (1/2/2.5/5/10 x 10^n) so tick labels read like
+// 500/1000/1500 rather than an arbitrary true max.
+function niceAxisMax(raw){
+  if (!raw || raw<=0) return 1;
+  const exp = Math.floor(Math.log10(raw));
+  const base = Math.pow(10, exp);
+  const norm = raw/base;
+  const step = norm<=1 ? 1 : norm<=2 ? 2 : norm<=2.5 ? 2.5 : norm<=5 ? 5 : 10;
+  return step*base;
+}
+// Renders a "Average X + Y by drill" breakdown against a shared 0..max
+// x-axis with tick labels, matching the club's own report style. Bars are
+// capped at 85% track width so the value label always has room to sit
+// right at the bar's tip rather than in a separate fixed column. Pass
+// seriesB.noBar to show that series as a plain value (e.g. a duration)
+// with no bar at all, scaled by seriesA alone.
 function drillBarSection(title, drillLabels, drillTotals, seriesA, seriesB, fullSessionD){
   const rows = fullSessionD ? [{label:'Full Session', d:fullSessionD}, ...drillLabels.map(l=>({label:l, d:drillTotals[l]}))] : drillLabels.map(l=>({label:l, d:drillTotals[l]}));
   const avgA = d=>d.n?seriesA.value(d)/d.n:0, avgB = d=>d.n?seriesB.value(d)/d.n:0;
-  const maxA = Math.max(1, ...rows.map(r=>avgA(r.d)));
-  const maxB = Math.max(1, ...rows.map(r=>avgB(r.d)));
+  const rawMax = Math.max(...rows.map(r=>avgA(r.d)), seriesB.noBar?0:Math.max(...rows.map(r=>avgB(r.d))));
+  const axisMax = niceAxisMax(rawMax);
+  const pct = v => Math.min(85, (v/axisMax)*85);
+  const bar = (val, color, unit)=>`<div class="drill-bar-line"><div class="drill-bar-track"></div><div class="drill-bar-fill" style="width:${pct(val)}%;background:${color};"></div><div class="drill-bar-val" style="left:${pct(val)}%;">${fmt(val)}${unit?' '+unit:''}</div></div>`;
+  const ticks = [0,0.25,0.5,0.75,1].map(f=>`<div class="drill-bar-axis-tick" style="left:${f*85}%;">${fmt(f*axisMax)}</div>`).join('');
   return `<div class="rpt-section-title">${title}</div>
-    <div class="drill-bar-legend"><span><i style="background:${seriesA.color};"></i>${seriesA.label}</span><span><i style="background:${seriesB.color};"></i>${seriesB.label}</span></div>
+    <div class="drill-bar-legend"><span><i style="background:${seriesA.color};"></i>${seriesA.label}</span>${seriesB.noBar?'':`<span><i style="background:${seriesB.color};"></i>${seriesB.label}</span>`}</div>
     ${rows.map(({label:l,d})=>{
+      const b = seriesB.noBar ? `<div class="drill-bar-line" style="height:auto;color:var(--text-secondary);font-size:11.5px;font-weight:600;">${seriesB.label}: ${fmt(avgB(d))}${seriesB.unit?' '+seriesB.unit:''}</div>` : bar(avgB(d), seriesB.color, seriesB.unit);
       return `<div class="drill-bar-row"><div class="drill-bar-name">${l}</div><div class="drill-bar-tracks">
-        <div class="drill-bar-line"><div class="drill-bar-track"><div class="drill-bar-fill" style="width:${Math.min(100,(avgA(d)/maxA)*100)}%;background:${seriesA.color};"></div></div><div class="drill-bar-val">${fmt(avgA(d))}${seriesA.unit?' '+seriesA.unit:''}</div></div>
-        <div class="drill-bar-line"><div class="drill-bar-track"><div class="drill-bar-fill" style="width:${Math.min(100,(avgB(d)/maxB)*100)}%;background:${seriesB.color};"></div></div><div class="drill-bar-val">${fmt(avgB(d))}${seriesB.unit?' '+seriesB.unit:''}</div></div>
+        ${bar(avgA(d), seriesA.color, seriesA.unit)}
+        ${b}
       </div></div>`;
-    }).join('')}`;
+    }).join('')}
+    <div class="drill-bar-axis"><div></div><div class="drill-bar-axis-ticks">${ticks}</div></div>`;
 }
 // ============================================================
 // PRINTABLE REPORTS — a single day's squad training report (team
@@ -3270,7 +3295,7 @@ function buildDailyReportHtml(dateStr, customTitle){
       {value:d=>d.hsr, label:'HID', color:'#3d6fb0', unit:'m'}, fsD);
     html += drillBarSection('Average Work Rate + Drill Duration', drillLabels, drillTotals,
       {value:d=>d.duration?(d.distance/d.duration)*d.n:0, label:'Work Rate (m/min)', color:'#F26522', unit:'m/min'},
-      {value:d=>d.duration, label:'Duration (min)', color:'#3d6fb0', unit:'min'}, fsD);
+      {value:d=>d.duration, label:'Duration', color:'#3d6fb0', unit:'min', noBar:true}, fsD);
     html += drillBarSection('Average Accelerations + Decelerations', drillLabels, drillTotals,
       {value:d=>d.accel, label:'Accelerations', color:'#F26522', unit:''},
       {value:d=>d.decel, label:'Decelerations', color:'#3d6fb0', unit:''}, fsD);
