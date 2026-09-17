@@ -371,7 +371,7 @@
     </div>
     <div class="alist" id="alist"><div style="padding:16px;font-size:12px;color:#7a8290;text-align:center">No players yet — add one, or import from a Google Sheet in Settings.</div></div>
     <div class="settings-bar"><span id="sheetStatus">No sheet imported</span><button class="btn-sm" onclick="showConfig()">⚙ Settings</button></div>
-    <div style="text-align:center;font-size:9.5px;color:#a3a9b4;padding:6px 4px 10px;letter-spacing:.02em;">Build 2026-09-17 12:40</div>
+    <div style="text-align:center;font-size:9.5px;color:#a3a9b4;padding:6px 4px 10px;letter-spacing:.02em;">Build 2026-09-17 13:05</div>
   </aside>
   <main class="main" id="main"></main>
 
@@ -3090,14 +3090,26 @@ function drillBarSection(title, drillLabels, drillTotals, seriesA, seriesB, full
 // extras, rehab work) that a length-based guess can't distinguish. With no
 // override and zero rows for a date, that's shown as "Did Not Train" rather
 // than blank.
-const STATUS_OPTIONS = ['Full','Partial','Did Not Train','No GPS'];
+const STATUS_OPTIONS = ['Full','Partial','Rehab','No GPS','Did Not Train'];
+// Maps whatever the sheet's own Participation column says (or a drill title
+// like "Rehab - Tempo") onto one of the five statuses above. An unrecognized
+// value defaults to Full rather than being shown verbatim -- the dropdown
+// only ever offers these five, so the auto-detected label has to be one of
+// them too, not arbitrary sheet text.
+function normalizeStatus(raw, hasData){
+  if (!hasData) return 'Did Not Train';
+  const r = (raw||'').trim().toLowerCase();
+  const match = STATUS_OPTIONS.find(o=>o.toLowerCase()===r);
+  return match || 'Full';
+}
 function participationStatus(players, dateStr, playerTotals){
   const byId = {}; playerTotals.forEach(t=>byId[t.id]=t);
   return players.map(a=>{
     const t = byId[a.id];
-    const raw = (!t || !t.duration) ? 'Did Not Train' : (t.participation || '—');
+    const hasData = !!(t && t.duration);
+    const auto = normalizeStatus(t ? t.participation : '', hasData);
     const override = STATUS_OVERRIDES[`${dateStr}|${a.id}`];
-    return { id:a.id, name:a.name, label: override || raw, raw, override: override||'', duration:t?t.duration:0 };
+    return { id:a.id, name:a.name, label: override || auto, duration:t?t.duration:0 };
   });
 }
 function setStatusOverride(dateStr, playerId, value){
@@ -3118,9 +3130,10 @@ function participationColor(label){
   const l = (label||'').toLowerCase();
   if (l==='full') return '#2f8f5b';
   if (l==='partial') return '#d97f3d';
-  if (l==='did not train' || l==='—' || l==='') return '#c8483d';
+  if (l==='rehab') return '#3d6fb0';
   if (l==='no gps') return '#8a8f9b';
-  return '#d97f3d'; // any other recorded value (Rehab, Goal Keeper, etc.)
+  if (l==='did not train' || l==='—' || l==='') return '#c8483d';
+  return '#d97f3d';
 }
 // %MAX (max velocity vs personal best) is only meaningful once a player
 // has had several genuine sprint-eliciting efforts recorded -- with very
@@ -3263,10 +3276,16 @@ function buildDailyReportHtml(dateStr, customTitle){
   }).filter(Boolean))];
   const primaryLabel = labelsUsed[0] || '';
   const statusList = participationStatus(players, dateStr, playerTotals);
-  const teamTotals = playerTotals.reduce((acc,t)=>({ duration:acc.duration+t.duration, distance:acc.distance+t.distance, hsr:acc.hsr+t.hsr, sprint:acc.sprint+t.sprint, vhsd:acc.vhsd+(t.vhsd||0), accelDecel:acc.accelDecel+t.accelDecel, accel:acc.accel+(t.accel||0), decel:acc.decel+(t.decel||0) }), {duration:0,distance:0,hsr:0,sprint:0,vhsd:0,accelDecel:0,accel:0,decel:0});
-  const avgN = playerTotals.length || 1;
-  const redZoneVals = playerTotals.filter(t=>t.redZone!=null);
-  const hrVals = playerTotals.filter(t=>t.avgHr!=null);
+  const statusById = {}; statusList.forEach(s=>statusById[s.id]=s.label);
+  // "No GPS" means the number on that row isn't trustworthy (no unit /
+  // failed recording), so it's excluded from the squad averages the same
+  // way a Did Not Train player naturally is (no row for them at all).
+  // Full, Partial and Rehab all still count -- only these two don't.
+  const avgEligible = playerTotals.filter(t=>statusById[t.id]!=='No GPS');
+  const teamTotals = avgEligible.reduce((acc,t)=>({ duration:acc.duration+t.duration, distance:acc.distance+t.distance, hsr:acc.hsr+t.hsr, sprint:acc.sprint+t.sprint, vhsd:acc.vhsd+(t.vhsd||0), accelDecel:acc.accelDecel+t.accelDecel, accel:acc.accel+(t.accel||0), decel:acc.decel+(t.decel||0) }), {duration:0,distance:0,hsr:0,sprint:0,vhsd:0,accelDecel:0,accel:0,decel:0});
+  const avgN = avgEligible.length || 1;
+  const redZoneVals = avgEligible.filter(t=>t.redZone!=null);
+  const hrVals = avgEligible.filter(t=>t.avgHr!=null);
   const teamAvg = { duration:teamTotals.duration/avgN, distance:teamTotals.distance/avgN, hsr:teamTotals.hsr/avgN, sprint:teamTotals.sprint/avgN, vhsd:teamTotals.vhsd/avgN, accelDecel:teamTotals.accelDecel/avgN, accel:teamTotals.accel/avgN, decel:teamTotals.decel/avgN, redZone: redZoneVals.length ? redZoneVals.reduce((s,t)=>s+t.redZone,0)/redZoneVals.length : null, avgHr: hrVals.length ? hrVals.reduce((s,t)=>s+t.avgHr,0)/hrVals.length : null };
   teamAvg.workRate = teamAvg.duration ? teamAvg.distance/teamAvg.duration : null;
   const md = matchDemandReference(players);
@@ -3344,8 +3363,7 @@ function buildDailyReportHtml(dateStr, customTitle){
   const flaggedById = {}; flagged.forEach(t=>flaggedById[t.id]=t);
   const playerRowCols = 8 + hrCols; // Duration/Distance/WorkRate/HID/SD/Speed/Acc/Dec + HR cols
   const statusSelect = (s)=>`<select onchange="setStatusOverride('${dateStr}','${s.id}',this.value)" style="font-size:12.5px;font-weight:700;color:${participationColor(s.label)};border:1px solid var(--border);border-radius:4px;padding:3px 5px;background:#fff;">
-      <option value="" ${!s.override?'selected':''}>Auto (${s.raw})</option>
-      ${STATUS_OPTIONS.map(o=>`<option value="${o}" ${s.override===o?'selected':''}>${o}</option>`).join('')}
+      ${STATUS_OPTIONS.map(o=>`<option value="${o}" ${s.label===o?'selected':''}>${o}</option>`).join('')}
     </select>`;
   html += `<div class="rpt-section-title">Player-by-Player</div>
     <table class="rpt-table"><thead><tr><th>Name</th><th>Status</th><th>Training Time (min)</th><th>Total Distance (m)</th><th>Work Rate (m/min)</th><th>HID (&gt;19.8kph)</th><th>SD (&gt;25.2kph)</th>${anyHrData?'<th>Avg HR (bpm)</th>':''}${anyRedZoneData?'<th>Time in Red Zone (%)</th>':''}<th>Speed (kph)</th><th>Acc (&gt;4m/s)</th><th>Dec (&gt;4m/s)</th></tr></thead><tbody>
