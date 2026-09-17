@@ -316,6 +316,7 @@
     #overlayReport .modal { box-shadow:none; max-width:100%; width:100%; margin:0; padding:0; overflow:visible; }
     .no-print { display:none !important; }
     .print-only { display:inline !important; }
+    .no-data-row { display:none !important; }
     .rpt-table { font-size:11px; }
     .rpt-table th { font-size:9.5px; padding:6px 7px; white-space:normal; }
     .rpt-table td { padding:6px 7px; }
@@ -362,7 +363,7 @@
     </div>
     <div class="alist" id="alist"><div style="padding:16px;font-size:12px;color:#7a8290;text-align:center">No players yet — add one, or import from a Google Sheet in Settings.</div></div>
     <div class="settings-bar"><span id="sheetStatus">No sheet imported</span><button class="btn-sm" onclick="showConfig()">⚙ Settings</button></div>
-    <div style="text-align:center;font-size:9.5px;color:#a3a9b4;padding:6px 4px 10px;letter-spacing:.02em;">Build 2026-09-16 14:45</div>
+    <div style="text-align:center;font-size:9.5px;color:#a3a9b4;padding:6px 4px 10px;letter-spacing:.02em;">Build 2026-09-17 09:30</div>
   </aside>
   <main class="main" id="main"></main>
 
@@ -2839,10 +2840,10 @@ const ROAR_LOGO_SVG = `<svg viewBox="0 0 184.1 250" xmlns="http://www.w3.org/200
 // Small line-art icons for the KPI cards (distance, work rate, HID, sprint) --
 // single-color, stroke-based, sized to sit inside the card above the number.
 const KPI_ICONS = {
-  distance: `<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#F26522" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="14.5" cy="4.2" r="1.6" fill="#F26522" stroke="none"/><path d="M9 21l2-5 2.5-2-1-4"/><path d="M8 13l2.5-2.5 2 2 3-1"/><path d="M6 21l3-6"/></svg>`,
-  workRate: `<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#F26522" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15a8 8 0 1 1 16 0"/><path d="M12 15l4-5"/><circle cx="12" cy="15" r="1.1" fill="#F26522" stroke="none"/></svg>`,
-  hid: `<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#F26522" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 13h4l2 5 3-11 2 6h3l2-4 1 4h3"/></svg>`,
-  sprint: `<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#F26522" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="16" cy="4.5" r="1.6" fill="#F26522" stroke="none"/><path d="M6 21l4-4 2-4-2-3"/><path d="M10 13l3 1 3 4"/><path d="M8 10l3-1 3 2"/><path d="M2 21h6"/></svg>`,
+  distance: `<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#F26522" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="19" r="2"/><path d="M6 17V5a2 2 0 0 1 2-2h2"/><circle cx="18" cy="5" r="2"/><path d="M18 7v12a2 2 0 0 1-2 2h-2"/></svg>`,
+  workRate: `<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#F26522" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></svg>`,
+  hid: `<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#F26522" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>`,
+  sprint: `<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#F26522" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/></svg>`,
 };
 
 const SESSION_TYPE_INFO = {
@@ -3156,10 +3157,8 @@ function buildDailyReportHtml(dateStr, customTitle){
   const hrVals = playerTotals.filter(t=>t.avgHr!=null);
   const teamAvg = { duration:teamTotals.duration/avgN, distance:teamTotals.distance/avgN, hsr:teamTotals.hsr/avgN, sprint:teamTotals.sprint/avgN, vhsd:teamTotals.vhsd/avgN, accelDecel:teamTotals.accelDecel/avgN, accel:teamTotals.accel/avgN, decel:teamTotals.decel/avgN, redZone: redZoneVals.length ? redZoneVals.reduce((s,t)=>s+t.redZone,0)/redZoneVals.length : null, avgHr: hrVals.length ? hrVals.reduce((s,t)=>s+t.avgHr,0)/hrVals.length : null };
   teamAvg.workRate = teamAvg.duration ? teamAvg.distance/teamAvg.duration : null;
-  const ref = primaryLabel ? findReferenceSession(athleteMap[playerTotals[0].id], dateStr, primaryLabel) : null;
   const md = matchDemandReference(players);
 
-  const genDate = new Date().toLocaleDateString('en-AU', {day:'numeric', month:'short', year:'numeric'});
   const meta = SESSION_META[dateStr] || {};
   // Some export formats leave the session-title column carrying the date
   // itself rather than a real label (e.g. "MD+3") -- showing that would
@@ -3174,7 +3173,7 @@ function buildDailyReportHtml(dateStr, customTitle){
     <span class="no-print">🌡 Temperature: <input type="text" placeholder="e.g. 21" value="${meta.temperature||''}" onchange="setSessionMeta('${dateStr}','temperature',this.value)">°</span>
     <span class="print-only" style="display:none;">🌡 Temperature: <b>${meta.temperature?meta.temperature+'°':'—'}</b></span>
     <span>⏱ Duration: <b>${fmt(teamAvg.duration)}min</b></span>
-    <span style="margin-left:auto;color:var(--text-muted);font-size:11px;">Henri Joensuu · Performance Coach · Generated ${genDate}</span>
+    <span style="margin-left:auto;color:var(--text-muted);font-size:11px;">Henri Joensuu · Performance Coach</span>
   </div>
   <div class="kpi-cards">
     <div class="kpi-card">${KPI_ICONS.distance}<div class="kpi-card-label">Total Distance (m)</div><div class="kpi-card-value">${fmt(teamAvg.distance)}</div><div class="kpi-card-sub">Full Training Average</div></div>
@@ -3206,16 +3205,6 @@ function buildDailyReportHtml(dateStr, customTitle){
   // Avg HR / Time in Red Zone columns only appear if someone actually had
   // a monitor on for this session -- otherwise it's just a column of dashes.
   const hrCols = (anyHrData?1:0) + (anyRedZoneData?1:0);
-  const hrPlaceholder = hrCols>0 ? `<td colspan="${hrCols}">—</td>` : '';
-  const overviewCols = 6 + hrCols; // label + Duration/Distance/HSR/VHSD/Accel-Decel + HR cols
-
-  html += `<div class="rpt-section-title">Session Overview</div>
-    <table class="rpt-table"><thead><tr><th></th><th>Duration</th><th>Distance</th><th>HSR</th><th>VHSD</th><th>Accel/Decel</th>${anyHrData?'<th>Avg HR</th>':''}${anyRedZoneData?'<th>Time in Red Zone</th>':''}</tr></thead><tbody>
-      <tr><td class="lbl">Today (squad avg)</td><td>${fmt(teamAvg.duration)} min</td><td>${fmt(teamAvg.distance)} m</td><td>${fmt(teamAvg.hsr)} m</td><td>${fmt(teamAvg.vhsd)} m</td><td>${fmt(teamAvg.accelDecel)}</td>${anyHrData?`<td>${teamAvg.avgHr!=null?fmt(teamAvg.avgHr)+' bpm':'—'}</td>`:''}${anyRedZoneData?`<td>${teamAvg.redZone!=null?fmt(teamAvg.redZone)+'%':'—'}</td>`:''}</tr>
-      ${ref ? `<tr><td class="lbl">Reference (${primaryLabel}, ${ref.date})</td><td>${fmt(ref.duration)} min</td><td>${fmt(ref.distance)} m</td><td>${fmt(ref.hsr)} m</td><td>${fmt(ref.vhsd)} m</td><td>${fmt(ref.accelDecel)}</td>${hrPlaceholder}</tr>
-      <tr><td class="lbl">Diff</td><td>${teamAvg.duration-ref.duration>=0?'+':''}${fmt(teamAvg.duration-ref.duration)} min</td><td>${teamAvg.distance-ref.distance>=0?'+':''}${fmt(teamAvg.distance-ref.distance)} m</td><td>${teamAvg.hsr-ref.hsr>=0?'+':''}${fmt(teamAvg.hsr-ref.hsr)} m</td><td>${teamAvg.vhsd-ref.vhsd>=0?'+':''}${fmt(teamAvg.vhsd-ref.vhsd)} m</td><td>${teamAvg.accelDecel-ref.accelDecel>=0?'+':''}${fmt(teamAvg.accelDecel-ref.accelDecel)}</td>${hrPlaceholder}</tr>
-      <tr><td class="lbl">% of Reference</td><td>${fmt(pctDiff(teamAvg.duration,ref.duration)+100)}%</td><td>${fmt(pctDiff(teamAvg.distance,ref.distance)+100)}%</td><td>${fmt(pctDiff(teamAvg.hsr,ref.hsr)+100)}%</td><td>${fmt(pctDiff(teamAvg.vhsd,ref.vhsd)+100)}%</td><td>${fmt(pctDiff(teamAvg.accelDecel,ref.accelDecel)+100)}%</td>${hrPlaceholder}</tr>` : `<tr><td class="lbl" colspan="${overviewCols}" style="color:var(--text-muted);font-style:italic;">No prior "${primaryLabel||'—'}" session on record to compare against yet.</td></tr>`}
-    </tbody></table>`;
 
   // Renders one stats row given a {duration,n,distance,hsr,accelDecel,
   // distances,accelDecels,hsrs,heartRates} bucket -- shared by both the
@@ -3247,21 +3236,21 @@ function buildDailyReportHtml(dateStr, customTitle){
       ${STATUS_OPTIONS.map(o=>`<option value="${o}" ${s.override===o?'selected':''}>${o}</option>`).join('')}
     </select>`;
   html += `<div class="rpt-section-title">Player-by-Player</div>
-    <table class="rpt-table"><thead><tr><th>Name</th><th>Status</th><th>Training Time</th><th>Total Distance</th><th>Work Rate</th><th>HID</th><th>SD</th>${anyHrData?'<th>Avg HR</th>':''}${anyRedZoneData?'<th>Time in Red Zone</th>':''}<th>Speed</th><th>Acc</th><th>Dec</th></tr></thead><tbody>
+    <table class="rpt-table"><thead><tr><th>Name</th><th>Status</th><th>Training Time (min)</th><th>Total Distance (m)</th><th>Work Rate (m/min)</th><th>HID (&gt;19.8kph)</th><th>SD (&gt;25.2kph)</th>${anyHrData?'<th>Avg HR (bpm)</th>':''}${anyRedZoneData?'<th>Time in Red Zone (%)</th>':''}<th>Speed (kph)</th><th>Acc (&gt;4m/s)</th><th>Dec (&gt;4m/s)</th></tr></thead><tbody>
     ${statusList.sort((a,b)=>(flaggedById[b.id]?.distance||-1)-(flaggedById[a.id]?.distance||-1)).map(s=>{
       const t = flaggedById[s.id];
       if (!t){
-        return `<tr style="color:var(--text-muted);"><td class="lbl">${s.name}</td><td>${statusSelect(s)}</td><td colspan="${playerRowCols}">—</td></tr>`;
+        return `<tr class="no-data-row" style="color:var(--text-muted);"><td class="lbl">${s.name}</td><td>${statusSelect(s)}</td><td colspan="${playerRowCols}">—</td></tr>`;
       }
       return `<tr><td class="lbl">${s.name}</td><td>${statusSelect(s)}</td>
-        <td>${fmt(t.duration)} min</td>
-        <td style="background:${flagBg(t.flags.distance)}">${fmt(t.distance)} m${flagTag(t.flags.distance)}</td>
-        <td style="background:${flagBg(t.flags.workRate)}">${fmt(t.workRate)} m/min${flagTag(t.flags.workRate)}</td>
-        <td style="background:${flagBg(t.flags.hsr)}">${fmt(t.hsr)} m${flagTag(t.flags.hsr)}</td>
-        <td style="background:${flagBg(t.flags.sprint)}">${fmt(t.sprint)} m${flagTag(t.flags.sprint)}</td>
-        ${anyHrData?`<td>${t.avgHr!=null?fmt(t.avgHr)+' bpm':'—'}</td>`:''}
-        ${anyRedZoneData?`<td>${t.redZone!=null?fmt(t.redZone)+'%':'—'}</td>`:''}
-        <td>${t.maxVel!=null?fmt(t.maxVel)+' km/h':'—'}</td>
+        <td>${fmt(t.duration)}</td>
+        <td style="background:${flagBg(t.flags.distance)}">${fmt(t.distance)}${flagTag(t.flags.distance)}</td>
+        <td style="background:${flagBg(t.flags.workRate)}">${fmt(t.workRate)}${flagTag(t.flags.workRate)}</td>
+        <td style="background:${flagBg(t.flags.hsr)}">${fmt(t.hsr)}${flagTag(t.flags.hsr)}</td>
+        <td style="background:${flagBg(t.flags.sprint)}">${fmt(t.sprint)}${flagTag(t.flags.sprint)}</td>
+        ${anyHrData?`<td>${t.avgHr!=null?fmt(t.avgHr):'—'}</td>`:''}
+        ${anyRedZoneData?`<td>${t.redZone!=null?fmt(t.redZone):'—'}</td>`:''}
+        <td>${t.maxVel!=null?fmt(t.maxVel):'—'}</td>
         <td style="background:${flagBg(t.flags.accel)}">${fmt(t.accel)}${flagTag(t.flags.accel)}</td>
         <td style="background:${flagBg(t.flags.decel)}">${fmt(t.decel)}${flagTag(t.flags.decel)}</td></tr>`;
     }).join('')}
