@@ -375,7 +375,7 @@
     </div>
     <div class="alist" id="alist"><div style="padding:16px;font-size:12px;color:#7a8290;text-align:center">No players yet — add one, or import from a Google Sheet in Settings.</div></div>
     <div class="settings-bar"><span id="sheetStatus">No sheet imported</span><button class="btn-sm" onclick="showConfig()">⚙ Settings</button></div>
-    <div style="text-align:center;font-size:9.5px;color:#a3a9b4;padding:6px 4px 10px;letter-spacing:.02em;">Build 2026-09-18 09:15</div>
+    <div style="text-align:center;font-size:9.5px;color:#a3a9b4;padding:6px 4px 10px;letter-spacing:.02em;">Build 2026-09-18 10:05</div>
   </aside>
   <main class="main" id="main"></main>
 
@@ -3391,10 +3391,10 @@ function buildDailyReportHtml(dateStr, customTitle){
     <div class="chart-note no-print"><span>▪ Each column's top/bottom 10% is flagged independently. Status defaults to the GPS sheet's Participation column ("Did Not Train" = no data recorded) — use the dropdown to override manually for any player/date; overrides are saved automatically.</span></div>`;
 
   const drillLabels = Object.keys(drillTotals).sort((a,b)=>(drillTotals[a].startSec==null?Infinity:drillTotals[a].startSec)-(drillTotals[b].startSec==null?Infinity:drillTotals[b].startSec));
-  html += `<div class="rpt-section-title">Drill-by-Drill</div>
+  html += `<div class="chart-block"><div class="rpt-section-title">Drill-by-Drill</div>
     <table class="rpt-table">${drillTableHead}<tbody>
     ${drillLabels.map(label=>drillStatRow(label, drillTotals[label], 0)).join('')}
-    </tbody></table>`;
+    </tbody></table></div>`;
 
   if (drillLabels.length){
     const fsD = { n:1, distance:teamAvg.distance, hsr:teamAvg.hsr, accel:teamAvg.accel, decel:teamAvg.decel, duration:teamAvg.duration };
