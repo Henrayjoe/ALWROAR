@@ -371,7 +371,7 @@
     </div>
     <div class="alist" id="alist"><div style="padding:16px;font-size:12px;color:#7a8290;text-align:center">No players yet — add one, or import from a Google Sheet in Settings.</div></div>
     <div class="settings-bar"><span id="sheetStatus">No sheet imported</span><button class="btn-sm" onclick="showConfig()">⚙ Settings</button></div>
-    <div style="text-align:center;font-size:9.5px;color:#a3a9b4;padding:6px 4px 10px;letter-spacing:.02em;">Build 2026-09-17 13:05</div>
+    <div style="text-align:center;font-size:9.5px;color:#a3a9b4;padding:6px 4px 10px;letter-spacing:.02em;">Build 2026-09-17 13:35</div>
   </aside>
   <main class="main" id="main"></main>
 
@@ -464,7 +464,7 @@
       <input id="reportTitle" type="text" class="axis-select" style="flex:1;min-width:180px;" placeholder="Optional custom title (e.g. 'Week 3 Pre-Season')" oninput="renderReportContent()">
       <button class="btn" onclick="printReport()">🖨 Print / Save PDF</button>
     </div>
-    <div class="rpt-print-hint no-print" style="margin:-8px 0 14px;">ℹ Prints as a normal multi-page document — if your print dialog has a "Pages" or "Headers and footers" option, leave defaults on so page breaks fall correctly.</div>
+    <div class="rpt-print-hint no-print" style="margin:-8px 0 14px;">ℹ Prints as a normal multi-page document. In your print dialog, turn <b>"Headers and footers" OFF</b> (usually under "More settings") — that's what stamps the page URL/title/date onto every page; page breaks here are handled by the report itself, not by that setting.</div>
     <div id="reportContent"></div>
   </div>
 </div>
@@ -3304,7 +3304,6 @@ function buildDailyReportHtml(dateStr, customTitle){
     <span class="no-print">🌡 Temperature: <input type="text" placeholder="e.g. 21" value="${meta.temperature||''}" onchange="setSessionMeta('${dateStr}','temperature',this.value)">°</span>
     <span class="print-only" style="display:none;">🌡 Temperature: <b>${meta.temperature?meta.temperature+'°':'—'}</b></span>
     <span>⏱ Duration: <b>${fmt(teamAvg.duration)}min</b></span>
-    <span style="margin-left:auto;color:var(--text-muted);font-size:11px;">Henri Joensuu · Performance Coach</span>
   </div>
   <div class="kpi-cards">
     <div class="kpi-card">${KPI_ICONS.distance}<div class="kpi-card-label">Total Distance (m)</div><div class="kpi-card-value">${fmt(teamAvg.distance)}</div><div class="kpi-card-sub">Full Training Average</div></div>
@@ -3417,7 +3416,7 @@ function buildWeeklyReportHtml(endDateStr, customTitle){
   if (!allDates.length) return `<div class="hint" style="padding:20px 4px;">No training GPS data in the 7 days ending ${endDateStr}.</div>`;
 
   const genDate2 = new Date().toLocaleDateString('en-AU', {day:'numeric', month:'short', year:'numeric'});
-  let html = `<div class="rpt-header">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">Brisbane Roar · A-League Women</div><div class="rpt-title">${customTitle || 'Weekly Training Report'}</div><div class="rpt-sub">${weekDates[0]} to ${endDateStr}</div></div><div class="rpt-header-meta"><b>Henri Joensuu</b>Performance Coach<br>Generated ${genDate2}</div></div>`;
+  let html = `<div class="rpt-header">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">Brisbane Roar · A-League Women</div><div class="rpt-title">${customTitle || 'Weekly Training Report'}</div><div class="rpt-sub">${weekDates[0]} to ${endDateStr}</div></div><div class="rpt-header-meta">Generated ${genDate2}</div></div>`;
 
   const sessionMedians = allDates.map(dt=>{
     const { playerTotals } = daySquadBreakdown(players, dt);
