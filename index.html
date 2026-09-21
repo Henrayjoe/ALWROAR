@@ -375,7 +375,7 @@
     </div>
     <div class="alist" id="alist"><div style="padding:16px;font-size:12px;color:#7a8290;text-align:center">No players yet — add one, or import from a Google Sheet in Settings.</div></div>
     <div class="settings-bar"><span id="sheetStatus">No sheet imported</span><button class="btn-sm" onclick="showConfig()">⚙ Settings</button></div>
-    <div style="text-align:center;font-size:9.5px;color:#a3a9b4;padding:6px 4px 10px;letter-spacing:.02em;">Build 2026-09-18 10:05</div>
+    <div style="text-align:center;font-size:9.5px;color:#a3a9b4;padding:6px 4px 10px;letter-spacing:.02em;">Build 2026-09-18 11:00</div>
   </aside>
   <main class="main" id="main"></main>
 
@@ -3419,35 +3419,37 @@ function buildWeeklyReportHtml(endDateStr, customTitle){
   const allDates = trainingSessionDates(players).filter(d=>weekDates.includes(d));
   if (!allDates.length) return `<div class="hint" style="padding:20px 4px;">No training GPS data in the 7 days ending ${endDateStr}.</div>`;
 
-  const genDate2 = new Date().toLocaleDateString('en-AU', {day:'numeric', month:'short', year:'numeric'});
-  let html = `<div class="rpt-header">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">Brisbane Roar · A-League Women</div><div class="rpt-title">${customTitle || 'Weekly Training Report'}</div><div class="rpt-sub">${weekDates[0]} to ${endDateStr}</div></div><div class="rpt-header-meta">Generated ${genDate2}</div></div>`;
-
-  const sessionMedians = allDates.map(dt=>{
+  // Same squad-average methodology as the daily report (Full/Partial/Rehab
+  // count, No GPS and Did Not Train don't) so a given day's numbers read
+  // the same whether you're looking at it here or in that day's own report.
+  const dayAverages = allDates.map(dt=>{
     const { playerTotals } = daySquadBreakdown(players, dt);
-    return { date:dt,
-      duration: median(playerTotals.map(t=>t.duration)),
-      distance: median(playerTotals.map(t=>t.distance)),
-      hsr: median(playerTotals.map(t=>t.hsr)),
-      vhsd: median(playerTotals.map(t=>t.vhsd)),
-      sprint: median(playerTotals.map(t=>t.sprint)),
-      accelDecel: median(playerTotals.map(t=>t.accelDecel)),
-    };
+    const statusList = participationStatus(players, dt, playerTotals);
+    const statusById = {}; statusList.forEach(s=>statusById[s.id]=s.label);
+    const eligible = playerTotals.filter(t=>statusById[t.id]!=='No GPS');
+    const n = eligible.length || 1;
+    const sum = f => eligible.reduce((s,t)=>s+(t[f]||0),0);
+    const meta = SESSION_META[dt] || {};
+    return { date:dt, label:meta.sessionLabel||'',
+      duration: sum('duration')/n, distance: sum('distance')/n, hsr: sum('hsr')/n, sprint: sum('sprint')/n, accelDecel: sum('accelDecel')/n };
   });
-  const sumField = f => sessionMedians.reduce((s,x)=>s+(x[f]||0),0);
-  const maxField = f => Math.max(...sessionMedians.map(x=>x[f]||0));
-  const minField = f => Math.min(...sessionMedians.map(x=>x[f]||0));
-  const sessTotal = { duration:sumField('duration'), distance:sumField('distance'), hsr:sumField('hsr'), vhsd:sumField('vhsd'), sprint:sumField('sprint'), accelDecel:sumField('accelDecel') };
-  const sessMax = { duration:maxField('duration'), distance:maxField('distance'), hsr:maxField('hsr'), vhsd:maxField('vhsd'), sprint:maxField('sprint'), accelDecel:maxField('accelDecel') };
-  const sessMin = { duration:minField('duration'), distance:minField('distance'), hsr:minField('hsr'), vhsd:minField('vhsd'), sprint:minField('sprint'), accelDecel:minField('accelDecel') };
+  const dayTotal = { duration:dayAverages.reduce((s,x)=>s+x.duration,0), distance:dayAverages.reduce((s,x)=>s+x.distance,0), hsr:dayAverages.reduce((s,x)=>s+x.hsr,0), sprint:dayAverages.reduce((s,x)=>s+x.sprint,0), accelDecel:dayAverages.reduce((s,x)=>s+x.accelDecel,0) };
+  const weekWorkRate = dayTotal.duration ? dayTotal.distance/dayTotal.duration : null;
 
-  html += `<div class="rpt-section-title">Session-by-Session (Squad Median)</div>
-    <table class="rpt-table"><thead><tr><th>Date</th><th>Duration</th><th>Distance</th><th>HSR</th><th>VHSD</th><th>Sprint Dist</th><th>Accel/Decel</th></tr></thead><tbody>
-    ${sessionMedians.map(s=>`<tr><td class="lbl">${s.date}</td><td>${fmt(s.duration)} min</td><td>${fmt(s.distance)} m</td><td>${fmt(s.hsr)} m</td><td>${fmt(s.vhsd)} m</td><td>${fmt(s.sprint)} m</td><td>${fmt(s.accelDecel)}</td></tr>`).join('')}
-    <tr style="border-top:2px solid var(--border);font-weight:700;"><td class="lbl">Total</td><td>${fmt(sessTotal.duration)} min</td><td>${fmt(sessTotal.distance)} m</td><td>${fmt(sessTotal.hsr)} m</td><td>${fmt(sessTotal.vhsd)} m</td><td>${fmt(sessTotal.sprint)} m</td><td>${fmt(sessTotal.accelDecel)}</td></tr>
-    <tr><td class="lbl" style="color:var(--text-muted);">Max</td><td>${fmt(sessMax.duration)} min</td><td>${fmt(sessMax.distance)} m</td><td>${fmt(sessMax.hsr)} m</td><td>${fmt(sessMax.vhsd)} m</td><td>${fmt(sessMax.sprint)} m</td><td>${fmt(sessMax.accelDecel)}</td></tr>
-    <tr><td class="lbl" style="color:var(--text-muted);">Min</td><td>${fmt(sessMin.duration)} min</td><td>${fmt(sessMin.distance)} m</td><td>${fmt(sessMin.hsr)} m</td><td>${fmt(sessMin.vhsd)} m</td><td>${fmt(sessMin.sprint)} m</td><td>${fmt(sessMin.accelDecel)}</td></tr>
-    </tbody></table>
-    <div class="chart-note"><span>▪ Each day shows the squad's median player that day (typical output, not skewed by one outlier), not a combined squad total. VHSD (Sonra Zone 6 distance) is a best-effort mapping we haven't fully confirmed with you — flag it if the numbers look off.</span></div>`;
+  let html = `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">${customTitle || 'ALW Brisbane Roar 2026/2027'}</div><div class="rpt-sub">WEEK: ${weekDates[0]} to ${endDateStr}&nbsp;&nbsp;SESSIONS: ${allDates.length}</div></div>${ROAR_LOGO_SVG}</div>
+  <div class="kpi-cards">
+    <div class="kpi-card">${KPI_ICONS.distance}<div class="kpi-card-label">Total Distance (m)</div><div class="kpi-card-value">${fmt(dayTotal.distance)}</div><div class="kpi-card-sub">Weekly Total</div></div>
+    <div class="kpi-card">${KPI_ICONS.workRate}<div class="kpi-card-label">Work Rate (m/min)</div><div class="kpi-card-value">${fmt(weekWorkRate)}</div><div class="kpi-card-sub">Weekly Average</div></div>
+    <div class="kpi-card">${KPI_ICONS.hid}<div class="kpi-card-label">HID (m)</div><div class="kpi-card-value">${fmt(dayTotal.hsr)}</div><div class="kpi-card-sub">Weekly Total</div></div>
+    <div class="kpi-card">${KPI_ICONS.sprint}<div class="kpi-card-label">SD (m)</div><div class="kpi-card-value">${fmt(dayTotal.sprint)}</div><div class="kpi-card-sub">Weekly Total</div></div>
+  </div>`;
+
+  html += `<div class="chart-block"><div class="rpt-section-title">Session-by-Session</div>
+    <table class="rpt-table"><thead><tr><th>Training</th><th>TD</th><th>HSR</th><th>Sprint Distance</th><th>#Accel/Decel</th></tr></thead><tbody>
+    ${dayAverages.map(s=>`<tr><td class="lbl">${s.date}${s.label?' · '+s.label:''}</td><td>${fmt(s.distance)} m</td><td>${fmt(s.hsr)} m</td><td>${fmt(s.sprint)} m</td><td>${fmt(s.accelDecel)}</td></tr>`).join('')}
+    <tr style="border-top:2px solid var(--border);font-weight:700;"><td class="lbl">Total</td><td>${fmt(dayTotal.distance)} m</td><td>${fmt(dayTotal.hsr)} m</td><td>${fmt(dayTotal.sprint)} m</td><td>${fmt(dayTotal.accelDecel)}</td></tr>
+    </tbody></table></div>
+    <div class="chart-note"><span>▪ Each day shows the squad average for that session (Full/Partial/Rehab players; No GPS and Did Not Train excluded) — same method as that day's own report.</span></div>`;
 
   const md = matchDemandReference(players);
   const target = SETTINGS.weeklyTargetMultiplier;
@@ -3455,13 +3457,13 @@ function buildWeeklyReportHtml(endDateStr, customTitle){
   rows.forEach(r=>{ r.pctBest = maxVelPctOfBest(athleteMap[r.id], r.maxVel); });
   rows = flagOutliersMulti(rows, ['distance','hsr','sprint','accelDecel']);
   html += `<div class="rpt-section-title">Player Weekly Accumulated Load</div>
-    <table class="rpt-table"><thead><tr><th>Player</th><th>Sessions</th><th>Distance</th><th>HSR</th><th>Sprint Dist</th><th>Accel/Decel</th><th>%MAX (peak)</th></tr></thead><tbody>
+    <table class="rpt-table"><thead><tr><th>Player</th><th>Sessions</th><th>Distance (m)</th><th>HSR (m)</th><th>Sprint Dist (m)</th><th>Accel/Decel</th><th>%MAX (peak)</th></tr></thead><tbody>
     ${rows.sort((a,b)=>b.distance-a.distance).map(r=>{
       const pctBestDisplay = r.pctBest!=null ? `${fmt(r.pctBest)}%${r.velConfidence==='low'?' <span title="Based on very few recorded max-velocity efforts — treat with caution.">⚠︎</span>':''}` : '—';
       return `<tr><td class="lbl">${r.name}</td><td>${r.sessionCount}</td>
-        <td style="background:${flagBg(r.flags.distance)}">${fmt(r.distance)} m${flagTag(r.flags.distance)}</td>
-        <td style="background:${flagBg(r.flags.hsr)}">${fmt(r.hsr)} m${flagTag(r.flags.hsr)}</td>
-        <td style="background:${flagBg(r.flags.sprint)}">${fmt(r.sprint)} m${flagTag(r.flags.sprint)}</td>
+        <td style="background:${flagBg(r.flags.distance)}">${fmt(r.distance)}${flagTag(r.flags.distance)}</td>
+        <td style="background:${flagBg(r.flags.hsr)}">${fmt(r.hsr)}${flagTag(r.flags.hsr)}</td>
+        <td style="background:${flagBg(r.flags.sprint)}">${fmt(r.sprint)}${flagTag(r.flags.sprint)}</td>
         <td style="background:${flagBg(r.flags.accelDecel)}">${fmt(r.accelDecel)}${flagTag(r.flags.accelDecel)}</td>
         <td>${pctBestDisplay}</td></tr>`;
     }).join('')}
