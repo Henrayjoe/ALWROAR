@@ -375,7 +375,7 @@
     </div>
     <div class="alist" id="alist"><div style="padding:16px;font-size:12px;color:#7a8290;text-align:center">No players yet — add one, or import from a Google Sheet in Settings.</div></div>
     <div class="settings-bar"><span id="sheetStatus">No sheet imported</span><button class="btn-sm" onclick="showConfig()">⚙ Settings</button></div>
-    <div style="text-align:center;font-size:9.5px;color:#a3a9b4;padding:6px 4px 10px;letter-spacing:.02em;">Build 2026-09-18 12:15</div>
+    <div style="text-align:center;font-size:9.5px;color:#a3a9b4;padding:6px 4px 10px;letter-spacing:.02em;">Build 2026-09-18 12:35</div>
   </aside>
   <main class="main" id="main"></main>
 
@@ -3451,25 +3451,21 @@ function buildWeeklyReportHtml(endDateStr, customTitle){
         <span class="print-only" style="display:none;">${s.label||s.date}</span>
       </td><td>${fmt(s.distance)} m</td><td>${fmt(s.hsr)} m</td><td>${fmt(s.sprint)} m</td><td>${fmt(s.accel)}</td><td>${fmt(s.decel)}</td></tr>`).join('')}
     <tr style="border-top:2px solid var(--border);font-weight:700;"><td class="lbl">Total</td><td>${fmt(dayTotal.distance)} m</td><td>${fmt(dayTotal.hsr)} m</td><td>${fmt(dayTotal.sprint)} m</td><td>${fmt(dayTotal.accel)}</td><td>${fmt(dayTotal.decel)}</td></tr>
-    </tbody></table></div>
-    <div class="chart-note"><span>▪ Each day shows the squad average for that session ("Full" status players only — Partial, Rehab, No GPS and Did Not Train excluded, so the average isn't skewed by reduced or missing load). Click a Training field to name that session (e.g. "MD+3") — saved automatically and shared with that day's own report.</span></div>`;
+    </tbody></table></div>`;
 
-  let rows = players.filter(a=>a.trainingGps&&a.trainingGps.length).map(a=>({ id:a.id, name:a.name, ...weeklyLoad(a, endDateStr), pctBest: null, velConfidence: maxVelConfidence(a) }));
-  rows.forEach(r=>{ r.pctBest = maxVelPctOfBest(athleteMap[r.id], r.maxVel); });
+  let rows = players.filter(a=>a.trainingGps&&a.trainingGps.length).map(a=>({ id:a.id, name:a.name, ...weeklyLoad(a, endDateStr) }));
   rows = flagOutliersMulti(rows, ['distance','hsr','sprint','accelDecel']);
   html += `<div class="rpt-section-title">Player Weekly Accumulated Load</div>
-    <table class="rpt-table"><thead><tr><th>Player</th><th>Sessions</th><th>Distance (m)</th><th>HSR (m)</th><th>Sprint Dist (m)</th><th>Accel/Decel</th><th>%MAX (peak)</th></tr></thead><tbody>
+    <table class="rpt-table"><thead><tr><th>Player</th><th>Sessions</th><th>Distance (m)</th><th>HSR (m)</th><th>Sprint Dist (m)</th><th>Accel/Decel</th><th>Max Speed (kph)</th></tr></thead><tbody>
     ${rows.sort((a,b)=>b.distance-a.distance).map(r=>{
-      const pctBestDisplay = r.pctBest!=null ? `${fmt(r.pctBest)}%${r.velConfidence==='low'?' <span title="Based on very few recorded max-velocity efforts — treat with caution.">⚠︎</span>':''}` : '—';
       return `<tr><td class="lbl">${r.name}</td><td>${r.sessionCount}</td>
         <td style="background:${flagBg(r.flags.distance)}">${fmt(r.distance)}${flagTag(r.flags.distance)}</td>
         <td style="background:${flagBg(r.flags.hsr)}">${fmt(r.hsr)}${flagTag(r.flags.hsr)}</td>
         <td style="background:${flagBg(r.flags.sprint)}">${fmt(r.sprint)}${flagTag(r.flags.sprint)}</td>
         <td style="background:${flagBg(r.flags.accelDecel)}">${fmt(r.accelDecel)}${flagTag(r.flags.accelDecel)}</td>
-        <td>${pctBestDisplay}</td></tr>`;
+        <td>${r.maxVel!=null?fmt(r.maxVel):'—'}</td></tr>`;
     }).join('')}
-    </tbody></table>
-    <div class="chart-note"><span>▪ %MAX (peak) = this player's highest max velocity recorded this week, as a % of their own all-time best. ⚠︎ = fewer than 3 max-velocity efforts recorded so far — treat as provisional.</span></div>`;
+    </tbody></table>`;
 
   return html;
 }
