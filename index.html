@@ -375,7 +375,7 @@
     </div>
     <div class="alist" id="alist"><div style="padding:16px;font-size:12px;color:#7a8290;text-align:center">No players yet — add one, or import from a Google Sheet in Settings.</div></div>
     <div class="settings-bar"><span id="sheetStatus">No sheet imported</span><button class="btn-sm" onclick="showConfig()">⚙ Settings</button></div>
-    <div style="text-align:center;font-size:9.5px;color:#a3a9b4;padding:6px 4px 10px;letter-spacing:.02em;">Build 2026-09-18 11:45</div>
+    <div style="text-align:center;font-size:9.5px;color:#a3a9b4;padding:6px 4px 10px;letter-spacing:.02em;">Build 2026-09-18 12:15</div>
   </aside>
   <main class="main" id="main"></main>
 
@@ -469,7 +469,7 @@
       <button class="btn" onclick="printReport()">🖨 Print / Save PDF</button>
     </div>
     <div class="rpt-print-hint no-print" style="margin:-8px 0 14px;">ℹ Prints as a normal multi-page document. In your print dialog, turn <b>"Headers and footers" OFF</b> (usually under "More settings") — that's what stamps the page URL/title/date onto every page; page breaks here are handled by the report itself, not by that setting.</div>
-    <div id="reportContent"></div>
+    <div id="reportFitOuter"><div id="reportContent"></div></div>
   </div>
 </div>
 <input type="file" id="restoreFileInput" accept=".json" style="display:none;" onchange="handleRestoreFile(event)">
@@ -3427,7 +3427,7 @@ function buildWeeklyReportHtml(endDateStr, customTitle){
     const { playerTotals } = daySquadBreakdown(players, dt);
     const statusList = participationStatus(players, dt, playerTotals);
     const statusById = {}; statusList.forEach(s=>statusById[s.id]=s.label);
-    const eligible = playerTotals.filter(t=>statusById[t.id]!=='No GPS');
+    const eligible = playerTotals.filter(t=>statusById[t.id]==='Full');
     const n = eligible.length || 1;
     const sum = f => eligible.reduce((s,t)=>s+(t[f]||0),0);
     const meta = SESSION_META[dt] || {};
@@ -3452,7 +3452,7 @@ function buildWeeklyReportHtml(endDateStr, customTitle){
       </td><td>${fmt(s.distance)} m</td><td>${fmt(s.hsr)} m</td><td>${fmt(s.sprint)} m</td><td>${fmt(s.accel)}</td><td>${fmt(s.decel)}</td></tr>`).join('')}
     <tr style="border-top:2px solid var(--border);font-weight:700;"><td class="lbl">Total</td><td>${fmt(dayTotal.distance)} m</td><td>${fmt(dayTotal.hsr)} m</td><td>${fmt(dayTotal.sprint)} m</td><td>${fmt(dayTotal.accel)}</td><td>${fmt(dayTotal.decel)}</td></tr>
     </tbody></table></div>
-    <div class="chart-note"><span>▪ Each day shows the squad average for that session (Full/Partial/Rehab players; No GPS and Did Not Train excluded) — same method as that day's own report. Click a Training field to name that session (e.g. "MD+3") — saved automatically and shared with that day's own report.</span></div>`;
+    <div class="chart-note"><span>▪ Each day shows the squad average for that session ("Full" status players only — Partial, Rehab, No GPS and Did Not Train excluded, so the average isn't skewed by reduced or missing load). Click a Training field to name that session (e.g. "MD+3") — saved automatically and shared with that day's own report.</span></div>`;
 
   let rows = players.filter(a=>a.trainingGps&&a.trainingGps.length).map(a=>({ id:a.id, name:a.name, ...weeklyLoad(a, endDateStr), pctBest: null, velConfidence: maxVelConfidence(a) }));
   rows.forEach(r=>{ r.pctBest = maxVelPctOfBest(athleteMap[r.id], r.maxVel); });
@@ -3502,7 +3502,42 @@ function renderReportContent(){
   if (!dateStr){ target.innerHTML = `<div class="hint" style="padding:20px 4px;">No training GPS data yet — nothing to report on.</div>`; return; }
   target.innerHTML = reportMode==='day' ? buildDailyReportHtml(dateStr, customTitle) : buildWeeklyReportHtml(dateStr, customTitle);
 }
-function printReport(){ window.print(); }
+// Weekly reports must always print on exactly one page, however many
+// training days or players are in them -- unlike the daily report (which
+// just paginates normally with the break-avoidance rules above), there's
+// no fixed content budget here, so we measure the actual rendered height
+// right before printing and shrink it to fit if it's too tall. transform:
+// scale() alone doesn't affect how the print engine paginates (it only
+// changes what's drawn, not the element's box height in normal flow), so
+// the outer wrapper's height is set explicitly to the post-scale size --
+// that's what actually convinces the paginator it fits on one page.
+function printReport(){
+  const outer = document.getElementById('reportFitOuter');
+  const inner = document.getElementById('reportContent');
+  inner.style.transform = '';
+  inner.style.width = '';
+  outer.style.height = '';
+  outer.style.overflow = '';
+  if (reportMode==='week'){
+    const naturalHeight = inner.scrollHeight;
+    const pageHeightPx = (297-24) * 96/25.4 * 0.97; // A4 minus 12mm margins, 96dpi CSS reference, small safety margin
+    const scale = Math.min(1, pageHeightPx/naturalHeight);
+    if (scale < 1){
+      inner.style.transformOrigin = 'top left';
+      inner.style.transform = `scale(${scale})`;
+      inner.style.width = `${100/scale}%`;
+      outer.style.height = `${naturalHeight*scale}px`;
+      outer.style.overflow = 'hidden';
+    }
+  }
+  window.print();
+}
+window.addEventListener('afterprint', ()=>{
+  const outer = document.getElementById('reportFitOuter');
+  const inner = document.getElementById('reportContent');
+  if (!outer || !inner) return;
+  inner.style.transform = ''; inner.style.width = ''; outer.style.height = ''; outer.style.overflow = '';
+});
 let teamAcwrChartInstance = null;
 let teamAcwrMetric = 'total_distance_m';
 function setTeamAcwrMetric(m){ teamAcwrMetric = m; drawTeamGpsTraining(); }
