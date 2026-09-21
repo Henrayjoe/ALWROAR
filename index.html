@@ -375,7 +375,7 @@
     </div>
     <div class="alist" id="alist"><div style="padding:16px;font-size:12px;color:#7a8290;text-align:center">No players yet — add one, or import from a Google Sheet in Settings.</div></div>
     <div class="settings-bar"><span id="sheetStatus">No sheet imported</span><button class="btn-sm" onclick="showConfig()">⚙ Settings</button></div>
-    <div style="text-align:center;font-size:9.5px;color:#a3a9b4;padding:6px 4px 10px;letter-spacing:.02em;">Build 2026-09-18 11:30</div>
+    <div style="text-align:center;font-size:9.5px;color:#a3a9b4;padding:6px 4px 10px;letter-spacing:.02em;">Build 2026-09-18 11:45</div>
   </aside>
   <main class="main" id="main"></main>
 
@@ -3454,8 +3454,6 @@ function buildWeeklyReportHtml(endDateStr, customTitle){
     </tbody></table></div>
     <div class="chart-note"><span>▪ Each day shows the squad average for that session (Full/Partial/Rehab players; No GPS and Did Not Train excluded) — same method as that day's own report. Click a Training field to name that session (e.g. "MD+3") — saved automatically and shared with that day's own report.</span></div>`;
 
-  const md = matchDemandReference(players);
-  const target = SETTINGS.weeklyTargetMultiplier;
   let rows = players.filter(a=>a.trainingGps&&a.trainingGps.length).map(a=>({ id:a.id, name:a.name, ...weeklyLoad(a, endDateStr), pctBest: null, velConfidence: maxVelConfidence(a) }));
   rows.forEach(r=>{ r.pctBest = maxVelPctOfBest(athleteMap[r.id], r.maxVel); });
   rows = flagOutliersMulti(rows, ['distance','hsr','sprint','accelDecel']);
@@ -3472,16 +3470,6 @@ function buildWeeklyReportHtml(endDateStr, customTitle){
     }).join('')}
     </tbody></table>
     <div class="chart-note"><span>▪ %MAX (peak) = this player's highest max velocity recorded this week, as a % of their own all-time best. ⚠︎ = fewer than 3 max-velocity efforts recorded so far — treat as provisional.</span></div>`;
-
-  html += `<div class="rpt-section-title">Player % Weekly Targets ${target!=null?`<span style="font-weight:400;font-size:11px;color:var(--text-muted);">(target = ${target}× avg match demand)</span>`:''}</div>
-    <table class="rpt-table"><thead><tr><th>Player</th><th>Distance %</th><th>HSR %</th><th>Accel/Decel %</th></tr></thead><tbody>
-    ${rows.map(r=>{
-      const distPct = (target!=null && md.avgDistance) ? (r.distance/(md.avgDistance*target))*100 : null;
-      const hsrPct = (target!=null && md.avgHsr) ? (r.hsr/(md.avgHsr*target))*100 : null;
-      const accelDecelPct = (target!=null && md.avgAccelDecel) ? (r.accelDecel/(md.avgAccelDecel*target))*100 : null;
-      return `<tr><td class="lbl">${r.name}</td><td>${distPct!=null?fmt(distPct)+'%':'—'}</td><td>${hsrPct!=null?fmt(hsrPct)+'%':'—'}</td><td>${accelDecelPct!=null?fmt(accelDecelPct)+'%':'—'}</td></tr>`;
-    }).join('')}
-    </tbody></table>`;
 
   return html;
 }
