@@ -375,7 +375,7 @@
     </div>
     <div class="alist" id="alist"><div style="padding:16px;font-size:12px;color:#7a8290;text-align:center">No players yet — add one, or import from a Google Sheet in Settings.</div></div>
     <div class="settings-bar"><span id="sheetStatus">No sheet imported</span><button class="btn-sm" onclick="showConfig()">⚙ Settings</button></div>
-    <div style="text-align:center;font-size:9.5px;color:#a3a9b4;padding:6px 4px 10px;letter-spacing:.02em;">Build 2026-09-18 11:00</div>
+    <div style="text-align:center;font-size:9.5px;color:#a3a9b4;padding:6px 4px 10px;letter-spacing:.02em;">Build 2026-09-18 11:30</div>
   </aside>
   <main class="main" id="main"></main>
 
@@ -2939,6 +2939,7 @@ const KPI_ICONS = {
   workRate: `<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#F26522" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></svg>`,
   hid: `<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#F26522" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>`,
   sprint: `<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#F26522" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/></svg>`,
+  accelDecel: `<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#F26522" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/></svg>`,
 };
 
 const SESSION_TYPE_INFO = {
@@ -3431,25 +3432,27 @@ function buildWeeklyReportHtml(endDateStr, customTitle){
     const sum = f => eligible.reduce((s,t)=>s+(t[f]||0),0);
     const meta = SESSION_META[dt] || {};
     return { date:dt, label:meta.sessionLabel||'',
-      duration: sum('duration')/n, distance: sum('distance')/n, hsr: sum('hsr')/n, sprint: sum('sprint')/n, accelDecel: sum('accelDecel')/n };
+      duration: sum('duration')/n, distance: sum('distance')/n, hsr: sum('hsr')/n, sprint: sum('sprint')/n, accel: sum('accel')/n, decel: sum('decel')/n };
   });
-  const dayTotal = { duration:dayAverages.reduce((s,x)=>s+x.duration,0), distance:dayAverages.reduce((s,x)=>s+x.distance,0), hsr:dayAverages.reduce((s,x)=>s+x.hsr,0), sprint:dayAverages.reduce((s,x)=>s+x.sprint,0), accelDecel:dayAverages.reduce((s,x)=>s+x.accelDecel,0) };
-  const weekWorkRate = dayTotal.duration ? dayTotal.distance/dayTotal.duration : null;
+  const dayTotal = { duration:dayAverages.reduce((s,x)=>s+x.duration,0), distance:dayAverages.reduce((s,x)=>s+x.distance,0), hsr:dayAverages.reduce((s,x)=>s+x.hsr,0), sprint:dayAverages.reduce((s,x)=>s+x.sprint,0), accel:dayAverages.reduce((s,x)=>s+x.accel,0), decel:dayAverages.reduce((s,x)=>s+x.decel,0) };
 
   let html = `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">${customTitle || 'ALW Brisbane Roar 2026/2027'}</div><div class="rpt-sub">WEEK: ${weekDates[0]} to ${endDateStr}&nbsp;&nbsp;SESSIONS: ${allDates.length}</div></div>${ROAR_LOGO_SVG}</div>
   <div class="kpi-cards">
     <div class="kpi-card">${KPI_ICONS.distance}<div class="kpi-card-label">Total Distance (m)</div><div class="kpi-card-value">${fmt(dayTotal.distance)}</div><div class="kpi-card-sub">Weekly Total</div></div>
-    <div class="kpi-card">${KPI_ICONS.workRate}<div class="kpi-card-label">Work Rate (m/min)</div><div class="kpi-card-value">${fmt(weekWorkRate)}</div><div class="kpi-card-sub">Weekly Average</div></div>
-    <div class="kpi-card">${KPI_ICONS.hid}<div class="kpi-card-label">HID (m)</div><div class="kpi-card-value">${fmt(dayTotal.hsr)}</div><div class="kpi-card-sub">Weekly Total</div></div>
-    <div class="kpi-card">${KPI_ICONS.sprint}<div class="kpi-card-label">SD (m)</div><div class="kpi-card-value">${fmt(dayTotal.sprint)}</div><div class="kpi-card-sub">Weekly Total</div></div>
+    <div class="kpi-card">${KPI_ICONS.hid}<div class="kpi-card-label">HSR (HIR) (m)</div><div class="kpi-card-value">${fmt(dayTotal.hsr)}</div><div class="kpi-card-sub">Weekly Total</div></div>
+    <div class="kpi-card">${KPI_ICONS.sprint}<div class="kpi-card-label">Sprint Distance (m)</div><div class="kpi-card-value">${fmt(dayTotal.sprint)}</div><div class="kpi-card-sub">Weekly Total</div></div>
+    <div class="kpi-card">${KPI_ICONS.accelDecel}<div class="kpi-card-label">Accel/Decel</div><div class="kpi-card-value">${fmt(dayTotal.accel+dayTotal.decel)}</div><div class="kpi-card-sub">Weekly Total</div></div>
   </div>`;
 
   html += `<div class="chart-block"><div class="rpt-section-title">Session-by-Session</div>
-    <table class="rpt-table"><thead><tr><th>Training</th><th>TD</th><th>HSR</th><th>Sprint Distance</th><th>#Accel/Decel</th></tr></thead><tbody>
-    ${dayAverages.map(s=>`<tr><td class="lbl">${s.date}${s.label?' · '+s.label:''}</td><td>${fmt(s.distance)} m</td><td>${fmt(s.hsr)} m</td><td>${fmt(s.sprint)} m</td><td>${fmt(s.accelDecel)}</td></tr>`).join('')}
-    <tr style="border-top:2px solid var(--border);font-weight:700;"><td class="lbl">Total</td><td>${fmt(dayTotal.distance)} m</td><td>${fmt(dayTotal.hsr)} m</td><td>${fmt(dayTotal.sprint)} m</td><td>${fmt(dayTotal.accelDecel)}</td></tr>
+    <table class="rpt-table"><thead><tr><th>Training</th><th>TD</th><th>HSR</th><th>Sprint Distance</th><th>Accel</th><th>Decel</th></tr></thead><tbody>
+    ${dayAverages.map(s=>`<tr><td class="lbl">
+        <span class="no-print"><input type="text" placeholder="e.g. MD+3" value="${s.label}" style="width:120px;font-size:12px;padding:2px 5px;border:1px solid var(--border);border-radius:4px;" onchange="setSessionMeta('${s.date}','sessionLabel',this.value)"></span>
+        <span class="print-only" style="display:none;">${s.label||s.date}</span>
+      </td><td>${fmt(s.distance)} m</td><td>${fmt(s.hsr)} m</td><td>${fmt(s.sprint)} m</td><td>${fmt(s.accel)}</td><td>${fmt(s.decel)}</td></tr>`).join('')}
+    <tr style="border-top:2px solid var(--border);font-weight:700;"><td class="lbl">Total</td><td>${fmt(dayTotal.distance)} m</td><td>${fmt(dayTotal.hsr)} m</td><td>${fmt(dayTotal.sprint)} m</td><td>${fmt(dayTotal.accel)}</td><td>${fmt(dayTotal.decel)}</td></tr>
     </tbody></table></div>
-    <div class="chart-note"><span>▪ Each day shows the squad average for that session (Full/Partial/Rehab players; No GPS and Did Not Train excluded) — same method as that day's own report.</span></div>`;
+    <div class="chart-note"><span>▪ Each day shows the squad average for that session (Full/Partial/Rehab players; No GPS and Did Not Train excluded) — same method as that day's own report. Click a Training field to name that session (e.g. "MD+3") — saved automatically and shared with that day's own report.</span></div>`;
 
   const md = matchDemandReference(players);
   const target = SETTINGS.weeklyTargetMultiplier;
