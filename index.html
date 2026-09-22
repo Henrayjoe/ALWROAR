@@ -375,7 +375,7 @@
     </div>
     <div class="alist" id="alist"><div style="padding:16px;font-size:12px;color:#7a8290;text-align:center">No players yet — add one, or import from a Google Sheet in Settings.</div></div>
     <div class="settings-bar"><span id="sheetStatus">No sheet imported</span><button class="btn-sm" onclick="showConfig()">⚙ Settings</button></div>
-    <div style="text-align:center;font-size:9.5px;color:#a3a9b4;padding:6px 4px 10px;letter-spacing:.02em;">Build 2026-09-18 14:45</div>
+    <div style="text-align:center;font-size:9.5px;color:#a3a9b4;padding:6px 4px 10px;letter-spacing:.02em;">Build 2026-09-18 15:10</div>
   </aside>
   <main class="main" id="main"></main>
 
@@ -2246,7 +2246,7 @@ function switchTeamTab(t){
   document.querySelectorAll('.team-tc').forEach(e=>{ const on=e.dataset.t===t; e.classList.toggle('active', on); if(on){ e.classList.remove('fade-redraw'); void e.offsetWidth; e.classList.add('fade-redraw'); } });
   if (t==='teamtrends') setTimeout(()=>{ buildTeamTrendMetricOptions(); drawTeamTrendChart(); },60);
   if (t==='screening') setTimeout(drawScreeningCharts,60);
-  if (t==='cmjmonitor') setTimeout(drawCmjTrafficLight,60);
+  if (t==='cmjmonitor') setTimeout(()=>{ drawCmjTrafficLight(); drawCmjPreseasonComparison(); },60);
   if (t==='scatter') setTimeout(()=>{ buildScatterAxisOptions(); drawTeamScatter(); drawPriorityTeamScatters(); },60);
   if (t==='analysis') setTimeout(initTeamAnalysis,60);
   if (t==='gpstraining') setTimeout(drawTeamGpsTraining,60);
@@ -2882,7 +2882,12 @@ function renderTeam(){
           <span class="control-label">CMJ Monitoring — Traffic Light</span>
           <span class="ref-note">Each player's own rolling baseline (trailing up to 6 tests), not a squad threshold. 🔴 = composite alert (contraction time up + 2 or more of RSI-mod/concentric impulse/concentric force/eccentric force down). 🟡 = one flag. 🟢 = within baseline. ⚽ = played &gt;70min in a match in the 7 days before this test.</span>
         </div>
-      </div><div id="cmjTrafficLightBody" style="padding:0"></div></div>
+      </div><div id="cmjTrafficLightBody" style="padding:0"></div>
+        <div class="quad-ctrl-row" style="margin-top:18px;">
+          <span class="control-label">CMJ vs Preseason Baseline</span>
+          <span class="ref-note">Current test vs each player's own preseason average (sessions tagged "Pre-Season Screening" in notes) — catches a slow drift the weekly rolling baseline above would miss, since that one keeps re-centering on recent weeks.</span>
+        </div>
+      <div id="cmjPreseasonBody" style="padding:0"></div></div>
       <div class="team-tc tc" data-t="scatter"><div class="quad-body">
         <div class="pq-heading">Priority Quadrants — Whole Squad</div>
         <div class="quad-ctrl-row">${refToggleHtml('scatter', refFrame.scatter)}</div>
@@ -4037,8 +4042,11 @@ function drawCmjMonitoring(){
   const ctx7 = cmjMatchSprintContext(a, latest.date);
   const statusIcon = latest.composite ? '🔴' : latest.flagCount>0 ? '🟡' : '🟢';
   const statusText = latest.composite ? 'Composite alert' : latest.flagCount>0 ? `${latest.flagCount} metric${latest.flagCount>1?'s':''} flagged` : 'Within baseline';
+  const preComp = cmjPreseasonComparison(a);
+  const preText = !preComp ? 'No preseason tag yet' : (preComp.composite ? '🔴 Composite alert' : preComp.flagCount>0 ? `🟡 ${preComp.flagCount} flagged` : '🟢 Within preseason range');
   summaryEl.innerHTML = `<div class="cat-grid" style="margin-bottom:14px;">
     <div class="cat-card"><div class="cat-name">Latest (${latest.date})</div><div class="cat-status">${statusIcon} ${statusText}</div></div>
+    <div class="cat-card"><div class="cat-name">vs Preseason Baseline</div><div class="cat-status">${preText}</div></div>
     <div class="cat-card"><div class="cat-name">Match exposure (7d prior)</div><div class="cat-status">${ctx7.maxMinutes!=null?fmt(ctx7.maxMinutes)+' min'+(ctx7.over70?' ⚽ >70min':''):'No match data'}</div></div>
     <div class="cat-card"><div class="cat-name">Sprint distance (7d prior)</div><div class="cat-status">${ctx7.sprintDist?fmt(ctx7.sprintDist)+' m':'No GPS data'}</div></div>
   </div>`;
@@ -4104,6 +4112,72 @@ function drawCmjTrafficLight(){
     }).join('')}
     </tbody></table>
     <div class="chart-note" style="padding:10px 20px;"><span>▪ Latest test date per player, may differ across rows. ⚽ = played &gt;70min in a match in the 7 days before that test.</span></div>`;
+}
+
+// ============================================================
+// CMJ vs PRESEASON BASELINE — how the squad sits now against where they
+// started, as opposed to the rolling weekly baseline above (which only
+// ever looks at the trailing few weeks and would quietly "forget" a slow
+// preseason-to-now decline since it keeps re-centering on recent data).
+// Preseason baseline = the average of every session tagged "Pre-Season
+// Screening" in the notes column (same tagging convention as Weekly
+// Screening/RTP); current = the player's latest CMJ session that ISN'T
+// itself tagged preseason.
+// ============================================================
+function isPreseasonCmjSession(s){ return /pre.?season.*screen/i.test(s.notes||''); }
+function cmjPreseasonComparison(a){
+  const cmjSessions = (a.sessions||[]).filter(s=>CMJ_FLAG_KEYS.some(k=>s[k]!=null) || s.cmj_jumpHeight!=null);
+  const preseasonSessions = cmjSessions.filter(isPreseasonCmjSession);
+  if (!preseasonSessions.length) return null;
+  const current = cmjSessions.filter(s=>!isPreseasonCmjSession(s)).sort((x,y)=>new Date(y.test_date)-new Date(x.test_date))[0];
+  if (!current) return null;
+  const baseline = {};
+  CMJ_ALL_KEYS.forEach(k=>{
+    const vals = preseasonSessions.map(s=>s[k]).filter(v=>v!=null);
+    baseline[k] = vals.length ? vals.reduce((x,y)=>x+y,0)/vals.length : null;
+  });
+  const flags = {};
+  CMJ_FLAG_KEYS.forEach(k=>{
+    const v = current[k], b = baseline[k];
+    flags[k] = (v!=null && b!=null) ? (CMJ_FLAG_DIRECTION[k]==='up' ? v > b : v < b) : false;
+  });
+  const downCount = ['cmj_rsiModified','cmj_concentricImpulse100ms','cmj_concentricPeakForce','cmj_eccentricPeakForce'].filter(k=>flags[k]).length;
+  const composite = flags.cmj_contractionTime && downCount>=2;
+  return { current, baseline, flags, composite, flagCount:Object.values(flags).filter(Boolean).length, preseasonN:preseasonSessions.length };
+}
+function drawCmjPreseasonComparison(){
+  const el = document.getElementById('cmjPreseasonBody'); if (!el) return;
+  const players = Object.values(athleteMap).filter(a=>(genderFilterVal==='all'||a.gender===genderFilterVal));
+  const rows = players.map(a=>({ a, cmp: cmjPreseasonComparison(a) })).filter(r=>r.cmp);
+  if (!rows.length){
+    el.innerHTML = '<p class="hint" style="padding:14px 20px;">No players with a session tagged "Pre-Season Screening" (and a later CMJ test to compare it to) yet.</p>';
+    return;
+  }
+  rows.sort((x,y)=> (y.cmp.composite - x.cmp.composite) || (y.cmp.flagCount - x.cmp.flagCount));
+  const cell = (k,cmp)=>{
+    const v = cmp.current[k], b = cmp.baseline[k];
+    if (v==null) return '<td>—</td>';
+    const flagged = CMJ_FLAG_KEYS.includes(k) && cmp.flags[k];
+    const pct = (b!=null && b!==0) ? ((v-b)/b)*100 : null;
+    const arrow = pct==null ? '' : pct>0 ? '▲' : pct<0 ? '▼' : '';
+    const bg = flagged ? 'rgba(200,72,61,0.12)' : '';
+    return `<td style="background:${bg};${flagged?'font-weight:700;color:#c8483d;':''}">${fmt(v)}${pct!=null?` <span style="font-size:10px;color:var(--text-muted);">${arrow}${fmt(Math.abs(pct))}%</span>`:''}</td>`;
+  };
+  el.innerHTML = `<table class="rpt-table" style="font-size:12.5px;"><thead><tr><th>Player</th><th>Contraction Time (ms)</th><th>RSI-Mod (m/s)</th><th>Conc Impulse-100ms (N·s)</th><th>Conc Peak Force (N)</th><th>Ecc Peak Force (N)</th><th>Jump Height (cm)</th><th>Body Weight (kg)</th><th>Alert</th></tr></thead><tbody>
+    ${rows.map(({a,cmp})=>{
+      const statusIcon = cmp.composite ? '🔴' : cmp.flagCount>0 ? '🟡' : '🟢';
+      return `<tr><td class="lbl">${a.name} <span style="font-size:10px;color:var(--text-muted);">(vs ${cmp.current.test_date}, n=${cmp.preseasonN} preseason)</span></td>
+        ${cell('cmj_contractionTime',cmp)}
+        ${cell('cmj_rsiModified',cmp)}
+        ${cell('cmj_concentricImpulse100ms',cmp)}
+        ${cell('cmj_concentricPeakForce',cmp)}
+        ${cell('cmj_eccentricPeakForce',cmp)}
+        ${cell('cmj_jumpHeight',cmp)}
+        ${cell('weight_kg',cmp)}
+        <td style="text-align:center;font-size:15px;">${statusIcon}</td></tr>`;
+    }).join('')}
+    </tbody></table>
+    <div class="chart-note" style="padding:10px 20px;"><span>▪ % = change from that player's own preseason average. Same flag logic as Weekly Screening (contraction time up + 2 of the other four down = composite alert), just measured against preseason instead of the trailing few weeks.</span></div>`;
 }
 
 // ============================================================
