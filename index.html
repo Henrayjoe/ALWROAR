@@ -375,7 +375,7 @@
     </div>
     <div class="alist" id="alist"><div style="padding:16px;font-size:12px;color:#7a8290;text-align:center">No players yet — add one, or import from a Google Sheet in Settings.</div></div>
     <div class="settings-bar"><span id="sheetStatus">No sheet imported</span><button class="btn-sm" onclick="showConfig()">⚙ Settings</button></div>
-    <div style="text-align:center;font-size:9.5px;color:#a3a9b4;padding:6px 4px 10px;letter-spacing:.02em;">Build 2026-09-18 13:30</div>
+    <div style="text-align:center;font-size:9.5px;color:#a3a9b4;padding:6px 4px 10px;letter-spacing:.02em;">Build 2026-09-18 14:45</div>
   </aside>
   <main class="main" id="main"></main>
 
@@ -492,6 +492,10 @@ const METRICS = [
   {key:'sj_jumpHeight', label:'Squat Jump — Jump Height', unit:'cm', lb:false, group:'Jump', paired:false},
   {key:'sj_peakPowerBM', label:'Squat Jump — Peak Power/BM', unit:'W/kg', lb:false, group:'Jump', paired:false},
   {key:'cmj_concentricImpulse100ms', label:'CMJ — Concentric Impulse-100ms', unit:'N·s', lb:false, group:'Jump', paired:false},
+  {key:'cmj_rsiModified', label:'CMJ — RSI-Modified', unit:'m/s', lb:false, group:'Jump', paired:false},
+  {key:'cmj_contractionTime', label:'CMJ — Contraction Time', unit:'ms', lb:true, group:'Jump', paired:false},
+  {key:'cmj_eccentricPeakForce', label:'CMJ — Eccentric Peak Force', unit:'N', lb:false, group:'Jump', paired:false},
+  {key:'cmj_concentricPeakForce', label:'CMJ — Concentric Peak Force', unit:'N', lb:false, group:'Jump', paired:false},
   {key:'eur', label:'EUR (CMJ ÷ SJ)', unit:'', lb:false, group:'Jump', paired:false, derived:true},
   {key:'hipAnkle_addPeak', label:'Hip Add (ankle) — Peak Force', unit:'N', lb:false, group:'Hip Strength', paired:true},
   {key:'hipAnkle_addMean', label:'Hip Add (ankle) — Mean Force', unit:'N', noNorm:true, group:'Hip Strength', paired:true},
@@ -2229,6 +2233,7 @@ function switchTab(t){
   document.querySelectorAll('.tab').forEach(e=>e.classList.toggle('active', e.dataset.t===t));
   document.querySelectorAll('.tc').forEach(e=>{ const on=e.dataset.t===t; e.classList.toggle('active', on); if(on){ e.classList.remove('fade-redraw'); void e.offsetWidth; e.classList.add('fade-redraw'); } });
   if (t==='trends') setTimeout(drawAllTrendCharts,60);
+  if (t==='cmjmonitor') setTimeout(drawCmjMonitoring,60);
   if (t==='quadrants') setTimeout(()=>{ drawPriorityQuadrants(); drawQuadrant(); },60);
   if (t==='profile') setTimeout(drawRadar,60);
   if (t==='training') setTimeout(drawTrainingPlan,60);
@@ -2241,6 +2246,7 @@ function switchTeamTab(t){
   document.querySelectorAll('.team-tc').forEach(e=>{ const on=e.dataset.t===t; e.classList.toggle('active', on); if(on){ e.classList.remove('fade-redraw'); void e.offsetWidth; e.classList.add('fade-redraw'); } });
   if (t==='teamtrends') setTimeout(()=>{ buildTeamTrendMetricOptions(); drawTeamTrendChart(); },60);
   if (t==='screening') setTimeout(drawScreeningCharts,60);
+  if (t==='cmjmonitor') setTimeout(drawCmjTrafficLight,60);
   if (t==='scatter') setTimeout(()=>{ buildScatterAxisOptions(); drawTeamScatter(); drawPriorityTeamScatters(); },60);
   if (t==='analysis') setTimeout(initTeamAnalysis,60);
   if (t==='gpstraining') setTimeout(drawTeamGpsTraining,60);
@@ -2292,6 +2298,7 @@ function renderIndividual(){
       <div class="tabs">
         <div class="tab active" data-t="results" onclick="switchTab('results')">Latest Results</div>
         <div class="tab" data-t="trends" onclick="switchTab('trends')">Trend Charts</div>
+        <div class="tab" data-t="cmjmonitor" onclick="switchTab('cmjmonitor')">CMJ Monitoring</div>
         <div class="tab" data-t="quadrants" onclick="switchTab('quadrants')">Quadrants</div>
         <div class="tab" data-t="profile" onclick="switchTab('profile')">Profile</div>
         <div class="tab" data-t="training" onclick="switchTab('training')">Training Plan</div>
@@ -2307,6 +2314,15 @@ function renderIndividual(){
         </div>
         <div class="chart-grid" id="chartGrid"></div>
         <div class="chart-note"><span>▪ League mode: shaded band = norm range for ${genderLabel.toLowerCase()} (25th–75th percentile, where set)</span><span>▪ Squad mode: shaded band = your own roster's mean ± 1 SD</span><span>▪ Paired tests show L and R separately</span></div>
+      </div></div>
+      <div class="tc" data-t="cmjmonitor"><div class="charts-body">
+        <div class="quad-ctrl-row">
+          <span class="control-label">CMJ Monitoring</span>
+          <span class="ref-note">Flags against this player's own rolling baseline (trailing up to 6 tests, min. 3 to establish), not a squad or normative threshold — force-time strategy varies a lot between athletes. Sessions with "RTP" or "injury" in the notes column don't count toward the baseline (so a reduced return-to-play week doesn't drag down what's "normal"), though they still show on the chart.</span>
+        </div>
+        <div id="cmjMonitorSummary"></div>
+        <div class="chart-grid" id="cmjMonitorGrid"></div>
+        <div class="chart-note"><span>▪ Shaded band = this player's own baseline mean ±1 SD at that point in time (not the squad's)</span><span>▪ Bars = minutes played in matches in the 7 days before that test</span><span>▪ Jump Height and Body Weight are shown for context only — not counted in the flag/alert logic</span></div>
       </div></div>
       <div class="tc" data-t="quadrants"><div class="quad-body">
         <div class="pq-heading">Priority Quadrants</div>
@@ -2834,6 +2850,7 @@ function renderTeam(){
         <div class="team-tab tab active" data-t="squad" onclick="switchTeamTab('squad')">Squad Table</div>
         <div class="team-tab tab" data-t="teamtrends" onclick="switchTeamTab('teamtrends')">Team Trends</div>
         <div class="team-tab tab" data-t="screening" onclick="switchTeamTab('screening')">Weekly Screening</div>
+        <div class="team-tab tab" data-t="cmjmonitor" onclick="switchTeamTab('cmjmonitor')">CMJ Monitoring</div>
         <div class="team-tab tab" data-t="scatter" onclick="switchTeamTab('scatter')">Team Scatter</div>
         <div class="team-tab tab" data-t="analysis" onclick="switchTeamTab('analysis')">Team Analysis</div>
         <div class="team-tab tab" data-t="gpstraining" onclick="switchTeamTab('gpstraining')">Training Load</div>
@@ -2860,6 +2877,12 @@ function renderTeam(){
         <div id="screeningGrid" class="chart-grid"></div>
         <div class="chart-note"><span>▪ Solid line = squad mean · shaded band = ±1 SD · dashed line = median</span><span>▪ Per test date${genderFilterVal!=='all'?' ('+(genderFilterVal==='W'?'Women':'Men')+' only)':''}</span></div>
       </div></div>
+      <div class="team-tc tc" data-t="cmjmonitor"><div class="quad-body" style="padding-bottom:0;">
+        <div class="quad-ctrl-row">
+          <span class="control-label">CMJ Monitoring — Traffic Light</span>
+          <span class="ref-note">Each player's own rolling baseline (trailing up to 6 tests), not a squad threshold. 🔴 = composite alert (contraction time up + 2 or more of RSI-mod/concentric impulse/concentric force/eccentric force down). 🟡 = one flag. 🟢 = within baseline. ⚽ = played &gt;70min in a match in the 7 days before this test.</span>
+        </div>
+      </div><div id="cmjTrafficLightBody" style="padding:0"></div></div>
       <div class="team-tc tc" data-t="scatter"><div class="quad-body">
         <div class="pq-heading">Priority Quadrants — Whole Squad</div>
         <div class="quad-ctrl-row">${refToggleHtml('scatter', refFrame.scatter)}</div>
@@ -3929,6 +3952,158 @@ function drawScreeningCharts(){
         <div class="cat-card"><div class="cat-name">n</div><div class="cat-status">${last.n}</div></div>`;
     }
   });
+}
+
+// ============================================================
+// CMJ MONITORING — individual-baseline flagging (VALD ForceDecks).
+// Deliberately NOT squad-relative like Weekly Screening above: force-time
+// strategy varies a lot between athletes, so each player is judged against
+// their OWN trailing history, not a fixed or squad threshold.
+// ============================================================
+const CMJ_FLAG_KEYS = ['cmj_contractionTime','cmj_rsiModified','cmj_concentricImpulse100ms','cmj_concentricPeakForce','cmj_eccentricPeakForce'];
+const CMJ_CONTEXT_KEYS = ['cmj_jumpHeight','weight_kg']; // shown for context, never counted in the flag/composite logic
+// "up = flag" for contraction time (slower contraction = worse); "down =
+// flag" for the other four (less force/impulse/stretch-shortening quality
+// = worse). Jump height and bodyweight aren't in here at all -- jump height
+// is a secondary confirmation at best, not a standalone trigger, and
+// bodyweight is only there to sanity-check whether a force drop is really
+// fatigue or just a mass fluctuation.
+const CMJ_FLAG_DIRECTION = { cmj_contractionTime:'up', cmj_rsiModified:'down', cmj_concentricImpulse100ms:'down', cmj_concentricPeakForce:'down', cmj_eccentricPeakForce:'down' };
+const CMJ_BASELINE_WINDOW = 6, CMJ_BASELINE_MIN_N = 3;
+// A session counts toward a player's baseline only if it looks like a
+// normal week -- a return-to-play or injury week is expected to look
+// different, and letting it into the baseline would just teach the model
+// that the reduced numbers are "normal" going forward. It still gets
+// shown on the chart and still gets evaluated against the baseline (so
+// you can see how far off a RTP week actually was), it just doesn't get
+// to shift what "baseline" means for future sessions. Tag it in the
+// Results sheet's notes column with "RTP" or "injury" to exclude it.
+function isCmjExcludedFromBaseline(s){ return /\brtp\b|return.?to.?play|\binjur/i.test(s.notes||''); }
+// Returns, in chronological order, every CMJ-tested session for this
+// player with: that session's raw values, its baseline (this player's own
+// trailing mean/SD, computed fresh at each point so it only ever looks
+// backward), which of the five flaggable metrics breached ±1 SD in the
+// "bad" direction, and whether the composite alert rule fired.
+function cmjMonitoringSeries(a){
+  const sessions = (a.sessions||[])
+    .filter(s=>CMJ_FLAG_KEYS.some(k=>s[k]!=null) || s.cmj_jumpHeight!=null)
+    .slice().sort((x,y)=>new Date(x.test_date)-new Date(y.test_date));
+  return sessions.map((s,i)=>{
+    const priorEligible = sessions.slice(0,i).filter(p=>!isCmjExcludedFromBaseline(p));
+    const windowSessions = priorEligible.slice(-CMJ_BASELINE_WINDOW);
+    const baseline = {};
+    [...CMJ_FLAG_KEYS, ...CMJ_CONTEXT_KEYS].forEach(k=>{
+      const vals = windowSessions.map(w=>w[k]).filter(v=>v!=null);
+      baseline[k] = vals.length>=CMJ_BASELINE_MIN_N ? {
+        mean: vals.reduce((x,y)=>x+y,0)/vals.length,
+        sd: vals.length<2?0:Math.sqrt(vals.reduce((x,y)=>x+(y-vals.reduce((p,q)=>p+q,0)/vals.length)**2,0)/(vals.length-1)),
+        n: vals.length,
+      } : null;
+    });
+    const flags = {};
+    CMJ_FLAG_KEYS.forEach(k=>{
+      const v = s[k], b = baseline[k];
+      flags[k] = (v!=null && b) ? (CMJ_FLAG_DIRECTION[k]==='up' ? v > b.mean+b.sd : v < b.mean-b.sd) : false;
+    });
+    const downCount = ['cmj_rsiModified','cmj_concentricImpulse100ms','cmj_concentricPeakForce','cmj_eccentricPeakForce'].filter(k=>flags[k]).length;
+    const composite = flags.cmj_contractionTime && downCount>=2;
+    return { date:s.test_date, session:s, baseline, flags, composite, flagCount:Object.values(flags).filter(Boolean).length, excluded:isCmjExcludedFromBaseline(s) };
+  });
+}
+// Match minutes and sprint distance in the 7 days before a given test date
+// -- context for why a flag might have fired, not part of the flag logic
+// itself. Only surfaced where GPS data actually exists for that player.
+function cmjMatchSprintContext(a, testDate){
+  const t = new Date(testDate).getTime(), weekBefore = t - 7*24*60*60*1000;
+  const games = (a.gameGps||[]).filter(g=>{ const d=new Date(g.date).getTime(); return d<=t && d>weekBefore; });
+  const maxMinutes = games.length ? Math.max(...games.map(g=>g.minutes_played||0)) : null;
+  const sprintDist = gpsLoadRows(a.trainingGps||[]).filter(e=>{ const d=new Date(e.date).getTime(); return d<=t && d>weekBefore; }).reduce((s,e)=>s+(e.sprint_distance_m||0),0);
+  return { maxMinutes, over70: maxMinutes!=null && maxMinutes>70, sprintDist };
+}
+const CMJ_ALL_KEYS = [...CMJ_FLAG_KEYS, ...CMJ_CONTEXT_KEYS];
+let cmjMonitorCharts=[];
+function drawCmjMonitoring(){
+  const a = athleteMap[selectedId]; if (!a) return;
+  const grid = document.getElementById('cmjMonitorGrid');
+  const summaryEl = document.getElementById('cmjMonitorSummary');
+  if (!grid || !summaryEl) return;
+  cmjMonitorCharts.forEach(c=>c.destroy()); cmjMonitorCharts=[];
+  const series = cmjMonitoringSeries(a);
+  if (!series.length){
+    grid.innerHTML = ''; summaryEl.innerHTML = '<div class="hint" style="padding:8px 4px;">No CMJ data with the ForceDecks fields (contraction time, RSI-mod, concentric/eccentric peak force) yet.</div>';
+    return;
+  }
+  const latest = series[series.length-1];
+  const ctx7 = cmjMatchSprintContext(a, latest.date);
+  const statusIcon = latest.composite ? '🔴' : latest.flagCount>0 ? '🟡' : '🟢';
+  const statusText = latest.composite ? 'Composite alert' : latest.flagCount>0 ? `${latest.flagCount} metric${latest.flagCount>1?'s':''} flagged` : 'Within baseline';
+  summaryEl.innerHTML = `<div class="cat-grid" style="margin-bottom:14px;">
+    <div class="cat-card"><div class="cat-name">Latest (${latest.date})</div><div class="cat-status">${statusIcon} ${statusText}</div></div>
+    <div class="cat-card"><div class="cat-name">Match exposure (7d prior)</div><div class="cat-status">${ctx7.maxMinutes!=null?fmt(ctx7.maxMinutes)+' min'+(ctx7.over70?' ⚽ >70min':''):'No match data'}</div></div>
+    <div class="cat-card"><div class="cat-name">Sprint distance (7d prior)</div><div class="cat-status">${ctx7.sprintDist?fmt(ctx7.sprintDist)+' m':'No GPS data'}</div></div>
+  </div>`;
+  grid.innerHTML = CMJ_ALL_KEYS.map(k=>`<div class="chart-wrap"><div class="chart-title">${metricByKey(k)?metricByKey(k).label:'Body Weight'}${CMJ_CONTEXT_KEYS.includes(k)?' <span style="font-weight:400;color:var(--text-muted);font-size:10.5px;">(context only)</span>':''}</div><canvas id="cmjc_${k}" height="130"></canvas></div>`).join('');
+  const dates = series.map(s=>s.date);
+  const maxMatchMin = Math.max(1, ...series.map(s=>cmjMatchSprintContext(a, s.date).maxMinutes||0));
+  CMJ_ALL_KEYS.forEach(k=>{
+    const unit = k==='weight_kg' ? 'kg' : (metricByKey(k).unit||'');
+    const label = k==='weight_kg' ? 'Body Weight' : metricByKey(k).label;
+    const vals = series.map(s=>s.session[k]);
+    const bLo = series.map(s=>s.baseline[k]?s.baseline[k].mean-s.baseline[k].sd:null);
+    const bHi = series.map(s=>s.baseline[k]?s.baseline[k].mean+s.baseline[k].sd:null);
+    const matchMin = series.map(s=>cmjMatchSprintContext(a, s.date).maxMinutes);
+    const pointColors = series.map(s=>CMJ_FLAG_KEYS.includes(k) && s.flags[k] ? '#c8483d' : '#f26522');
+    const canvas = document.getElementById('cmjc_'+k);
+    cmjMonitorCharts.push(new Chart(canvas.getContext('2d'), { data:{ labels:dates, datasets:[
+      { type:'bar', label:'Match minutes (prior 7d)', data:matchMin, backgroundColor:'rgba(61,111,176,0.18)', yAxisID:'y1', order:3, barPercentage:0.5 },
+      { type:'line', label:'−1 SD', data:bLo, borderColor:'transparent', pointRadius:0, fill:false, order:2 },
+      { type:'line', label:'+1 SD', data:bHi, borderColor:'transparent', backgroundColor:'rgba(148,163,184,0.18)', pointRadius:0, fill:'-1', order:2 },
+      { type:'line', label:label, data:vals, borderColor:'#f26522', tension:0.2, spanGaps:true, pointRadius:4, pointBackgroundColor:pointColors, borderWidth:2, order:1 },
+    ] }, options:{responsive:true, plugins:{legend:{position:'bottom', labels:{filter:l=>l.text!=='−1 SD' && l.text!=='+1 SD', boxWidth:10, font:{size:10}}}}, scales:{
+      x:{title:{display:true, text:'Test date', font:{size:10}}},
+      y:{beginAtZero:false, title:{display:true, text:unit?`${label} (${unit})`:label, font:{size:10}}},
+      y1:{position:'right', beginAtZero:true, max:maxMatchMin*1.6, title:{display:true, text:'Match minutes', font:{size:10}}, grid:{drawOnChartArea:false}},
+    }} }));
+  });
+}
+function drawCmjTrafficLight(){
+  const el = document.getElementById('cmjTrafficLightBody'); if (!el) return;
+  const players = Object.values(athleteMap).filter(a=>(genderFilterVal==='all'||a.gender===genderFilterVal));
+  const rows = players.map(a=>{
+    const series = cmjMonitoringSeries(a);
+    return { a, latest: series.length?series[series.length-1]:null };
+  }).filter(r=>r.latest);
+  if (!rows.length){
+    el.innerHTML = '<p class="hint" style="padding:14px 20px;">No players with CMJ ForceDecks data (contraction time, RSI-mod, peak force fields) yet.</p>';
+    return;
+  }
+  rows.sort((x,y)=> (y.latest.composite - x.latest.composite) || (y.latest.flagCount - x.latest.flagCount));
+  const cell = (a,k,latest)=>{
+    const v = latest.session[k];
+    if (v==null) return '<td>—</td>';
+    const flagged = CMJ_FLAG_KEYS.includes(k) && latest.flags[k];
+    const b = latest.baseline[k];
+    const delta = b ? v-b.mean : null;
+    const arrow = delta==null ? '' : delta>0 ? '▲' : delta<0 ? '▼' : '';
+    const bg = flagged ? 'rgba(200,72,61,0.12)' : '';
+    return `<td style="background:${bg};${flagged?'font-weight:700;color:#c8483d;':''}">${fmt(v)}${delta!=null?` <span style="font-size:10px;color:var(--text-muted);">${arrow}${fmt(Math.abs(delta))}</span>`:''}</td>`;
+  };
+  el.innerHTML = `<table class="rpt-table" style="font-size:12.5px;"><thead><tr><th>Player</th><th>Contraction Time (ms)</th><th>RSI-Mod (m/s)</th><th>Conc Impulse-100ms (N·s)</th><th>Conc Peak Force (N)</th><th>Ecc Peak Force (N)</th><th>Jump Height (cm)</th><th>Body Weight (kg)</th><th>Alert</th></tr></thead><tbody>
+    ${rows.map(({a,latest})=>{
+      const ctx7 = cmjMatchSprintContext(a, latest.date);
+      const statusIcon = latest.composite ? '🔴' : latest.flagCount>0 ? '🟡' : '🟢';
+      return `<tr><td class="lbl">${a.name}${ctx7.over70?' ⚽':''}</td>
+        ${cell(a,'cmj_contractionTime',latest)}
+        ${cell(a,'cmj_rsiModified',latest)}
+        ${cell(a,'cmj_concentricImpulse100ms',latest)}
+        ${cell(a,'cmj_concentricPeakForce',latest)}
+        ${cell(a,'cmj_eccentricPeakForce',latest)}
+        ${cell(a,'cmj_jumpHeight',latest)}
+        ${cell(a,'weight_kg',latest)}
+        <td style="text-align:center;font-size:15px;">${statusIcon}</td></tr>`;
+    }).join('')}
+    </tbody></table>
+    <div class="chart-note" style="padding:10px 20px;"><span>▪ Latest test date per player, may differ across rows. ⚽ = played &gt;70min in a match in the 7 days before that test.</span></div>`;
 }
 
 // ============================================================
