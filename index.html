@@ -375,7 +375,7 @@
     </div>
     <div class="alist" id="alist"><div style="padding:16px;font-size:12px;color:#7a8290;text-align:center">No players yet — add one, or import from a Google Sheet in Settings.</div></div>
     <div class="settings-bar"><span id="sheetStatus">No sheet imported</span><button class="btn-sm" onclick="showConfig()">⚙ Settings</button></div>
-    <div style="text-align:center;font-size:9.5px;color:#a3a9b4;padding:6px 4px 10px;letter-spacing:.02em;">Build 2026-09-18 12:35</div>
+    <div style="text-align:center;font-size:9.5px;color:#a3a9b4;padding:6px 4px 10px;letter-spacing:.02em;">Build 2026-09-18 13:30</div>
   </aside>
   <main class="main" id="main"></main>
 
@@ -2240,6 +2240,7 @@ function switchTeamTab(t){
   document.querySelectorAll('.team-tab').forEach(e=>e.classList.toggle('active', e.dataset.t===t));
   document.querySelectorAll('.team-tc').forEach(e=>{ const on=e.dataset.t===t; e.classList.toggle('active', on); if(on){ e.classList.remove('fade-redraw'); void e.offsetWidth; e.classList.add('fade-redraw'); } });
   if (t==='teamtrends') setTimeout(()=>{ buildTeamTrendMetricOptions(); drawTeamTrendChart(); },60);
+  if (t==='screening') setTimeout(drawScreeningCharts,60);
   if (t==='scatter') setTimeout(()=>{ buildScatterAxisOptions(); drawTeamScatter(); drawPriorityTeamScatters(); },60);
   if (t==='analysis') setTimeout(initTeamAnalysis,60);
   if (t==='gpstraining') setTimeout(drawTeamGpsTraining,60);
@@ -2832,6 +2833,7 @@ function renderTeam(){
       <div class="tabs">
         <div class="team-tab tab active" data-t="squad" onclick="switchTeamTab('squad')">Squad Table</div>
         <div class="team-tab tab" data-t="teamtrends" onclick="switchTeamTab('teamtrends')">Team Trends</div>
+        <div class="team-tab tab" data-t="screening" onclick="switchTeamTab('screening')">Weekly Screening</div>
         <div class="team-tab tab" data-t="scatter" onclick="switchTeamTab('scatter')">Team Scatter</div>
         <div class="team-tab tab" data-t="analysis" onclick="switchTeamTab('analysis')">Team Analysis</div>
         <div class="team-tab tab" data-t="gpstraining" onclick="switchTeamTab('gpstraining')">Training Load</div>
@@ -2848,6 +2850,14 @@ function renderTeam(){
         </div>
         <div id="teamTrendPicker" class="composite-picker"></div>
         <div id="teamTrendGrid" class="chart-grid"></div>
+        <div class="chart-note"><span>▪ Solid line = squad mean · shaded band = ±1 SD · dashed line = median</span><span>▪ Per test date${genderFilterVal!=='all'?' ('+(genderFilterVal==='W'?'Women':'Men')+' only)':''}</span></div>
+      </div></div>
+      <div class="team-tc tc" data-t="screening"><div class="charts-body">
+        <div class="quad-ctrl-row">
+          <span class="control-label">Weekly Screening</span>
+          <span class="ref-note">Fixed squad-wide trend on the four tests best suited to catching a developing issue early — same squad mean/median/SD method as Team Trends, just a curated view for a quick weekly check. Only counts sessions tagged "Weekly Screening" in the Results sheet's notes column, so other testing (preseason batteries, return-to-play re-tests, etc.) doesn't get mixed in.</span>
+        </div>
+        <div id="screeningGrid" class="chart-grid"></div>
         <div class="chart-note"><span>▪ Solid line = squad mean · shaded band = ±1 SD · dashed line = median</span><span>▪ Per test date${genderFilterVal!=='all'?' ('+(genderFilterVal==='W'?'Women':'Men')+' only)':''}</span></div>
       </div></div>
       <div class="team-tc tc" data-t="scatter"><div class="quad-body">
@@ -3828,6 +3838,85 @@ function drawTeamTrendChart(){
     ] }, options:{responsive:true, plugins:{legend:{position:'bottom', labels:{filter:l=>l.text!=='−1 SD' && l.text!=='+1 SD', boxWidth:10, font:{size:10}}}, tooltip:{callbacks:{afterBody:ctx=>{ const d=perDate[ctx[0].dataIndex]; return `n=${d.n}`; }}}}, scales:{ x:{title:{display:true, text:'Test date', font:{size:10}}}, y:{beginAtZero:false, title:{display:true, text:m.unit?`${m.label} (${m.unit})`:m.label, font:{size:10}}} }} }));
 
     const statsEl = document.getElementById('tts_'+key);
+    const last = perDate[perDate.length-1];
+    if (!last || last.n===0){
+      statsEl.innerHTML = '<div class="cat-card"><div class="cat-name">Latest</div><div class="cat-status" style="color:#7a8290">No data yet</div></div>';
+    } else {
+      const sd = last.n>=2 ? (last.sdHi-last.mean) : null;
+      statsEl.innerHTML = `
+        <div class="cat-card"><div class="cat-name">Mean</div><div class="cat-status">${fmt(last.mean)} ${m.unit}</div></div>
+        <div class="cat-card"><div class="cat-name">Median</div><div class="cat-status">${fmt(last.median)} ${m.unit}</div></div>
+        <div class="cat-card"><div class="cat-name">SD</div><div class="cat-status">${sd==null?'—':'± '+fmt(sd)}</div></div>
+        <div class="cat-card"><div class="cat-name">n</div><div class="cat-status">${last.n}</div></div>`;
+    }
+  });
+}
+
+// A fixed, curated version of Team Trends for a weekly screening ritual --
+// same squad mean/median/SD-per-test-date computation, just four specific
+// tests chosen for injury-risk screening rather than whatever's ticked:
+//  - CMJ jump height: general neuromuscular/jump readiness
+//  - IMTP relative force: maximal strength capacity
+//  - Hip Add (ankle) peak force: the adductor "squeeze test" -- the
+//    standard groin-tendon loading/screening test (see the Barcelona
+//    Tendon Guide: "Groin squeeze" is literally the named tendon-loading
+//    test for the adductor)
+//  - DSI (CMJ force / IMTP force): used here as a readiness proxy. We
+//    aren't currently collecting a subjective wellness/readiness
+//    questionnaire (sleep, soreness, mood, stress) -- DSI is the closest
+//    thing to a "readiness" signal in the data already being collected,
+//    since a week-to-week drop can flag reduced ability to express force
+//    dynamically even when raw strength (IMTP) hasn't changed. It is NOT
+//    a substitute for genuine subjective readiness data if you want that.
+const SCREENING_METRICS = [
+  { key:'cmj_jumpHeight', title:'CMJ — Jump Height' },
+  { key:'imtp_relForce', title:'IMTP — Relative Peak Force' },
+  { key:'hipAnkle_addPeak', title:'Adductor Squeeze — Hip Add (ankle) Peak Force' },
+  { key:'dsi', title:'Readiness Proxy (DSI = CMJ force ÷ IMTP force)' },
+];
+let screeningCharts=[];
+// Only rows tagged in the sheet's notes column count as a weekly screening
+// session -- keeps this separate from other testing (preseason batteries,
+// return-to-play re-tests, etc.) that might otherwise land on the same
+// dates and skew the squad average. Matched case-insensitively and as a
+// substring, so "Weekly Screening", "weekly screening - wk3" etc. all count.
+function isWeeklyScreeningSession(s){ return (s.notes||'').toLowerCase().includes('weekly screening'); }
+function drawScreeningCharts(){
+  screeningCharts.forEach(c=>c.destroy()); screeningCharts=[];
+  const grid = document.getElementById('screeningGrid');
+  const players = Object.values(athleteMap).filter(a=>(genderFilterVal==='all'||a.gender===genderFilterVal) && a.sessions.some(isWeeklyScreeningSession));
+  if (!players.length){
+    grid.innerHTML = '<p class="hint" style="padding:8px 4px;">No sessions tagged "Weekly Screening" in the notes column yet — tag a row in the Results sheet\'s notes column and it\'ll show up here.</p>';
+    return;
+  }
+  grid.innerHTML = SCREENING_METRICS.map(sm=>`<div class="chart-wrap"><div class="chart-title">${sm.title}</div><div class="cat-grid" id="scs_${sm.key}" style="margin-bottom:10px;"></div><canvas id="scc_${sm.key}" height="140"></canvas></div>`).join('');
+  const dateSet = new Set();
+  players.forEach(a=>a.sessions.filter(isWeeklyScreeningSession).forEach(s=>dateSet.add(s.test_date)));
+  const dates = [...dateSet].sort((a,b)=>new Date(a)-new Date(b));
+  SCREENING_METRICS.forEach(sm=>{
+    const m = metricByKey(sm.key);
+    const perDate = dates.map(dt=>{
+      const vals = [];
+      players.forEach(a=>{
+        const s = a.sessions.find(s=>s.test_date===dt && isWeeklyScreeningSession(s));
+        if (s){ const v = repVal(m,s); if (v!=null) vals.push(v); }
+      });
+      if (!vals.length) return { mean:null, median:null, sdLo:null, sdHi:null, n:0 };
+      const mn = vals.reduce((x,y)=>x+y,0)/vals.length;
+      const sd = vals.length<2 ? 0 : Math.sqrt(vals.reduce((x,y)=>x+(y-mn)**2,0)/(vals.length-1));
+      const q = quartiles(vals);
+      return { mean:mn, median:q.median, sdLo:mn-sd, sdHi:mn+sd, n:vals.length };
+    });
+    const canvas = document.getElementById('scc_'+sm.key);
+    const ctx = canvas.getContext('2d');
+    screeningCharts.push(new Chart(ctx, { type:'line', data:{ labels:dates, datasets:[
+      { label:'−1 SD', data:perDate.map(d=>d.sdLo), borderColor:'transparent', pointRadius:0, fill:false },
+      { label:'+1 SD', data:perDate.map(d=>d.sdHi), borderColor:'transparent', backgroundColor:'rgba(242,101,34,0.14)', pointRadius:0, fill:'-1' },
+      { label:'Median', data:perDate.map(d=>d.median), borderColor:'#94a3b8', borderDash:[5,4], pointRadius:2, borderWidth:1.5 },
+      { label:'Squad mean', data:perDate.map(d=>d.mean), borderColor:'#f26522', backgroundColor:'#f26522', tension:0.25, spanGaps:true, pointRadius:3, borderWidth:2.5 },
+    ] }, options:{responsive:true, plugins:{legend:{position:'bottom', labels:{filter:l=>l.text!=='−1 SD' && l.text!=='+1 SD', boxWidth:10, font:{size:10}}}, tooltip:{callbacks:{afterBody:ctx=>{ const d=perDate[ctx[0].dataIndex]; return `n=${d.n}`; }}}}, scales:{ x:{title:{display:true, text:'Test date', font:{size:10}}}, y:{beginAtZero:false, title:{display:true, text:m.unit?`${m.label} (${m.unit})`:m.label, font:{size:10}}} }} }));
+
+    const statsEl = document.getElementById('scs_'+sm.key);
     const last = perDate[perDate.length-1];
     if (!last || last.n===0){
       statsEl.innerHTML = '<div class="cat-card"><div class="cat-name">Latest</div><div class="cat-status" style="color:#7a8290">No data yet</div></div>';
