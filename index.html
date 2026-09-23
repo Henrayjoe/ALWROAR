@@ -3,6 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- Prevents the browser from serving a stale cached copy on a normal
+     refresh -- doesn't help with GitHub Pages' own CDN cache (that's a
+     few minutes of propagation delay after a push, nothing client-side
+     can skip), but stops the browser itself from being the reason a
+     refresh doesn't show the latest deploy. -->
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>Brisbane Roar — Performance Dashboard</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
@@ -377,7 +385,10 @@
     </div>
     <div class="alist" id="alist"><div style="padding:16px;font-size:12px;color:#7a8290;text-align:center">No players yet — add one, or import from a Google Sheet in Settings.</div></div>
     <div class="settings-bar"><span id="sheetStatus">No sheet imported</span><button class="btn-sm" onclick="showConfig()">⚙ Settings</button></div>
-    <div style="text-align:center;font-size:9.5px;color:#a3a9b4;padding:6px 4px 10px;letter-spacing:.02em;">Build 2026-09-18 17:10</div>
+    <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-09-18 17:40</span>
+      <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
+    </div>
   </aside>
   <main class="main" id="main"></main>
 
@@ -3584,7 +3595,10 @@ function buildAthleteSummaryReportHtml(a, keys){
     return `<tr><td class="lbl">${m.label}</td><td>${fmt(playerVal)} ${m.unit}</td><td>${fmt(stats.mean)} ${m.unit}${stats.sd!=null?' ± '+fmt(stats.sd):''}</td><td style="color:${pctColor};font-weight:700;">${pctLabel}</td></tr>`;
   }).join('');
   let html = `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">${a.name}</div><div class="rpt-sub">Brisbane Roar · Physical Testing Summary · ${genDate}</div></div>${ROAR_LOGO_SVG}</div>
-  <table class="rpt-table"><thead><tr><th>Metric</th><th>${a.name}</th><th>Squad Average (± SD)</th><th>vs Average</th></tr></thead><tbody>${rows}</tbody></table>
+  <div class="chart-grid">
+    ${keys.map(k=>`<div class="chart-block"><div class="chart-title">${metricByKey(k).label}</div><canvas id="rptsum_${k}" height="130"></canvas><div class="cmj-summary-note" id="rptsumr_${k}"></div></div>`).join('')}
+  </div>
+  <table class="rpt-table" style="margin-top:8px;"><thead><tr><th>Metric</th><th>${a.name}</th><th>Squad Average (± SD)</th><th>vs Average</th></tr></thead><tbody>${rows}</tbody></table>
   <div class="chart-note" style="padding:10px 2px;"><span>▪ "vs Average" is red when the player falls short of squad average (or exceeds it, for metrics where lower is better, like sprint times) — green when they're ahead of it.</span></div>`;
   if (keys.length>=3){
     html += `<div class="chart-block" style="max-width:480px;margin:16px auto 0;"><div class="chart-title" style="text-align:center;">Shape at a glance (vs squad average)</div><canvas id="rptsumRadar" height="280"></canvas></div>`;
@@ -3598,7 +3612,19 @@ function drawAthleteSummaryReportCharts(a, keys){
   keys.forEach(k=>{
     const m = metricByKey(k);
     const playerVal = repVal(m, buildLatest(a.sessions));
-    if (playerVal!=null) { radarLabels.push(m.label); radarVals.push(squadRadarScore(m, playerVal, a.gender, a.id)); }
+    const stats = squadStats(k, a.gender, a.id);
+    const band = (!m.noNorm) ? (NORMS[k] && NORMS[k][a.gender]) : null;
+    const leagueMid = band && band.min!=null && band.max!=null ? (band.min+band.max)/2 : null;
+    const labels = ['This Player','Squad Average']; const vals = [playerVal, stats.mean];
+    if (leagueMid!=null){ labels.push('League Mean'); vals.push(leagueMid); }
+    const colors = ['#f26522','#3d6fb0','#94a3b8'];
+    const canvas = document.getElementById('rptsum_'+k);
+    if (canvas){
+      athleteReportCharts.push(new Chart(canvas.getContext('2d'), { type:'bar', data:{ labels, datasets:[{ data:vals, backgroundColor:colors.slice(0,vals.length) }] }, options:{animation:false, indexAxis:'y', responsive:true, plugins:{legend:{display:false}}, scales:{ x:{title:{display:true, text:m.unit?`${m.label} (${m.unit})`:m.label, font:{size:10}}} }} }));
+      const noteEl = document.getElementById('rptsumr_'+k);
+      if (noteEl) noteEl.innerHTML = band && band.min!=null && band.max!=null ? `League range: ${fmt(band.min)}–${fmt(band.max)} ${m.unit} (25th–75th percentile)` : 'No league band set for this metric yet.';
+    }
+    if (playerVal!=null){ radarLabels.push(m.label); radarVals.push(squadRadarScore(m, playerVal, a.gender, a.id)); }
   });
   const radarCanvas = document.getElementById('rptsumRadar');
   if (radarCanvas && keys.length>=3 && radarVals.some(v=>v!=null)){
@@ -4762,6 +4788,20 @@ document.querySelectorAll('.settings-tabs button').forEach(b=>b.onclick=()=>{
   b.classList.add('active');
   document.getElementById('pane'+b.dataset.p).classList.add('active');
 });
+// Forces a genuinely fresh load instead of a cached copy: a bare reload()
+// can still be answered from the browser's own cache even with the
+// no-cache meta tags above (support for those varies), so instead we
+// navigate to a URL with a unique query string, which the browser has
+// never seen before and so can't serve from cache. This can't do anything
+// about GitHub Pages' own CDN not having picked up a very recent push yet
+// (that's a few minutes of propagation delay, not a caching issue) --
+// only that the browser itself won't be the reason you're seeing an old
+// version.
+function forceRefreshLatest(){
+  const url = new URL(location.href);
+  url.searchParams.set('_refresh', Date.now());
+  location.href = url.toString();
+}
 function showConfig(){ buildPaneSheet(); buildPaneNorms(); buildPaneThresholds(); buildPaneBackup(); document.getElementById('overlaySettings').classList.add('show'); }
 function buildPaneSheet(){
   document.getElementById('paneSheet').innerHTML = `
