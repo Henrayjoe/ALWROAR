@@ -386,7 +386,7 @@
     <div class="alist" id="alist"><div style="padding:16px;font-size:12px;color:#7a8290;text-align:center">No players yet — add one, or import from a Google Sheet in Settings.</div></div>
     <div class="settings-bar"><span id="sheetStatus">No sheet imported</span><button class="btn-sm" onclick="showConfig()">⚙ Settings</button></div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-09-18 17:40</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-09-18 18:10</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -3094,6 +3094,25 @@ function weeklyLoad(a, asOfDate){
   });
   return { distance, hsr, sprint, accelDecel, sessionCount: datesInWindow.size, maxVel };
 }
+// Monday-Sunday calendar week totals for the weekly report -- as opposed
+// to weeklyLoad above (rolling trailing-7-days-from-today, used by the
+// live Team Analysis view), this needs to reset on the calendar week
+// boundary, not on whatever date happens to be selected.
+function weeklyLoadCalendar(a, mondayStr){
+  const start = new Date(mondayStr+'T00:00:00');
+  let distance=0, hsr=0, sprint=0, accelDecel=0, maxVel=null;
+  const datesInWindow = new Set();
+  gpsLoadRows(a.trainingGps).forEach(e=>{
+    const daysFromStart = Math.round((new Date(e.date)-start)/86400000);
+    if (daysFromStart>=0 && daysFromStart<7){
+      distance+=e.total_distance_m||0; hsr+=e.hsr_distance_m||0;
+      sprint+=e.sprint_distance_m||0; accelDecel+=e.accel_decel_count||0;
+      datesInWindow.add(e.date);
+      if (e.max_velocity_kmh!=null) maxVel = Math.max(maxVel||0, e.max_velocity_kmh);
+    }
+  });
+  return { distance, hsr, sprint, accelDecel, sessionCount: datesInWindow.size, maxVel };
+}
 function flagOutliers(rows, key){
   const sorted = [...rows].sort((a,b)=>a[key]-b[key]);
   const n = sorted.length; if (n<3) return rows.map(r=>({...r, flag:null}));
@@ -3489,13 +3508,15 @@ function buildDailyReportHtml(dateStr, customTitle){
 
   return html;
 }
-function buildWeeklyReportHtml(endDateStr, customTitle){
+function buildWeeklyReportHtml(mondayStr, customTitle){
   const players = Object.values(athleteMap).filter(a=>genderFilterVal==='all'||a.gender===genderFilterVal);
-  const asOf = new Date(endDateStr);
+  const weekStart = new Date(mondayStr+'T00:00:00');
   const weekDates = [];
-  for (let i=6;i>=0;i--){ const d=new Date(asOf); d.setDate(d.getDate()-i); weekDates.push(d.toISOString().slice(0,10)); }
+  for (let i=0;i<=6;i++){ const d=new Date(weekStart); d.setDate(d.getDate()+i); weekDates.push(d.toISOString().slice(0,10)); }
+  const sundayStr = weekDates[6];
+  const weekNum = computeCalendarWeeks(players).find(w=>w.monday===mondayStr)?.n;
   const allDates = trainingSessionDates(players).filter(d=>weekDates.includes(d));
-  if (!allDates.length) return `<div class="hint" style="padding:20px 4px;">No training GPS data in the 7 days ending ${endDateStr}.</div>`;
+  if (!allDates.length) return `<div class="hint" style="padding:20px 4px;">No training GPS data in the week of ${mondayStr} – ${sundayStr}.</div>`;
 
   // Same squad-average methodology as the daily report (Full/Partial/Rehab
   // count, No GPS and Did Not Train don't) so a given day's numbers read
@@ -3513,7 +3534,7 @@ function buildWeeklyReportHtml(endDateStr, customTitle){
   });
   const dayTotal = { duration:dayAverages.reduce((s,x)=>s+x.duration,0), distance:dayAverages.reduce((s,x)=>s+x.distance,0), hsr:dayAverages.reduce((s,x)=>s+x.hsr,0), sprint:dayAverages.reduce((s,x)=>s+x.sprint,0), accel:dayAverages.reduce((s,x)=>s+x.accel,0), decel:dayAverages.reduce((s,x)=>s+x.decel,0) };
 
-  let html = `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">${customTitle || 'ALW Brisbane Roar 2026/2027'}</div><div class="rpt-sub">WEEK: ${weekDates[0]} to ${endDateStr}&nbsp;&nbsp;SESSIONS: ${allDates.length}</div></div>${ROAR_LOGO_SVG}</div>
+  let html = `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">${customTitle || 'ALW Brisbane Roar 2026/2027'}</div><div class="rpt-sub">${weekNum?'WEEK '+weekNum+': ':''}${mondayStr} to ${sundayStr}&nbsp;&nbsp;SESSIONS: ${allDates.length}</div></div>${ROAR_LOGO_SVG}</div>
   <div class="kpi-cards">
     <div class="kpi-card">${KPI_ICONS.distance}<div class="kpi-card-label">Total Distance (m)</div><div class="kpi-card-value">${fmt(dayTotal.distance)}</div><div class="kpi-card-sub">Weekly Total</div></div>
     <div class="kpi-card">${KPI_ICONS.hid}<div class="kpi-card-label">HSR (HIR) (m)</div><div class="kpi-card-value">${fmt(dayTotal.hsr)}</div><div class="kpi-card-sub">Weekly Total</div></div>
@@ -3530,7 +3551,7 @@ function buildWeeklyReportHtml(endDateStr, customTitle){
     <tr style="border-top:2px solid var(--border);font-weight:700;"><td class="lbl">Total</td><td>${fmt(dayTotal.distance)} m</td><td>${fmt(dayTotal.hsr)} m</td><td>${fmt(dayTotal.sprint)} m</td><td>${fmt(dayTotal.accel)}</td><td>${fmt(dayTotal.decel)}</td></tr>
     </tbody></table></div>`;
 
-  let rows = players.filter(a=>a.trainingGps&&a.trainingGps.length).map(a=>({ id:a.id, name:a.name, ...weeklyLoad(a, endDateStr) }));
+  let rows = players.filter(a=>a.trainingGps&&a.trainingGps.length).map(a=>({ id:a.id, name:a.name, ...weeklyLoadCalendar(a, mondayStr) }));
   rows = flagOutliersMulti(rows, ['distance','hsr','sprint','accelDecel']);
   html += `<div class="rpt-section-title">Player Weekly Accumulated Load</div>
     <table class="rpt-table"><thead><tr><th>Player</th><th>Sessions</th><th>Distance (m)</th><th>HSR (m)</th><th>Sprint Dist (m)</th><th>Accel/Decel</th><th>Max Speed (kph)</th></tr></thead><tbody>
@@ -3548,14 +3569,52 @@ function buildWeeklyReportHtml(endDateStr, customTitle){
 }
 let reportMode = 'day';
 let reportKind = 'training'; // 'training' (Day/Week, uses the date/title controls) or 'athlete' (Athlete Summary print, no date picker involved)
+// Calendar Monday of the week containing dateStr (so weekly totals always
+// reset on a Monday, not on whatever date happens to be selected).
+function mondayOf(dateStr){
+  const d = new Date(dateStr+'T00:00:00');
+  const day = d.getDay(); // 0=Sun,1=Mon,...,6=Sat
+  d.setDate(d.getDate() + (day===0 ? -6 : 1-day));
+  return d.toISOString().slice(0,10);
+}
+// Every Monday-start week from the first training date on record through
+// the most recent one, numbered sequentially (Week 1 = the week
+// containing the earliest session) -- a continuous range, not just the
+// weeks that happen to have data, so "Week 5" always means the same
+// calendar week even if a week in between had no training.
+function computeCalendarWeeks(players){
+  const dates = trainingSessionDates(players);
+  if (!dates.length) return [];
+  const firstMon = new Date(mondayOf(dates[0])+'T00:00:00');
+  const lastMon = new Date(mondayOf(dates[dates.length-1])+'T00:00:00');
+  const weeks = []; let n=1;
+  for (let cur=new Date(firstMon); cur<=lastMon; cur.setDate(cur.getDate()+7), n++){
+    const monday = cur.toISOString().slice(0,10);
+    const sun = new Date(cur); sun.setDate(sun.getDate()+6);
+    weeks.push({ n, monday, sunday: sun.toISOString().slice(0,10) });
+  }
+  return weeks;
+}
+function populateReportDateSelect(){
+  const players = Object.values(athleteMap).filter(a=>genderFilterVal==='all'||a.gender===genderFilterVal);
+  const sel = document.getElementById('reportDate');
+  const prevValue = sel.value;
+  if (reportMode==='day'){
+    const dates = trainingSessionDates(players);
+    sel.innerHTML = dates.map(d=>`<option value="${d}">${d}</option>`).join('');
+    sel.value = dates.includes(prevValue) ? prevValue : (dates.length ? dates[dates.length-1] : '');
+  } else {
+    const weeks = computeCalendarWeeks(players);
+    sel.innerHTML = weeks.map(w=>`<option value="${w.monday}">Week ${w.n} (${w.monday} – ${w.sunday})</option>`).join('');
+    const stillValid = weeks.some(w=>w.monday===prevValue);
+    sel.value = stillValid ? prevValue : (weeks.length ? weeks[weeks.length-1].monday : '');
+  }
+}
 function openReportModal(){
   reportKind = 'training';
   document.getElementById('rptTrainingControls').style.display = 'contents';
-  const players = Object.values(athleteMap).filter(a=>genderFilterVal==='all'||a.gender===genderFilterVal);
-  const dates = trainingSessionDates(players);
+  populateReportDateSelect();
   const sel = document.getElementById('reportDate');
-  sel.innerHTML = dates.map(d=>`<option value="${d}">${d}</option>`).join('');
-  if (dates.length) sel.value = dates[dates.length-1];
   sel.onchange = renderReportContent;
   document.getElementById('reportTitle').value = ''; // avoid an old title accidentally carrying onto a different day/week
   document.getElementById('overlayReport').classList.add('show');
@@ -3634,6 +3693,7 @@ function drawAthleteSummaryReportCharts(a, keys){
 function setReportMode(m){
   reportMode = m;
   document.querySelectorAll('#reportModeToggle button').forEach(b=>b.classList.toggle('active', b.dataset.rm===m));
+  populateReportDateSelect();
   renderReportContent();
 }
 function setSessionType(typeKey, value){
