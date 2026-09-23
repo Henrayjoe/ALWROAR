@@ -377,7 +377,7 @@
     </div>
     <div class="alist" id="alist"><div style="padding:16px;font-size:12px;color:#7a8290;text-align:center">No players yet — add one, or import from a Google Sheet in Settings.</div></div>
     <div class="settings-bar"><span id="sheetStatus">No sheet imported</span><button class="btn-sm" onclick="showConfig()">⚙ Settings</button></div>
-    <div style="text-align:center;font-size:9.5px;color:#a3a9b4;padding:6px 4px 10px;letter-spacing:.02em;">Build 2026-09-18 16:50</div>
+    <div style="text-align:center;font-size:9.5px;color:#a3a9b4;padding:6px 4px 10px;letter-spacing:.02em;">Build 2026-09-18 17:10</div>
   </aside>
   <main class="main" id="main"></main>
 
@@ -462,12 +462,14 @@
   <div class="modal" style="max-width:980px;">
     <button class="close no-print" data-close>&times;</button>
     <div class="rpt-controls no-print">
-      <div class="lb-mode-toggle" id="reportModeToggle">
-        <button data-rm="day" class="active" onclick="setReportMode('day')">Day</button>
-        <button data-rm="week" onclick="setReportMode('week')">Week</button>
+      <div id="rptTrainingControls" style="display:contents;">
+        <div class="lb-mode-toggle" id="reportModeToggle">
+          <button data-rm="day" class="active" onclick="setReportMode('day')">Day</button>
+          <button data-rm="week" onclick="setReportMode('week')">Week</button>
+        </div>
+        <select id="reportDate" class="axis-select"></select>
+        <input id="reportTitle" type="text" class="axis-select" style="flex:1;min-width:180px;" placeholder="Optional custom title (e.g. 'Week 3 Pre-Season')" oninput="renderReportContent()">
       </div>
-      <select id="reportDate" class="axis-select"></select>
-      <input id="reportTitle" type="text" class="axis-select" style="flex:1;min-width:180px;" placeholder="Optional custom title (e.g. 'Week 3 Pre-Season')" oninput="renderReportContent()">
       <button class="btn" onclick="printReport()">🖨 Print / Save PDF</button>
     </div>
     <div class="rpt-print-hint no-print" style="margin:-8px 0 14px;">ℹ Prints as a normal multi-page document. In your print dialog, turn <b>"Headers and footers" OFF</b> (usually under "More settings") — that's what stamps the page URL/title/date onto every page; page breaks here are handled by the report itself, not by that setting.</div>
@@ -3537,7 +3539,7 @@ let reportMode = 'day';
 let reportKind = 'training'; // 'training' (Day/Week, uses the date/title controls) or 'athlete' (Athlete Summary print, no date picker involved)
 function openReportModal(){
   reportKind = 'training';
-  document.querySelector('.rpt-controls').style.display = '';
+  document.getElementById('rptTrainingControls').style.display = 'contents';
   const players = Object.values(athleteMap).filter(a=>genderFilterVal==='all'||a.gender===genderFilterVal);
   const dates = trainingSessionDates(players);
   const sel = document.getElementById('reportDate');
@@ -3561,17 +3563,29 @@ function openAthleteSummaryReport(){
   const keys = [...summaryMetricKeys];
   if (!keys.length){ alert('Tick at least one metric first.'); return; }
   reportKind = 'athlete';
-  document.querySelector('.rpt-controls').style.display = 'none';
+  document.getElementById('rptTrainingControls').style.display = 'none';
   document.getElementById('reportContent').innerHTML = buildAthleteSummaryReportHtml(a, keys);
   document.getElementById('overlayReport').classList.add('show');
   setTimeout(()=>drawAthleteSummaryReportCharts(a, keys), 60);
 }
 function buildAthleteSummaryReportHtml(a, keys){
   const genDate = new Date().toLocaleDateString('en-AU', {day:'numeric', month:'short', year:'numeric'});
+  const rows = keys.map(k=>{
+    const m = metricByKey(k);
+    const playerVal = repVal(m, buildLatest(a.sessions));
+    const stats = squadStats(k, a.gender, a.id);
+    if (playerVal==null) return `<tr><td class="lbl">${m.label}</td><td colspan="3">No data yet</td></tr>`;
+    if (stats.mean==null) return `<tr><td class="lbl">${m.label}</td><td>${fmt(playerVal)} ${m.unit}</td><td colspan="2">Not enough squad data yet</td></tr>`;
+    const pct = stats.mean ? ((playerVal-stats.mean)/stats.mean)*100 : null;
+    // m.lb = lower is better (e.g. sprint times) -- flips which direction counts as "falling short"
+    const isShort = pct==null ? null : (m.lb ? pct>0 : pct<0);
+    const pctColor = isShort==null ? 'var(--text-secondary)' : isShort ? '#c8483d' : '#2f8f5b';
+    const pctLabel = pct==null ? '—' : `${pct>=0?'+':''}${fmt(pct)}%`;
+    return `<tr><td class="lbl">${m.label}</td><td>${fmt(playerVal)} ${m.unit}</td><td>${fmt(stats.mean)} ${m.unit}${stats.sd!=null?' ± '+fmt(stats.sd):''}</td><td style="color:${pctColor};font-weight:700;">${pctLabel}</td></tr>`;
+  }).join('');
   let html = `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">${a.name}</div><div class="rpt-sub">Brisbane Roar · Physical Testing Summary · ${genDate}</div></div>${ROAR_LOGO_SVG}</div>
-  <div class="chart-grid">
-    ${keys.map(k=>`<div class="chart-block"><div class="chart-title">${metricByKey(k).label}</div><canvas id="rptsum_${k}" height="130"></canvas><div class="cmj-summary-note" id="rptsumr_${k}"></div></div>`).join('')}
-  </div>`;
+  <table class="rpt-table"><thead><tr><th>Metric</th><th>${a.name}</th><th>Squad Average (± SD)</th><th>vs Average</th></tr></thead><tbody>${rows}</tbody></table>
+  <div class="chart-note" style="padding:10px 2px;"><span>▪ "vs Average" is red when the player falls short of squad average (or exceeds it, for metrics where lower is better, like sprint times) — green when they're ahead of it.</span></div>`;
   if (keys.length>=3){
     html += `<div class="chart-block" style="max-width:480px;margin:16px auto 0;"><div class="chart-title" style="text-align:center;">Shape at a glance (vs squad average)</div><canvas id="rptsumRadar" height="280"></canvas></div>`;
   }
@@ -3584,18 +3598,7 @@ function drawAthleteSummaryReportCharts(a, keys){
   keys.forEach(k=>{
     const m = metricByKey(k);
     const playerVal = repVal(m, buildLatest(a.sessions));
-    const stats = squadStats(k, a.gender, a.id);
-    const band = (!m.noNorm) ? (NORMS[k] && NORMS[k][a.gender]) : null;
-    const leagueMid = band && band.min!=null && band.max!=null ? (band.min+band.max)/2 : null;
-    const labels = ['This Player','Squad Average']; const vals = [playerVal, stats.mean];
-    if (leagueMid!=null){ labels.push('League Mean'); vals.push(leagueMid); }
-    const colors = ['#f26522','#3d6fb0','#94a3b8'];
-    const canvas = document.getElementById('rptsum_'+k);
-    if (!canvas) return;
-    athleteReportCharts.push(new Chart(canvas.getContext('2d'), { type:'bar', data:{ labels, datasets:[{ data:vals, backgroundColor:colors.slice(0,vals.length) }] }, options:{animation:false, indexAxis:'y', responsive:true, plugins:{legend:{display:false}}, scales:{ x:{title:{display:true, text:m.unit?`${m.label} (${m.unit})`:m.label, font:{size:10}}} }} }));
-    const noteEl = document.getElementById('rptsumr_'+k);
-    if (noteEl) noteEl.innerHTML = band && band.min!=null && band.max!=null ? `League range: ${fmt(band.min)}–${fmt(band.max)} ${m.unit} (25th–75th percentile)` : 'No league band set for this metric yet.';
-    if (playerVal!=null){ radarLabels.push(m.label); radarVals.push(squadRadarScore(m, playerVal, a.gender, a.id)); }
+    if (playerVal!=null) { radarLabels.push(m.label); radarVals.push(squadRadarScore(m, playerVal, a.gender, a.id)); }
   });
   const radarCanvas = document.getElementById('rptsumRadar');
   if (radarCanvas && keys.length>=3 && radarVals.some(v=>v!=null)){
