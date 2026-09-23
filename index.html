@@ -377,7 +377,7 @@
     </div>
     <div class="alist" id="alist"><div style="padding:16px;font-size:12px;color:#7a8290;text-align:center">No players yet — add one, or import from a Google Sheet in Settings.</div></div>
     <div class="settings-bar"><span id="sheetStatus">No sheet imported</span><button class="btn-sm" onclick="showConfig()">⚙ Settings</button></div>
-    <div style="text-align:center;font-size:9.5px;color:#a3a9b4;padding:6px 4px 10px;letter-spacing:.02em;">Build 2026-09-18 16:20</div>
+    <div style="text-align:center;font-size:9.5px;color:#a3a9b4;padding:6px 4px 10px;letter-spacing:.02em;">Build 2026-09-18 16:50</div>
   </aside>
   <main class="main" id="main"></main>
 
@@ -2952,6 +2952,7 @@ function renderTeam(){
             <button onclick="setSummaryScope('individual')">Individual Player</button>
           </div>
           <select id="summaryPlayerSelect" onchange="setSummaryPlayer(this.value)" style="display:none;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;"></select>
+          <button id="summaryPrintBtn" class="btn" style="display:none;" onclick="openAthleteSummaryReport()">🖨 Print Summary</button>
         </div>
         <div id="summaryMetricPicker" class="composite-picker"></div>
       </div>
@@ -3533,7 +3534,10 @@ function buildWeeklyReportHtml(endDateStr, customTitle){
   return html;
 }
 let reportMode = 'day';
+let reportKind = 'training'; // 'training' (Day/Week, uses the date/title controls) or 'athlete' (Athlete Summary print, no date picker involved)
 function openReportModal(){
+  reportKind = 'training';
+  document.querySelector('.rpt-controls').style.display = '';
   const players = Object.values(athleteMap).filter(a=>genderFilterVal==='all'||a.gender===genderFilterVal);
   const dates = trainingSessionDates(players);
   const sel = document.getElementById('reportDate');
@@ -3543,6 +3547,60 @@ function openReportModal(){
   document.getElementById('reportTitle').value = ''; // avoid an old title accidentally carrying onto a different day/week
   document.getElementById('overlayReport').classList.add('show');
   renderReportContent();
+}
+// Print flow for Athlete Summary -- deliberately separate from the
+// training report flow above (which is built around a date picker and
+// Day/Week modes that don't apply here). Reuses the same modal shell,
+// header style, and chart-block page-break-safe wrapping, just hides the
+// date/title controls that belong to the other report kind and shows a
+// bare player-name header with only the metrics currently selected in
+// the Athlete Summary tab.
+function openAthleteSummaryReport(){
+  const a = athleteMap[summaryPlayerId];
+  if (!a){ alert('Pick a player first.'); return; }
+  const keys = [...summaryMetricKeys];
+  if (!keys.length){ alert('Tick at least one metric first.'); return; }
+  reportKind = 'athlete';
+  document.querySelector('.rpt-controls').style.display = 'none';
+  document.getElementById('reportContent').innerHTML = buildAthleteSummaryReportHtml(a, keys);
+  document.getElementById('overlayReport').classList.add('show');
+  setTimeout(()=>drawAthleteSummaryReportCharts(a, keys), 60);
+}
+function buildAthleteSummaryReportHtml(a, keys){
+  const genDate = new Date().toLocaleDateString('en-AU', {day:'numeric', month:'short', year:'numeric'});
+  let html = `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">${a.name}</div><div class="rpt-sub">Brisbane Roar · Physical Testing Summary · ${genDate}</div></div>${ROAR_LOGO_SVG}</div>
+  <div class="chart-grid">
+    ${keys.map(k=>`<div class="chart-block"><div class="chart-title">${metricByKey(k).label}</div><canvas id="rptsum_${k}" height="130"></canvas><div class="cmj-summary-note" id="rptsumr_${k}"></div></div>`).join('')}
+  </div>`;
+  if (keys.length>=3){
+    html += `<div class="chart-block" style="max-width:480px;margin:16px auto 0;"><div class="chart-title" style="text-align:center;">Shape at a glance (vs squad average)</div><canvas id="rptsumRadar" height="280"></canvas></div>`;
+  }
+  return html;
+}
+let athleteReportCharts=[];
+function drawAthleteSummaryReportCharts(a, keys){
+  athleteReportCharts.forEach(c=>c.destroy()); athleteReportCharts=[];
+  const radarLabels=[], radarVals=[];
+  keys.forEach(k=>{
+    const m = metricByKey(k);
+    const playerVal = repVal(m, buildLatest(a.sessions));
+    const stats = squadStats(k, a.gender, a.id);
+    const band = (!m.noNorm) ? (NORMS[k] && NORMS[k][a.gender]) : null;
+    const leagueMid = band && band.min!=null && band.max!=null ? (band.min+band.max)/2 : null;
+    const labels = ['This Player','Squad Average']; const vals = [playerVal, stats.mean];
+    if (leagueMid!=null){ labels.push('League Mean'); vals.push(leagueMid); }
+    const colors = ['#f26522','#3d6fb0','#94a3b8'];
+    const canvas = document.getElementById('rptsum_'+k);
+    if (!canvas) return;
+    athleteReportCharts.push(new Chart(canvas.getContext('2d'), { type:'bar', data:{ labels, datasets:[{ data:vals, backgroundColor:colors.slice(0,vals.length) }] }, options:{animation:false, indexAxis:'y', responsive:true, plugins:{legend:{display:false}}, scales:{ x:{title:{display:true, text:m.unit?`${m.label} (${m.unit})`:m.label, font:{size:10}}} }} }));
+    const noteEl = document.getElementById('rptsumr_'+k);
+    if (noteEl) noteEl.innerHTML = band && band.min!=null && band.max!=null ? `League range: ${fmt(band.min)}–${fmt(band.max)} ${m.unit} (25th–75th percentile)` : 'No league band set for this metric yet.';
+    if (playerVal!=null){ radarLabels.push(m.label); radarVals.push(squadRadarScore(m, playerVal, a.gender, a.id)); }
+  });
+  const radarCanvas = document.getElementById('rptsumRadar');
+  if (radarCanvas && keys.length>=3 && radarVals.some(v=>v!=null)){
+    athleteReportCharts.push(new Chart(radarCanvas.getContext('2d'), { type:'radar', data:{ labels:radarLabels, datasets:[{ label:a.name, data:radarVals.map(v=>v==null?0:v), backgroundColor:'rgba(242,101,34,0.2)', borderColor:'#f26522', pointBackgroundColor:'#f26522' }] }, options:{animation:false, responsive:true, scales:{ r:{ min:0, max:4, ticks:{stepSize:1, display:false}, pointLabels:{font:{size:10}} } }, plugins:{legend:{display:false}} } }));
+  }
 }
 function setReportMode(m){
   reportMode = m;
@@ -3577,7 +3635,7 @@ function printReport(){
   inner.style.width = '';
   outer.style.height = '';
   outer.style.overflow = '';
-  if (reportMode==='week'){
+  if (reportKind==='training' && reportMode==='week'){
     const naturalHeight = inner.scrollHeight;
     const pageHeightPx = (297-24) * 96/25.4 * 0.97; // A4 minus 12mm margins, 96dpi CSS reference, small safety margin
     const scale = Math.min(1, pageHeightPx/naturalHeight);
@@ -3936,6 +3994,7 @@ function setSummaryScope(scope){
   document.querySelectorAll('#summaryScopeToggle button').forEach((b,i)=>b.classList.toggle('active', (scope==='squad'&&i===0)||(scope==='individual'&&i===1)));
   const sel = document.getElementById('summaryPlayerSelect');
   sel.style.display = scope==='individual' ? '' : 'none';
+  document.getElementById('summaryPrintBtn').style.display = scope==='individual' ? '' : 'none';
   if (scope==='individual' && !summaryPlayerId){
     const players = Object.values(athleteMap).filter(a=>genderFilterVal==='all'||a.gender===genderFilterVal);
     summaryPlayerId = players[0] ? players[0].id : null;
