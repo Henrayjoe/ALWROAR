@@ -377,7 +377,7 @@
     </div>
     <div class="alist" id="alist"><div style="padding:16px;font-size:12px;color:#7a8290;text-align:center">No players yet — add one, or import from a Google Sheet in Settings.</div></div>
     <div class="settings-bar"><span id="sheetStatus">No sheet imported</span><button class="btn-sm" onclick="showConfig()">⚙ Settings</button></div>
-    <div style="text-align:center;font-size:9.5px;color:#a3a9b4;padding:6px 4px 10px;letter-spacing:.02em;">Build 2026-09-18 15:35</div>
+    <div style="text-align:center;font-size:9.5px;color:#a3a9b4;padding:6px 4px 10px;letter-spacing:.02em;">Build 2026-09-18 16:20</div>
   </aside>
   <main class="main" id="main"></main>
 
@@ -2254,6 +2254,7 @@ function switchTeamTab(t){
   if (t==='gpstraining') setTimeout(drawTeamGpsTraining,60);
   if (t==='gpsmatch') setTimeout(drawTeamGpsMatch,60);
   if (t==='mas') setTimeout(drawTeamMasView,60);
+  if (t==='summary') setTimeout(()=>{ buildSummaryMetricOptions(); drawAthleteSummary(); },60);
 }
 
 // ============================================================
@@ -2858,6 +2859,7 @@ function renderTeam(){
         <div class="team-tab tab" data-t="gpstraining" onclick="switchTeamTab('gpstraining')">Training Load</div>
         <div class="team-tab tab" data-t="gpsmatch" onclick="switchTeamTab('gpsmatch')">Match Load</div>
         <div class="team-tab tab" data-t="mas" onclick="switchTeamTab('mas')">MAS / Conditioning</div>
+        <div class="team-tab tab" data-t="summary" onclick="switchTeamTab('summary')">Athlete Summary</div>
       </div>
       <div class="team-tc tc active" data-t="squad"><div class="quad-body" style="padding-bottom:0;">
         <div class="quad-ctrl-row">${refToggleHtml('heatmap', refFrame.heatmap)}<span class="ref-note">Cell color = status against the selected reference. Toggle changes color only, not the raw values shown.</span></div>
@@ -2939,6 +2941,21 @@ function renderTeam(){
       <div class="team-tc tc" data-t="gpstraining"><div class="quad-body" id="teamGpsTrainingBody" style="padding:16px 20px;"></div></div>
       <div class="team-tc tc" data-t="gpsmatch"><div class="quad-body" id="teamGpsMatchBody" style="padding:16px 20px;"></div></div>
       <div class="team-tc tc" data-t="mas"><div class="quad-body" id="teamMasBody" style="padding:16px 20px;"></div></div>
+      <div class="team-tc tc" data-t="summary"><div class="quad-body" style="padding-bottom:0;">
+        <div class="quad-ctrl-row">
+          <span class="control-label">Athlete Summary</span>
+          <span class="ref-note">Pick any metrics, compare a player (or the whole squad) against squad average and the league norm band — built for showing an athlete where they sit, not for dense analysis.</span>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;margin:10px 0;flex-wrap:wrap;">
+          <div class="lb-mode-toggle" id="summaryScopeToggle">
+            <button class="active" onclick="setSummaryScope('squad')">Squad Overview</button>
+            <button onclick="setSummaryScope('individual')">Individual Player</button>
+          </div>
+          <select id="summaryPlayerSelect" onchange="setSummaryPlayer(this.value)" style="display:none;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;"></select>
+        </div>
+        <div id="summaryMetricPicker" class="composite-picker"></div>
+      </div>
+      <div id="summaryOutput" style="padding:0 20px 20px;"></div></div>
     </div>`;
   buildSquadTable();
   buildTeamTrendMetricOptions();
@@ -3888,7 +3905,113 @@ function drawTeamTrendChart(){
   });
 }
 
-// A fixed, curated version of Team Trends for a weekly screening ritual --
+// ============================================================
+// ATHLETE SUMMARY — presentation-quality metric comparison for athlete
+// conversations, distinct from Team Trends above: that one shows change
+// over time for coach analysis; this shows "where does this player (or
+// the squad) sit right now" against squad average and the league norm
+// band, laid out simply enough to put in front of a player.
+// ============================================================
+let summaryMetricKeys = new Set(['cmj_jumpHeight','imtp_relForce','speed_20m','nordic_maxForce']);
+let summaryScope = 'squad';
+let summaryPlayerId = null;
+const SUMMARY_MAX_METRICS = 6;
+function buildSummaryMetricOptions(){
+  const picker = document.getElementById('summaryMetricPicker');
+  if (!picker) return;
+  picker.innerHTML = GROUPS.map(g=>METRICS.filter(m=>m.group===g).map(m=>
+    `<label><input type="checkbox" value="${m.key}" ${summaryMetricKeys.has(m.key)?'checked':''} onchange="toggleSummaryKey('${m.key}',this.checked)">${m.label}</label>`
+  ).join('')).join('');
+}
+function toggleSummaryKey(key, checked){
+  if (checked){
+    if (summaryMetricKeys.size>=SUMMARY_MAX_METRICS){ alert(`Up to ${SUMMARY_MAX_METRICS} metrics at a time — untick one first.`); buildSummaryMetricOptions(); return; }
+    summaryMetricKeys.add(key);
+  } else summaryMetricKeys.delete(key);
+  buildSummaryMetricOptions();
+  drawAthleteSummary();
+}
+function setSummaryScope(scope){
+  summaryScope = scope;
+  document.querySelectorAll('#summaryScopeToggle button').forEach((b,i)=>b.classList.toggle('active', (scope==='squad'&&i===0)||(scope==='individual'&&i===1)));
+  const sel = document.getElementById('summaryPlayerSelect');
+  sel.style.display = scope==='individual' ? '' : 'none';
+  if (scope==='individual' && !summaryPlayerId){
+    const players = Object.values(athleteMap).filter(a=>genderFilterVal==='all'||a.gender===genderFilterVal);
+    summaryPlayerId = players[0] ? players[0].id : null;
+    buildSummaryPlayerOptions();
+  }
+  drawAthleteSummary();
+}
+function setSummaryPlayer(id){ summaryPlayerId = id; drawAthleteSummary(); }
+function buildSummaryPlayerOptions(){
+  const sel = document.getElementById('summaryPlayerSelect');
+  if (!sel) return;
+  const players = Object.values(athleteMap).filter(a=>genderFilterVal==='all'||a.gender===genderFilterVal).sort((a,b)=>a.name.localeCompare(b.name));
+  sel.innerHTML = players.map(a=>`<option value="${a.id}" ${a.id===summaryPlayerId?'selected':''}>${a.name}</option>`).join('');
+}
+let summaryCharts=[];
+function drawAthleteSummary(){
+  buildSummaryPlayerOptions();
+  const out = document.getElementById('summaryOutput'); if (!out) return;
+  summaryCharts.forEach(c=>c.destroy()); summaryCharts=[];
+  const keys = [...summaryMetricKeys];
+  if (!keys.length){ out.innerHTML = '<p class="hint" style="padding:8px 4px;">Tick one or more metrics above to build a summary.</p>'; return; }
+  if (summaryScope==='squad') drawSummarySquad(out, keys); else drawSummaryIndividual(out, keys);
+}
+function drawSummarySquad(out, keys){
+  out.innerHTML = `<div class="chart-grid" id="summarySquadGrid"></div>`;
+  const grid = document.getElementById('summarySquadGrid');
+  grid.innerHTML = keys.map(k=>`<div class="chart-wrap"><div class="chart-title">${metricByKey(k).label}</div><canvas id="sumsq_${k}" height="150"></canvas></div>`).join('');
+  const players = Object.values(athleteMap).filter(a=>(genderFilterVal==='all'||a.gender===genderFilterVal) && a.sessions.length);
+  keys.forEach(k=>{
+    const m = metricByKey(k);
+    const rows = players.map(a=>({ name:a.name, v:repVal(m, buildLatest(a.sessions)) })).filter(r=>r.v!=null).sort((x,y)=>y.v-x.v);
+    if (!rows.length){ document.getElementById('sumsq_'+k).closest('.chart-wrap').innerHTML = `<div class="chart-title">${m.label}</div><p class="hint" style="padding:8px 4px;">No data yet.</p>`; return; }
+    const mean = rows.reduce((s,r)=>s+r.v,0)/rows.length;
+    // League band only shown when one gender is selected -- averaging a
+    // men's and women's band together would produce a meaningless number.
+    const band = (genderFilterVal!=='all' && !m.noNorm) ? (NORMS[k] && NORMS[k][genderFilterVal]) : null;
+    const canvas = document.getElementById('sumsq_'+k);
+    const datasets = [
+      { type:'bar', label:m.label, data:rows.map(r=>r.v), backgroundColor:'#f26522', order:3 },
+      { type:'line', label:'Squad average', data:rows.map(()=>mean), borderColor:'#3d6fb0', borderDash:[6,4], pointRadius:0, borderWidth:2, order:1 },
+    ];
+    if (band && band.min!=null && band.max!=null){
+      datasets.push({ type:'line', label:'League band (low)', data:rows.map(()=>band.min), borderColor:'transparent', pointRadius:0, fill:false, order:2 });
+      datasets.push({ type:'line', label:'League band (high)', data:rows.map(()=>band.max), borderColor:'transparent', backgroundColor:'rgba(148,163,184,0.22)', pointRadius:0, fill:'-1', order:2 });
+    }
+    summaryCharts.push(new Chart(canvas.getContext('2d'), { data:{ labels:rows.map(r=>r.name), datasets }, options:{responsive:true, plugins:{legend:{position:'bottom', labels:{filter:l=>!l.text.startsWith('League band'), boxWidth:10, font:{size:10}}}}, scales:{ x:{ticks:{font:{size:10}, maxRotation:60, minRotation:40}}, y:{beginAtZero:false, title:{display:true, text:m.unit?`${m.label} (${m.unit})`:m.label, font:{size:10}}} }} }));
+  });
+}
+function drawSummaryIndividual(out, keys){
+  const a = athleteMap[summaryPlayerId];
+  if (!a){ out.innerHTML = '<p class="hint" style="padding:8px 4px;">Pick a player.</p>'; return; }
+  out.innerHTML = `<div class="chart-grid" id="summaryIndivGrid"></div>${keys.length>=3?'<div class="chart-wrap" style="max-width:480px;margin:16px auto 0;"><div class="chart-title">Shape at a glance (vs squad average)</div><canvas id="summaryRadar" height="280"></canvas></div>':''}`;
+  const grid = document.getElementById('summaryIndivGrid');
+  grid.innerHTML = keys.map(k=>`<div class="chart-wrap"><div class="chart-title">${metricByKey(k).label}</div><canvas id="sumin_${k}" height="130"></canvas><div class="cmj-summary-note" id="suminr_${k}"></div></div>`).join('');
+  const radarLabels=[], radarVals=[];
+  keys.forEach(k=>{
+    const m = metricByKey(k);
+    const playerVal = repVal(m, buildLatest(a.sessions));
+    const stats = squadStats(k, a.gender, a.id);
+    const band = (!m.noNorm) ? (NORMS[k] && NORMS[k][a.gender]) : null;
+    const leagueMid = band && band.min!=null && band.max!=null ? (band.min+band.max)/2 : null;
+    const labels = ['This Player','Squad Average']; const vals = [playerVal, stats.mean];
+    if (leagueMid!=null){ labels.push('League Mean'); vals.push(leagueMid); }
+    const colors = ['#f26522','#3d6fb0','#94a3b8'];
+    const canvas = document.getElementById('sumin_'+k);
+    summaryCharts.push(new Chart(canvas.getContext('2d'), { type:'bar', data:{ labels, datasets:[{ data:vals, backgroundColor:colors.slice(0,vals.length) }] }, options:{indexAxis:'y', responsive:true, plugins:{legend:{display:false}}, scales:{ x:{title:{display:true, text:m.unit?`${m.label} (${m.unit})`:m.label, font:{size:10}}} }} }));
+    const noteEl = document.getElementById('suminr_'+k);
+    noteEl.innerHTML = band && band.min!=null && band.max!=null ? `League range: ${fmt(band.min)}–${fmt(band.max)} ${m.unit} (25th–75th percentile)` : 'No league band set for this metric yet.';
+    if (playerVal!=null){ radarLabels.push(m.label); radarVals.push(squadRadarScore(m, playerVal, a.gender, a.id)); }
+  });
+  if (keys.length>=3 && radarVals.some(v=>v!=null)){
+    const ctx = document.getElementById('summaryRadar').getContext('2d');
+    summaryCharts.push(new Chart(ctx, { type:'radar', data:{ labels:radarLabels, datasets:[{ label:a.name, data:radarVals.map(v=>v==null?0:v), backgroundColor:'rgba(242,101,34,0.2)', borderColor:'#f26522', pointBackgroundColor:'#f26522' }] }, options:{responsive:true, scales:{ r:{ min:0, max:4, ticks:{stepSize:1, display:false}, pointLabels:{font:{size:10}} } }, plugins:{legend:{display:false}} } }));
+  }
+}
+
 // same squad mean/median/SD-per-test-date computation, just four specific
 // tests chosen for injury-risk screening rather than whatever's ticked:
 //  - CMJ jump height: general neuromuscular/jump readiness
