@@ -74,6 +74,7 @@
   .mp-cell-input, .mp-target-input { width:56px; padding:3px 5px; border:1px solid var(--border); border-radius:4px; font-size:12px; text-align:center; background:transparent; }
   .mp-target-input { width:60px; }
   .mp-notes-input { width:150px; padding:3px 7px; border:1px solid var(--border); border-radius:4px; font-size:12px; }
+  .mp-warn-icon { position:absolute; top:1px; right:2px; font-size:10px; color:#c8483d; cursor:help; }
   .composite-picker label { display:flex; align-items:center; gap:5px; font-size:11.5px; background:#fff; border:1px solid var(--border); border-radius:6px; padding:4px 8px; cursor:pointer; }
   .lb-mode-toggle { display:inline-flex; gap:4px; background:var(--surface-alt); padding:3px; border-radius:8px; border:1px solid var(--border); }
   .lb-mode-toggle button { border:none; background:transparent; padding:6px 12px; border-radius:6px; font-size:11.5px; font-weight:600; color:var(--text-muted); cursor:pointer; transition:background 0.22s ease, color 0.22s ease, transform 0.15s ease; }
@@ -400,7 +401,7 @@
     <div class="alist" id="alist"><div style="padding:16px;font-size:12px;color:#7a8290;text-align:center">No players yet — add one, or import from a Google Sheet in Settings.</div></div>
     <div class="settings-bar"><span id="sheetStatus">No sheet imported</span><button class="btn-sm" onclick="showConfig()">⚙ Settings</button></div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-09-24 09:45</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-09-24 10:20</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -5246,6 +5247,20 @@ let MINUTES_PLAN = {
   playerGroup: {}, // athleteId -> group name
   minutes: {},     // athleteId -> { gameId: number }
   notes: {},       // athleteId -> string
+  availability: {},   // athleteId -> 'Available'|'Modified'|'Unavailable'
+  capacity90: {},      // athleteId -> 'Ready'|'Building'|'Limited'
+  statusUpdated: {},   // athleteId -> "YYYY-MM-DD", set whenever either status changes
+};
+const MP_AVAILABILITY_OPTIONS = ['Available','Modified','Unavailable'];
+const MP_CAPACITY_OPTIONS = ['Ready','Building','Limited'];
+const MP_CAPACITY_LABEL = { Ready:'Ready for 90', Building:'Building', Limited:'Limited' };
+const MP_STATUS_COLOR = {
+  Available: { bg:'var(--c-exceeds-bg)', text:'var(--c-exceeds-text)' },
+  Modified:  { bg:'var(--c-near-bg)', text:'var(--c-near-text)' },
+  Unavailable: { bg:'var(--c-priority-bg)', text:'var(--c-priority-text)' },
+  Ready: { bg:'var(--c-exceeds-bg)', text:'var(--c-exceeds-text)' },
+  Building: { bg:'var(--c-near-bg)', text:'var(--c-near-text)' },
+  Limited: { bg:'var(--c-priority-bg)', text:'var(--c-priority-text)' },
 };
 function mpGameTotalMinutes(g){ return g.periods*g.minPerPeriod + (g.optionalEnabled ? (g.optionalMin||0) : 0); }
 function mpPlayerGroup(aId){ return MINUTES_PLAN.playerGroup[aId] || ''; }
@@ -5256,15 +5271,15 @@ function mpFindDefaultGroup(name){
   }
   return '';
 }
-// Only fills in a default for a player who has never had ANY group set
-// (including explicitly cleared to "unassigned" via the dropdown, which
-// still counts as "set" and is left alone) -- so this never overwrites a
+// Only fills in a default for a player who has never had ANY group/status
+// set (including explicitly picking a value that happens to match the
+// default, which still counts as "set") -- so this never overwrites a
 // manual change.
 function mpEnsureDefaults(players){
   players.forEach(a=>{
-    if (!(a.id in MINUTES_PLAN.playerGroup)){
-      MINUTES_PLAN.playerGroup[a.id] = mpFindDefaultGroup(a.name);
-    }
+    if (!(a.id in MINUTES_PLAN.playerGroup)) MINUTES_PLAN.playerGroup[a.id] = mpFindDefaultGroup(a.name);
+    if (!(a.id in MINUTES_PLAN.availability)) MINUTES_PLAN.availability[a.id] = 'Available';
+    if (!(a.id in MINUTES_PLAN.capacity90)) MINUTES_PLAN.capacity90[a.id] = 'Building';
   });
 }
 function mpComputeGameBudget(g, players){
@@ -5303,6 +5318,41 @@ function mpPersist(){
 }
 function mpPlayers(){ return Object.values(athleteMap).filter(a=>genderFilterVal==='all'||a.gender===genderFilterVal); }
 function setPlayerGroup(aId, group){ MINUTES_PLAN.playerGroup[aId] = group; mpPersist(); renderMinutesPlan(); }
+function setAvailability(aId, val){ MINUTES_PLAN.availability[aId] = val; MINUTES_PLAN.statusUpdated[aId] = toLocalDateStr(new Date()); mpPersist(); renderMinutesPlan(); }
+function setCapacity90(aId, val){ MINUTES_PLAN.capacity90[aId] = val; MINUTES_PLAN.statusUpdated[aId] = toLocalDateStr(new Date()); mpPersist(); renderMinutesPlan(); }
+// The next game from today's date -- used only for the "Modified player
+// with >45min planned in the NEXT game" warning below.
+function mpNextGame(){
+  const todayStr = toLocalDateStr(new Date());
+  return [...MINUTES_PLAN.games].sort((a,b)=>a.date.localeCompare(b.date)).find(g=>g.date>=todayStr) || null;
+}
+// Every reason (if any) this player's minutes cell for this game should
+// carry a warning icon. Purely informational -- doesn't block entry,
+// just flags it for a second look.
+function mpCellWarnings(a, g, nextGame){
+  const val = (MINUTES_PLAN.minutes[a.id]||{})[g.id];
+  if (val==null) return [];
+  const reasons = [];
+  const avail = MINUTES_PLAN.availability[a.id];
+  const cap = MINUTES_PLAN.capacity90[a.id];
+  if (avail==='Unavailable' && val>0) reasons.push('Player is marked Unavailable but has minutes planned');
+  if (avail==='Modified' && nextGame && g.id===nextGame.id && val>45) reasons.push('Player is Modified and has more than 45 min planned in the next game');
+  if (cap==='Limited' && val>60) reasons.push('Player is Limited (under 60 min capacity) but has more than 60 min planned');
+  if (cap==='Building' && val>75) reasons.push('Player is Building (60–75 min capacity) but has more than 75 min planned');
+  return reasons;
+}
+let mpAvailFilter = new Set(MP_AVAILABILITY_OPTIONS);
+let mpCapFilter = new Set(MP_CAPACITY_OPTIONS);
+function toggleMpAvailFilter(val){
+  if (mpAvailFilter.has(val)) mpAvailFilter.delete(val); else mpAvailFilter.add(val);
+  if (!mpAvailFilter.size) mpAvailFilter = new Set(MP_AVAILABILITY_OPTIONS); // never allow an empty filter to hide everyone silently
+  renderMinutesPlan();
+}
+function toggleMpCapFilter(val){
+  if (mpCapFilter.has(val)) mpCapFilter.delete(val); else mpCapFilter.add(val);
+  if (!mpCapFilter.size) mpCapFilter = new Set(MP_CAPACITY_OPTIONS);
+  renderMinutesPlan();
+}
 function setPlayerMinutes(aId, gId, val){
   if (!MINUTES_PLAN.minutes[aId]) MINUTES_PLAN.minutes[aId] = {};
   const n = val===''?null:Number(val);
@@ -5361,8 +5411,13 @@ function mpDownload(filename, content, type){
 function exportMinutesPlanCsv(){
   const players = mpPlayers().sort((a,b)=>a.name.localeCompare(b.name));
   const games = MINUTES_PLAN.games;
-  const header = ['Player','Group', ...games.map(g=>`${g.name} (${g.date})`), 'Notes'];
-  const rows = players.map(a=>[a.name, mpPlayerGroup(a.id)||'Unassigned', ...games.map(g=>(MINUTES_PLAN.minutes[a.id]||{})[g.id] ?? ''), MINUTES_PLAN.notes[a.id]||'']);
+  const header = ['Player','Group','Availability','90-min Capacity','Updated', ...games.map(g=>`${g.name} (${g.date})`), 'Notes'];
+  const rows = players.map(a=>[
+    a.name, mpPlayerGroup(a.id)||'Unassigned',
+    MINUTES_PLAN.availability[a.id]||'Available', MP_CAPACITY_LABEL[MINUTES_PLAN.capacity90[a.id]||'Building'],
+    MINUTES_PLAN.statusUpdated[a.id]||'',
+    ...games.map(g=>(MINUTES_PLAN.minutes[a.id]||{})[g.id] ?? ''), MINUTES_PLAN.notes[a.id]||''
+  ]);
   mpDownload(`minutes-plan-${toLocalDateStr(new Date())}.csv`, [header,...rows].map(r=>r.map(csvEscape).join(',')).join('\r\n'), 'text/csv;charset=utf-8;');
 }
 function exportMinutesPlanBackup(){
@@ -5375,7 +5430,7 @@ function importMinutesPlanBackup(inputEl){
     try{
       const data = JSON.parse(e.target.result);
       if (!data || !Array.isArray(data.games)) throw new Error('bad format');
-      MINUTES_PLAN = Object.assign({games:[],groupTargets:{},playerGroup:{},minutes:{},notes:{}}, data);
+      MINUTES_PLAN = Object.assign({games:[],groupTargets:{},playerGroup:{},minutes:{},notes:{},availability:{},capacity90:{},statusUpdated:{}}, data);
       mpPersist(); renderMinutesPlan();
       alert('Minutes Plan backup imported.');
     }catch(err){ alert('Could not read that file — is it a Minutes Plan backup JSON?'); }
@@ -5388,7 +5443,36 @@ function renderMinutesPlan(){
   const players = mpPlayers();
   mpEnsureDefaults(players);
   const games = MINUTES_PLAN.games;
+  const nextGame = mpNextGame();
   const groupOptionsHtml = `<option value="">Unassigned</option>` + MINUTES_PLAN_GROUPS.map(g=>`<option value="${g}">${g}</option>`).join('');
+  const statusSelectHtml = (options, labelFn, current, onchangeFn)=>{
+    const col = MP_STATUS_COLOR[current] || {bg:'transparent', text:'inherit'};
+    return `<select onchange="${onchangeFn}" style="font-size:11px;font-weight:700;padding:3px 5px;border:1px solid var(--border);border-radius:5px;background:${col.bg};color:${col.text};">
+      ${options.map(o=>`<option value="${o}" ${o===current?'selected':''}>${labelFn(o)}</option>`).join('')}
+    </select>`;
+  };
+
+  // Active warnings count (total cells with at least one warning) --
+  // computed once here so both the header badge and the cell icons below
+  // are reading the exact same logic.
+  let warningCount = 0;
+  const cellWarningsCache = {};
+  players.forEach(a=>{
+    games.forEach(g=>{
+      const w = mpCellWarnings(a, g, nextGame);
+      if (w.length){ warningCount++; cellWarningsCache[a.id+'|'+g.id] = w; }
+    });
+  });
+
+  const availCounts = {Available:0, Modified:0, Unavailable:0};
+  const capCounts = {Ready:0, Building:0, Limited:0};
+  const readyPlayers = [];
+  players.forEach(a=>{
+    const av = MINUTES_PLAN.availability[a.id]||'Available'; availCounts[av] = (availCounts[av]||0)+1;
+    const cp = MINUTES_PLAN.capacity90[a.id]||'Building'; capCounts[cp] = (capCounts[cp]||0)+1;
+    if (cp==='Ready') readyPlayers.push(a.name);
+  });
+  readyPlayers.sort();
 
   const gamesPanel = !mpGamesPanelOpen ? '' : `
     <div style="background:var(--surface-alt);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:14px;overflow-x:auto;">
@@ -5412,26 +5496,33 @@ function renderMinutesPlan(){
       <button class="btn-sm" style="margin-top:8px;" onclick="addMinutesPlanGame()">+ Add Game</button>
     </div>`;
 
+  const visiblePlayers = players.filter(a=>mpAvailFilter.has(MINUTES_PLAN.availability[a.id]||'Available') && mpCapFilter.has(MINUTES_PLAN.capacity90[a.id]||'Building'));
+  const totalCols = games.length+6; // Name, Group, Availability, Capacity, Updated, [games], Notes
   const allBuckets = [...MINUTES_PLAN_GROUPS, ''];
   const rowsHtml = allBuckets.map(group=>{
-    const inGroup = players.filter(a=>mpPlayerGroup(a.id)===group).sort((a,b)=>a.name.localeCompare(b.name));
+    const inGroup = visiblePlayers.filter(a=>mpPlayerGroup(a.id)===group).sort((a,b)=>a.name.localeCompare(b.name));
     if (!inGroup.length) return '';
     const label = group || 'Unassigned';
-    const targetRow = group ? `<tr class="mp-group-row"><td class="mp-sticky mp-group-name">${label}</td><td></td>
+    const targetRow = group ? `<tr class="mp-group-row"><td class="mp-sticky mp-group-name">${label}</td><td></td><td></td><td></td><td></td>
         ${games.map(g=>`<td><input type="number" class="mp-target-input" value="${(MINUTES_PLAN.groupTargets[group]||{})[g.id] ?? ''}" placeholder="target" onchange="setGroupTarget('${group}','${g.id}',this.value)"></td>`).join('')}
         <td></td></tr>`
-      : `<tr class="mp-group-row"><td class="mp-sticky mp-group-name" colspan="${games.length+3}">${label}</td></tr>`;
+      : `<tr class="mp-group-row"><td class="mp-sticky mp-group-name" colspan="${totalCols}">${label}</td></tr>`;
     const playerRows = inGroup.map(a=>{
       const notes = MINUTES_PLAN.notes[a.id]||'';
+      const updated = MINUTES_PLAN.statusUpdated[a.id];
       return `<tr><td class="mp-sticky">${a.name}</td>
         <td><select onchange="setPlayerGroup('${a.id}',this.value)" style="font-size:11.5px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;">${groupOptionsHtml.replace(`value="${group}"`, `value="${group}" selected`)}</select></td>
+        <td>${statusSelectHtml(MP_AVAILABILITY_OPTIONS, o=>o, MINUTES_PLAN.availability[a.id]||'Available', `setAvailability('${a.id}',this.value)`)}</td>
+        <td>${statusSelectHtml(MP_CAPACITY_OPTIONS, o=>MP_CAPACITY_LABEL[o], MINUTES_PLAN.capacity90[a.id]||'Building', `setCapacity90('${a.id}',this.value)`)}</td>
+        <td style="font-size:10.5px;color:var(--text-muted);">${updated||'—'}</td>
         ${games.map(g=>{
           const val = (MINUTES_PLAN.minutes[a.id]||{})[g.id];
           const target = group ? (MINUTES_PLAN.groupTargets[group]||{})[g.id] : null;
           const st = mpCellStatus(val, target);
           const over = val!=null && val>mpGameTotalMinutes(g);
-          return `<td style="background:${st?st.bg:'transparent'};${over?'outline:2px solid #c8483d;outline-offset:-2px;':''}" title="${over?`Exceeds this game's total length (${mpGameTotalMinutes(g)} min)`:''}">
-            <input type="number" min="0" class="mp-cell-input" value="${val??''}" onchange="setPlayerMinutes('${a.id}','${g.id}',this.value)" style="color:${st?st.color:'inherit'};">
+          const warns = cellWarningsCache[a.id+'|'+g.id]||[];
+          return `<td style="background:${st?st.bg:'transparent'};${over?'outline:2px solid #c8483d;outline-offset:-2px;':''}position:relative;" title="${over?`Exceeds this game's total length (${mpGameTotalMinutes(g)} min)`:''}">
+            <input type="number" min="0" class="mp-cell-input" value="${val??''}" onchange="setPlayerMinutes('${a.id}','${g.id}',this.value)" style="color:${st?st.color:'inherit'};">${warns.length?`<span class="mp-warn-icon" title="${warns.join('; ').replace(/"/g,'&quot;')}">⚠</span>`:''}
           </td>`;
         }).join('')}
         <td><input type="text" class="mp-notes-input" value="${notes.replace(/"/g,'&quot;')}" onchange="setPlayerNotes('${a.id}',this.value)"></td></tr>`;
@@ -5441,7 +5532,7 @@ function renderMinutesPlan(){
 
   const budgetRows = ['outfield','gk'].map(kind=>{
     const label = kind==='outfield' ? 'Outfield Budget' : 'GK Budget';
-    return `<tr class="mp-budget-row"><td class="mp-sticky" colspan="2">${label}</td>
+    return `<tr class="mp-budget-row"><td class="mp-sticky" colspan="5">${label}</td>
       ${games.map(g=>{
         const b = mpComputeGameBudget(g, players);
         const st = mpBudgetStatus(kind==='outfield'?b.outfieldPlanned:b.gkPlanned, kind==='outfield'?b.outfieldAvail:b.gkAvail);
@@ -5450,12 +5541,35 @@ function renderMinutesPlan(){
       <td></td></tr>`;
   }).join('');
 
+  const filterChip = (val, active, onclickFn, label)=>{
+    const col = MP_STATUS_COLOR[val];
+    return `<button onclick="${onclickFn}" style="font-size:11px;font-weight:600;padding:4px 10px;border-radius:14px;border:1.5px solid ${active?col.text:'var(--border)'};background:${active?col.bg:'transparent'};color:${active?col.text:'var(--text-muted)'};cursor:pointer;">${label}</button>`;
+  };
+
   root.innerHTML = `
     <div class="quad-ctrl-row">
       <span class="control-label">Minutes Plan</span>
-      <span class="ref-note">Predicted minutes per game, tracked toward Round 1. Cell colour = vs that player's group target (green = on target ±5min, orange = below, blue = above).</span>
+      <span class="ref-note">Predicted minutes per game, tracked toward Round 1. Cell colour = vs that player's group target (green = on target ±5min, orange = below, blue = above).${warningCount?` <b style="color:#c8483d;">⚠ ${warningCount} active warning${warningCount===1?'':'s'}</b>`:''}</span>
     </div>
-    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0 14px;">
+    <div style="background:var(--surface-alt);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin:10px 0 14px;display:flex;gap:24px;flex-wrap:wrap;">
+      <div>
+        <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;">Availability</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">${MP_AVAILABILITY_OPTIONS.map(o=>`<span style="font-size:12px;">${o}: <b>${availCounts[o]||0}</b></span>`).join(' &nbsp; ')}</div>
+      </div>
+      <div>
+        <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;">90-min Capacity</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">${MP_CAPACITY_OPTIONS.map(o=>`<span style="font-size:12px;">${MP_CAPACITY_LABEL[o]}: <b>${capCounts[o]||0}</b></span>`).join(' &nbsp; ')}</div>
+      </div>
+      <div style="flex:1;min-width:200px;">
+        <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;">Ready for 90 (${readyPlayers.length})</div>
+        <div style="font-size:12px;color:var(--text-secondary);">${readyPlayers.length?readyPlayers.join(', '):'No one yet'}</div>
+      </div>
+    </div>
+    <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;"><span style="font-size:11px;color:var(--text-muted);margin-right:2px;">Availability:</span>${MP_AVAILABILITY_OPTIONS.map(o=>filterChip(o, mpAvailFilter.has(o), `toggleMpAvailFilter('${o}')`, o)).join('')}</div>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;"><span style="font-size:11px;color:var(--text-muted);margin-right:2px;">Capacity:</span>${MP_CAPACITY_OPTIONS.map(o=>filterChip(o, mpCapFilter.has(o), `toggleMpCapFilter('${o}')`, MP_CAPACITY_LABEL[o])).join('')}</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 14px;">
       <button class="btn-sm" onclick="toggleMpGamesPanel()">${mpGamesPanelOpen?'▾':'▸'} Manage Games</button>
       <button class="btn-sm" onclick="applyGroupTargets()">Apply Group Targets</button>
       <button class="btn-sm" onclick="openMinutesPlanReport()">🖨 Print View</button>
@@ -5468,11 +5582,11 @@ function renderMinutesPlan(){
     <div class="mp-table-wrap">
       <table class="mp-table">
         <thead><tr>
-          <th class="mp-sticky">Name</th><th>Group</th>
+          <th class="mp-sticky">Name</th><th>Group</th><th>Availability</th><th>90-min Capacity</th><th>Updated</th>
           ${games.map(g=>`<th>${g.name}<div style="font-weight:400;color:var(--text-muted);font-size:10.5px;">${g.date} · ${mpGameTotalMinutes(g)} min/player max</div></th>`).join('')}
           <th>Notes</th>
         </tr></thead>
-        <tbody>${rowsHtml || `<tr><td class="mp-sticky" colspan="${games.length+3}" style="color:var(--text-muted);">No players in the current filter.</td></tr>`}</tbody>
+        <tbody>${rowsHtml || `<tr><td class="mp-sticky" colspan="${totalCols}" style="color:var(--text-muted);">No players match the current filters.</td></tr>`}</tbody>
         <tfoot>${budgetRows}</tfoot>
       </table>
     </div>`;
@@ -5494,13 +5608,22 @@ function buildMinutesPlanReportHtml(){
   mpEnsureDefaults(players);
   const games = MINUTES_PLAN.games;
   const genDate = new Date().toLocaleDateString('en-AU', {day:'numeric', month:'short', year:'numeric'});
+  const availCounts = {Available:0, Modified:0, Unavailable:0};
+  const capCounts = {Ready:0, Building:0, Limited:0};
+  const readyPlayers = [];
+  players.forEach(a=>{
+    const av = MINUTES_PLAN.availability[a.id]||'Available'; availCounts[av]=(availCounts[av]||0)+1;
+    const cp = MINUTES_PLAN.capacity90[a.id]||'Building'; capCounts[cp]=(capCounts[cp]||0)+1;
+    if (cp==='Ready') readyPlayers.push(a.name);
+  });
+  readyPlayers.sort();
   const allBuckets = [...MINUTES_PLAN_GROUPS, ''];
   const bodyRows = allBuckets.map(group=>{
     const inGroup = players.filter(a=>mpPlayerGroup(a.id)===group).sort((a,b)=>a.name.localeCompare(b.name));
     if (!inGroup.length) return '';
     const label = group || 'Unassigned';
-    return `<tr><td class="lbl" style="font-weight:800;background:#f6f7f9;" colspan="${games.length+2}">${label}</td></tr>`
-      + inGroup.map(a=>`<tr><td class="lbl">${a.name}</td>${games.map(g=>{
+    return `<tr><td class="lbl" style="font-weight:800;background:#f6f7f9;" colspan="${games.length+5}">${label}</td></tr>`
+      + inGroup.map(a=>`<tr><td class="lbl">${a.name}</td><td>${MINUTES_PLAN.availability[a.id]||'Available'}</td><td>${MP_CAPACITY_LABEL[MINUTES_PLAN.capacity90[a.id]||'Building']}</td>${games.map(g=>{
           const v = (MINUTES_PLAN.minutes[a.id]||{})[g.id];
           return `<td>${v!=null?fmt(v):'—'}</td>`;
         }).join('')}<td>${MINUTES_PLAN.notes[a.id]||''}</td></tr>`).join('');
@@ -5509,7 +5632,8 @@ function buildMinutesPlanReportHtml(){
     ${games.map(g=>{ const b=mpComputeGameBudget(g,players); const planned=kind==='outfield'?b.outfieldPlanned:b.gkPlanned, avail=kind==='outfield'?b.outfieldAvail:b.gkAvail;
       return `<td>${fmt(planned)} / ${fmt(avail)}</td>`; }).join('')}</tr>`).join('');
   return `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">Minutes Plan</div><div class="rpt-sub">Brisbane Roar · Printed ${genDate}</div></div>${ROAR_LOGO_SVG}</div>
-    <table class="rpt-table"><thead><tr><th>Name</th>${games.map(g=>`<th>${g.name}<br><span style="font-weight:400;">${g.date}</span></th>`).join('')}<th>Notes</th></tr></thead>
+    <div class="chart-note" style="padding:4px 2px 14px;"><span>▪ Availability — ${MP_AVAILABILITY_OPTIONS.map(o=>`${o}: ${availCounts[o]||0}`).join(', ')}</span><span>▪ 90-min Capacity — ${MP_CAPACITY_OPTIONS.map(o=>`${MP_CAPACITY_LABEL[o]}: ${capCounts[o]||0}`).join(', ')}</span><span>▪ Ready for 90: ${readyPlayers.length?readyPlayers.join(', '):'No one yet'}</span></div>
+    <table class="rpt-table"><thead><tr><th>Name</th><th>Availability</th><th>90-min Capacity</th>${games.map(g=>`<th>${g.name}<br><span style="font-weight:400;">${g.date}</span></th>`).join('')}<th>Notes</th></tr></thead>
     <tbody>${bodyRows}</tbody></table>
     <div class="rpt-section-title" style="margin-top:16px;">Budget Check</div>
     <table class="rpt-table"><thead><tr><th></th>${games.map(g=>`<th>${g.name}</th>`).join('')}</tr></thead><tbody>${budgetRows}</tbody></table>`;
