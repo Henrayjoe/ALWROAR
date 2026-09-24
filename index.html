@@ -401,7 +401,7 @@
     <div class="alist" id="alist"><div style="padding:16px;font-size:12px;color:#7a8290;text-align:center">No players yet — add one, or import from a Google Sheet in Settings.</div></div>
     <div class="settings-bar"><span id="sheetStatus">No sheet imported</span><button class="btn-sm" onclick="showConfig()">⚙ Settings</button></div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-09-24 10:20</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-09-24 10:30</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -5253,7 +5253,7 @@ let MINUTES_PLAN = {
 };
 const MP_AVAILABILITY_OPTIONS = ['Available','Modified','Unavailable'];
 const MP_CAPACITY_OPTIONS = ['Ready','Building','Limited'];
-const MP_CAPACITY_LABEL = { Ready:'Ready for 90', Building:'Building', Limited:'Limited' };
+const MP_CAPACITY_LABEL = { Ready:'Perform', Building:'Play', Limited:'Build' };
 const MP_STATUS_COLOR = {
   Available: { bg:'var(--c-exceeds-bg)', text:'var(--c-exceeds-text)' },
   Modified:  { bg:'var(--c-near-bg)', text:'var(--c-near-text)' },
@@ -5337,8 +5337,8 @@ function mpCellWarnings(a, g, nextGame){
   const cap = MINUTES_PLAN.capacity90[a.id];
   if (avail==='Unavailable' && val>0) reasons.push('Player is marked Unavailable but has minutes planned');
   if (avail==='Modified' && nextGame && g.id===nextGame.id && val>45) reasons.push('Player is Modified and has more than 45 min planned in the next game');
-  if (cap==='Limited' && val>60) reasons.push('Player is Limited (under 60 min capacity) but has more than 60 min planned');
-  if (cap==='Building' && val>75) reasons.push('Player is Building (60–75 min capacity) but has more than 75 min planned');
+  if (cap==='Limited' && val>60) reasons.push('Player is Build (under 60 min capacity) but has more than 60 min planned');
+  if (cap==='Building' && val>75) reasons.push('Player is Play (60–75 min capacity) but has more than 75 min planned');
   return reasons;
 }
 let mpAvailFilter = new Set(MP_AVAILABILITY_OPTIONS);
@@ -5561,7 +5561,7 @@ function renderMinutesPlan(){
         <div style="display:flex;gap:6px;flex-wrap:wrap;">${MP_CAPACITY_OPTIONS.map(o=>`<span style="font-size:12px;">${MP_CAPACITY_LABEL[o]}: <b>${capCounts[o]||0}</b></span>`).join(' &nbsp; ')}</div>
       </div>
       <div style="flex:1;min-width:200px;">
-        <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;">Ready for 90 (${readyPlayers.length})</div>
+        <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;">Perform (${readyPlayers.length})</div>
         <div style="font-size:12px;color:var(--text-secondary);">${readyPlayers.length?readyPlayers.join(', '):'No one yet'}</div>
       </div>
     </div>
@@ -5632,7 +5632,7 @@ function buildMinutesPlanReportHtml(){
     ${games.map(g=>{ const b=mpComputeGameBudget(g,players); const planned=kind==='outfield'?b.outfieldPlanned:b.gkPlanned, avail=kind==='outfield'?b.outfieldAvail:b.gkAvail;
       return `<td>${fmt(planned)} / ${fmt(avail)}</td>`; }).join('')}</tr>`).join('');
   return `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">Minutes Plan</div><div class="rpt-sub">Brisbane Roar · Printed ${genDate}</div></div>${ROAR_LOGO_SVG}</div>
-    <div class="chart-note" style="padding:4px 2px 14px;"><span>▪ Availability — ${MP_AVAILABILITY_OPTIONS.map(o=>`${o}: ${availCounts[o]||0}`).join(', ')}</span><span>▪ 90-min Capacity — ${MP_CAPACITY_OPTIONS.map(o=>`${MP_CAPACITY_LABEL[o]}: ${capCounts[o]||0}`).join(', ')}</span><span>▪ Ready for 90: ${readyPlayers.length?readyPlayers.join(', '):'No one yet'}</span></div>
+    <div class="chart-note" style="padding:4px 2px 14px;"><span>▪ Availability — ${MP_AVAILABILITY_OPTIONS.map(o=>`${o}: ${availCounts[o]||0}`).join(', ')}</span><span>▪ 90-min Capacity — ${MP_CAPACITY_OPTIONS.map(o=>`${MP_CAPACITY_LABEL[o]}: ${capCounts[o]||0}`).join(', ')}</span><span>▪ Perform: ${readyPlayers.length?readyPlayers.join(', '):'No one yet'}</span></div>
     <table class="rpt-table"><thead><tr><th>Name</th><th>Availability</th><th>90-min Capacity</th>${games.map(g=>`<th>${g.name}<br><span style="font-weight:400;">${g.date}</span></th>`).join('')}<th>Notes</th></tr></thead>
     <tbody>${bodyRows}</tbody></table>
     <div class="rpt-section-title" style="margin-top:16px;">Budget Check</div>
