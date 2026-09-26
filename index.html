@@ -401,7 +401,7 @@
     <div class="alist" id="alist"><div style="padding:16px;font-size:12px;color:#7a8290;text-align:center">No players yet — add one, or import from a Google Sheet in Settings.</div></div>
     <div class="settings-bar"><span id="sheetStatus">No sheet imported</span><button class="btn-sm" onclick="showConfig()">⚙ Settings</button></div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-09-24 10:30</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-09-24 10:50</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -2141,6 +2141,10 @@ async function loadPersisted(){
     const raw = await storageGet('roar-minutesplan');
     if (raw) MINUTES_PLAN = Object.assign(MINUTES_PLAN, JSON.parse(raw));
   }catch(e){ /* nothing saved yet */ }
+  try{
+    const raw = await storageGet('roar-trainingprograms');
+    if (raw) TRAINING_PROGRAMS = Object.assign(TRAINING_PROGRAMS, JSON.parse(raw));
+  }catch(e){ /* nothing saved yet */ }
   purgeNamelessAthletes();
 }
 
@@ -2692,7 +2696,112 @@ let radarChartInstance = null;
 function drawTrainingPlan(){
   const a = athleteMap[selectedId]; if (!a) return;
   const el = document.getElementById('trainingPlanBody');
-  if (el) el.innerHTML = `<div class="fade-redraw">${buildTrainingPlanHtml(a)}</div>`;
+  if (!el) return;
+  el.innerHTML = `<div class="fade-redraw">${buildTrainingPlanHtml(a)}<div id="tpProgramRoot"></div></div>`;
+  renderTrainingProgram(a);
+}
+// ============================================================
+// TRAINING PROGRAM — an actual editable program (days/exercises/sets/
+// reps/load/notes) the coach writes themselves, separate from the
+// auto-generated analysis above it. Own storage key, same
+// storageSet/storageGet pattern as everything else, autosaved.
+// ============================================================
+let TRAINING_PROGRAMS = {}; // athleteId -> { title, days:[{id,name,exercises:[{id,name,sets,reps,load,notes}]}] }
+function tpGet(aId){
+  if (!TRAINING_PROGRAMS[aId]) TRAINING_PROGRAMS[aId] = { title:'', days:[] };
+  return TRAINING_PROGRAMS[aId];
+}
+function tpNewId(){ return 't'+Date.now()+Math.floor(Math.random()*1000); }
+let tpSaveTimer=null;
+function tpPersist(){
+  const ind = document.getElementById('tpSavedIndicator'); if (ind) ind.textContent = 'Saving…';
+  clearTimeout(tpSaveTimer);
+  tpSaveTimer = setTimeout(async ()=>{
+    await storageSet('roar-trainingprograms', JSON.stringify(TRAINING_PROGRAMS));
+    const el = document.getElementById('tpSavedIndicator');
+    if (el){ el.textContent = 'Saved ✓'; setTimeout(()=>{ if (el && el.textContent==='Saved ✓') el.textContent=''; }, 2000); }
+  }, 400);
+}
+function tpSetTitle(aId, val){ tpGet(aId).title = val; tpPersist(); }
+function tpAddDay(aId){ const p=tpGet(aId); p.days.push({ id:tpNewId(), name:`Day ${p.days.length+1}`, exercises:[] }); tpPersist(); renderTrainingProgram(athleteMap[aId]); }
+function tpDeleteDay(aId, dayId){
+  if (!confirm('Delete this day and its exercises?')) return;
+  const p = tpGet(aId); p.days = p.days.filter(d=>d.id!==dayId); tpPersist(); renderTrainingProgram(athleteMap[aId]);
+}
+function tpUpdateDayName(aId, dayId, val){ const d=tpGet(aId).days.find(d=>d.id===dayId); if (d) d.name=val; tpPersist(); }
+function tpAddExercise(aId, dayId){
+  const d = tpGet(aId).days.find(d=>d.id===dayId); if (!d) return;
+  d.exercises.push({ id:tpNewId(), name:'', sets:'', reps:'', load:'', notes:'' });
+  tpPersist(); renderTrainingProgram(athleteMap[aId]);
+}
+function tpDeleteExercise(aId, dayId, exId){
+  const d = tpGet(aId).days.find(d=>d.id===dayId); if (!d) return;
+  d.exercises = d.exercises.filter(e=>e.id!==exId); tpPersist(); renderTrainingProgram(athleteMap[aId]);
+}
+function tpUpdateExercise(aId, dayId, exId, field, val){
+  const d = tpGet(aId).days.find(d=>d.id===dayId); if (!d) return;
+  const e = d.exercises.find(e=>e.id===exId); if (!e) return;
+  e[field] = val; tpPersist();
+}
+function renderTrainingProgram(a){
+  const root = document.getElementById('tpProgramRoot'); if (!root) return;
+  const p = tpGet(a.id);
+  root.innerHTML = `
+    <div class="rpt-section-title" style="margin-top:24px;">Training Program</div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0 12px;">
+      <input type="text" placeholder="Program title (e.g. 'Pre-Season Block 2')" value="${(p.title||'').replace(/"/g,'&quot;')}" oninput="tpSetTitle('${a.id}',this.value)" style="flex:1;min-width:200px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;">
+      <button class="btn-sm" onclick="tpAddDay('${a.id}')">+ Add Day</button>
+      <button class="btn-sm" onclick="openTrainingProgramReport('${a.id}')">🖨 Print</button>
+      <span id="tpSavedIndicator" style="font-size:11px;color:var(--text-muted);"></span>
+    </div>
+    ${!p.days.length ? '<p class="hint" style="padding:8px 4px;">No days added yet — click "+ Add Day" to start writing a program.</p>' : p.days.map(d=>`
+      <div style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:12px;">
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+          <input type="text" value="${d.name.replace(/"/g,'&quot;')}" oninput="tpUpdateDayName('${a.id}','${d.id}',this.value)" style="font-weight:700;font-size:13.5px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;flex:1;max-width:240px;">
+          <button class="btn-sm" style="color:#c8483d;" onclick="tpDeleteDay('${a.id}','${d.id}')">Delete Day</button>
+        </div>
+        <div style="overflow-x:auto;">
+        <table class="mp-table" style="width:100%;min-width:520px;">
+          <thead><tr><th>Exercise</th><th>Sets</th><th>Reps</th><th>Load</th><th>Notes</th><th></th></tr></thead>
+          <tbody>
+          ${d.exercises.map(e=>`<tr>
+            <td><input value="${(e.name||'').replace(/"/g,'&quot;')}" oninput="tpUpdateExercise('${a.id}','${d.id}','${e.id}','name',this.value)" style="width:180px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;"></td>
+            <td><input value="${(e.sets||'').replace(/"/g,'&quot;')}" oninput="tpUpdateExercise('${a.id}','${d.id}','${e.id}','sets',this.value)" style="width:50px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;"></td>
+            <td><input value="${(e.reps||'').replace(/"/g,'&quot;')}" oninput="tpUpdateExercise('${a.id}','${d.id}','${e.id}','reps',this.value)" style="width:60px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;"></td>
+            <td><input value="${(e.load||'').replace(/"/g,'&quot;')}" oninput="tpUpdateExercise('${a.id}','${d.id}','${e.id}','load',this.value)" style="width:80px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;"></td>
+            <td><input value="${(e.notes||'').replace(/"/g,'&quot;')}" oninput="tpUpdateExercise('${a.id}','${d.id}','${e.id}','notes',this.value)" style="width:160px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;"></td>
+            <td><button class="btn-sm" style="color:#c8483d;" onclick="tpDeleteExercise('${a.id}','${d.id}','${e.id}')">✕</button></td>
+          </tr>`).join('')}
+          </tbody>
+        </table>
+        </div>
+        <button class="btn-sm" style="margin-top:8px;" onclick="tpAddExercise('${a.id}','${d.id}')">+ Add Exercise</button>
+      </div>
+    `).join('')}`;
+}
+function openTrainingProgramReport(aId){
+  const a = athleteMap[aId]; if (!a) return;
+  reportKind = 'program';
+  mpSetLandscape(false);
+  document.getElementById('rptTrainingControls').style.display = 'none';
+  document.getElementById('reportContent').innerHTML = buildTrainingProgramReportHtml(a);
+  document.getElementById('overlayReport').classList.add('show');
+}
+function buildTrainingProgramReportHtml(a){
+  const p = tpGet(a.id);
+  const genDate = new Date().toLocaleDateString('en-AU', {day:'numeric', month:'short', year:'numeric'});
+  let html = `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">${a.name}</div><div class="rpt-sub">${p.title||'Training Program'} · Brisbane Roar · ${genDate}</div></div>${ROAR_LOGO_SVG}</div>`;
+  if (!p.days.length){
+    html += `<p style="padding:20px 4px;color:var(--text-muted);">No program written yet.</p>`;
+  } else {
+    p.days.forEach(d=>{
+      html += `<div class="chart-block"><div class="rpt-section-title">${d.name}</div>
+        <table class="rpt-table"><thead><tr><th>Exercise</th><th>Sets</th><th>Reps</th><th>Load</th><th>Notes</th></tr></thead><tbody>
+        ${d.exercises.length ? d.exercises.map(e=>`<tr><td class="lbl">${e.name||'—'}</td><td>${e.sets||'—'}</td><td>${e.reps||'—'}</td><td>${e.load||'—'}</td><td>${e.notes||''}</td></tr>`).join('') : '<tr><td colspan="5" style="color:var(--text-muted);">No exercises added.</td></tr>'}
+        </tbody></table></div>`;
+    });
+  }
+  return html;
 }
 // Groups raw drill-level rows into session-level totals (same date +
 // session_label), since the trend/table views need session totals, not
