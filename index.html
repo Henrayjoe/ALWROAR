@@ -412,7 +412,7 @@
     <div class="alist" id="alist"><div style="padding:16px;font-size:12px;color:#7a8290;text-align:center">No players yet — add one, or import from a Google Sheet in Settings.</div></div>
     <div class="settings-bar"><span id="sheetStatus">No sheet imported</span><button class="btn-sm" onclick="showConfig()">⚙ Settings</button></div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-09-24 11:25</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-09-24 12:05</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -2312,6 +2312,7 @@ function switchTeamTab(t){
   if (t==='summary') setTimeout(()=>{ buildSummaryMetricOptions(); drawAthleteSummary(); },60);
   if (t==='minutesplan') setTimeout(renderMinutesPlan,60);
   if (t==='weekcompare') setTimeout(renderWeekCompare,60);
+  if (t==='gpscoverage') setTimeout(renderGpsCoverage,60);
 }
 
 // ============================================================
@@ -3024,6 +3025,7 @@ function renderTeam(){
         <div class="team-tab tab" data-t="summary" onclick="switchTeamTab('summary')">Athlete Summary</div>
         <div class="team-tab tab" data-t="minutesplan" onclick="switchTeamTab('minutesplan')">Minutes Plan</div>
         <div class="team-tab tab" data-t="weekcompare" onclick="switchTeamTab('weekcompare')">Week Comparison</div>
+        <div class="team-tab tab" data-t="gpscoverage" onclick="switchTeamTab('gpscoverage')">GPS Coverage</div>
       </div>
       <div class="team-tc tc active" data-t="squad"><div class="quad-body" style="padding-bottom:0;">
         <div class="quad-ctrl-row">${refToggleHtml('heatmap', refFrame.heatmap)}<span class="ref-note">Cell color = status against the selected reference. Toggle changes color only, not the raw values shown.</span></div>
@@ -3123,6 +3125,7 @@ function renderTeam(){
       <div id="summaryOutput" style="padding:0 20px 20px;"></div></div>
       <div class="team-tc tc" data-t="minutesplan"><div class="quad-body" id="minutesPlanRoot" style="padding:16px 20px;"></div></div>
       <div class="team-tc tc" data-t="weekcompare"><div class="quad-body" id="weekCompareRoot" style="padding:16px 20px;"></div></div>
+      <div class="team-tc tc" data-t="gpscoverage"><div class="quad-body" id="gpsCoverageRoot" style="padding:16px 20px;"></div></div>
     </div>`;
   buildSquadTable();
   buildTeamTrendMetricOptions();
@@ -5940,6 +5943,138 @@ function renderWeekCompare(){
       <select class="axis-select" onchange="setWcSort(this.value)">${sortOpts}</select>
     </div>
     <div class="mp-table-wrap"><table class="mp-table"><thead><tr>${head}</tr></thead><tbody>${body || `<tr><td class="mp-sticky" colspan="${1+keys.length*3}" style="color:var(--text-muted);">No players trained in either week.</td></tr>`}</tbody></table></div>`;
+}
+
+// ============================================================
+// GPS COVERAGE — how many training sessions each athlete has GPS data
+// for, versus sessions they trained but the GPS wasn't working.
+// The data alone can't tell "didn't train" from "trained, GPS failed"
+// (both are just a missing row), so this uses the SAME per-player-per-day
+// status marks as the daily report (STATUS_OVERRIDES): "No GPS" = trained
+// without working GPS, "Did Not Train" = wasn't there. Anything with no
+// data and no mark is shown as Unmarked so it's obvious what still needs
+// a call. Marking here shows up in the daily report too, and vice versa.
+// ============================================================
+let gcPeriod = 'all';   // 'all' or a week's Monday date string
+let gcGapsOnly = false;
+let gcCache = { dates:[], states:{} };
+const GC_LABEL = { gps:'GPS', nogps:'No GPS', dnt:'Did not train', unmarked:'Unmarked' };
+const GC_STYLE = {
+  gps:      { bg:'var(--c-exceeds-bg)',  text:'var(--c-exceeds-text)' },
+  nogps:    { bg:'var(--c-meets-bg)',    text:'var(--c-meets-text)' },
+  dnt:      { bg:'var(--surface-alt)',   text:'var(--text-muted)' },
+  unmarked: { bg:'var(--c-near-bg)',     text:'var(--c-near-text)' },
+};
+function gcComputeStates(players, dates){
+  const states = {}; players.forEach(a=>{ states[a.id] = {}; });
+  dates.forEach(dt=>{
+    const { playerTotals } = daySquadBreakdown(players, dt);
+    const hasData = new Set(playerTotals.filter(t=>t.duration>0).map(t=>t.id));
+    const labelById = {};
+    participationStatus(players, dt, playerTotals).forEach(s=>{ labelById[s.id] = s.label; });
+    players.forEach(a=>{
+      const label = labelById[a.id], data = hasData.has(a.id);
+      let st;
+      if (label==='No GPS') st = 'nogps';                                   // marked: trained, GPS not usable
+      else if (data) st = 'gps';
+      else if (['Full','Partial','Rehab'].includes(label)) st = 'nogps';     // marked as participating but no data exists
+      else st = STATUS_OVERRIDES[`${dt}|${a.id}`]==='Did Not Train' ? 'dnt' : 'unmarked';
+      states[a.id][dt] = { st, data };
+    });
+  });
+  return states;
+}
+function gcMark(dt, aId, kind){
+  const key = `${dt}|${aId}`;
+  if (kind==='nogps') STATUS_OVERRIDES[key] = 'No GPS';
+  else if (kind==='dnt') STATUS_OVERRIDES[key] = 'Did Not Train';
+  else delete STATUS_OVERRIDES[key]; // 'unmarked' / 'gps' -> back to whatever the data says
+  persist(); renderGpsCoverage();
+}
+// Marks every still-unmarked session (in the dates currently shown) for one athlete.
+function gcBulk(aId, kind){
+  gcCache.dates.forEach(dt=>{
+    const cell = (gcCache.states[aId]||{})[dt];
+    if (cell && cell.st==='unmarked') STATUS_OVERRIDES[`${dt}|${aId}`] = kind==='nogps' ? 'No GPS' : 'Did Not Train';
+  });
+  persist(); renderGpsCoverage();
+}
+function setGcPeriod(v){ gcPeriod = v; renderGpsCoverage(); }
+function setGcGapsOnly(v){ gcGapsOnly = v; renderGpsCoverage(); }
+function renderGpsCoverage(){
+  const root = document.getElementById('gpsCoverageRoot'); if (!root) return;
+  const players = Object.values(athleteMap).filter(a=>genderFilterVal==='all'||a.gender===genderFilterVal).sort((a,b)=>a.name.localeCompare(b.name));
+  const allDates = trainingSessionDates(players);
+  if (!allDates.length){
+    root.innerHTML = `<div class="quad-ctrl-row"><span class="control-label">GPS Coverage</span></div><p class="hint" style="padding:12px 4px;">No training GPS data yet.</p>`;
+    return;
+  }
+  const weeks = computeCalendarWeeks(players).filter(w=>allDates.some(d=>d>=w.monday && d<=w.sunday));
+  if (gcPeriod!=='all' && !weeks.some(w=>w.monday===gcPeriod)) gcPeriod = 'all';
+  const wk = gcPeriod==='all' ? null : weeks.find(w=>w.monday===gcPeriod);
+  const dates = wk ? allDates.filter(d=>d>=wk.monday && d<=wk.sunday) : allDates;
+  const states = gcComputeStates(players, dates);
+  gcCache = { dates, states };
+
+  const counts = {};
+  players.forEach(a=>{
+    const c = { gps:0, nogps:0, dnt:0, unmarked:0 };
+    dates.forEach(dt=>{ c[states[a.id][dt].st]++; });
+    const trained = c.gps + c.nogps;
+    c.coverage = trained ? (c.gps/trained)*100 : null;
+    counts[a.id] = c;
+  });
+  const tot = { gps:0, nogps:0, unmarked:0 };
+  players.forEach(a=>{ tot.gps += counts[a.id].gps; tot.nogps += counts[a.id].nogps; tot.unmarked += counts[a.id].unmarked; });
+  const totTrained = tot.gps + tot.nogps;
+  const shown = players.filter(a=>!gcGapsOnly || counts[a.id].nogps>0 || counts[a.id].unmarked>0);
+
+  const dateLabel = dt=>{
+    const d = new Date(dt+'T00:00:00').toLocaleDateString('en-AU', {weekday:'short', day:'numeric', month:'short'});
+    const lbl = (SESSION_META[dt]||{}).sessionLabel;
+    return `${d}${lbl?`<div class="wc-sub">${lbl}</div>`:''}`;
+  };
+  const cellHtml = (dt, a)=>{
+    const cell = states[a.id][dt], s = GC_STYLE[cell.st];
+    if (cell.st==='gps') return `<td style="background:${s.bg};color:${s.text};text-align:center;font-weight:700;" title="GPS data recorded">✓</td>`;
+    const opts = cell.data ? [['gps','GPS ✓'],['nogps','No GPS']] : [['unmarked','Unmarked'],['nogps','No GPS'],['dnt','Didn’t train']];
+    return `<td style="background:${s.bg};padding:3px 5px;"><select onchange="gcMark('${dt}','${a.id}',this.value)" title="${cell.data?'GPS data exists but is marked unreliable':'No GPS data for this session'}" style="font-size:10.5px;font-weight:700;padding:2px 3px;border:1px solid var(--border);border-radius:4px;background:transparent;color:${s.text};">${opts.map(([v,l])=>`<option value="${v}" ${v===cell.st?'selected':''}>${l}</option>`).join('')}</select></td>`;
+  };
+  const rowsHtml = shown.map(a=>{
+    const c = counts[a.id];
+    const covCol = c.coverage==null ? 'var(--text-muted)' : (c.coverage>=100 ? 'var(--c-exceeds-text)' : 'var(--c-near-text)');
+    return `<tr><td class="mp-sticky">${a.name}</td>
+      <td style="text-align:center;font-weight:700;">${c.gps}</td>
+      <td style="text-align:center;${c.nogps?'font-weight:700;color:var(--c-meets-text);':'color:var(--text-muted);'}">${c.nogps||'—'}</td>
+      <td style="text-align:center;${c.unmarked?'font-weight:700;color:var(--c-near-text);':'color:var(--text-muted);'}">${c.unmarked||'—'}</td>
+      <td style="text-align:center;color:var(--text-muted);">${c.dnt||'—'}</td>
+      <td style="text-align:center;font-weight:700;color:${covCol};">${c.coverage==null?'—':Math.round(c.coverage)+'%'}</td>
+      <td style="white-space:nowrap;">${c.unmarked?`<button class="btn-sm" title="Mark all ${c.unmarked} unmarked session${c.unmarked===1?'':'s'} as Did not train" onclick="gcBulk('${a.id}','dnt')">→ Didn’t train</button> <button class="btn-sm" title="Mark all ${c.unmarked} unmarked session${c.unmarked===1?'':'s'} as trained, no GPS" onclick="gcBulk('${a.id}','nogps')">→ No GPS</button>`:''}</td>
+      ${dates.map(dt=>cellHtml(dt,a)).join('')}</tr>`;
+  }).join('');
+
+  root.innerHTML = `
+    <div class="quad-ctrl-row">
+      <span class="control-label">GPS Coverage</span>
+      <span class="ref-note">How many training sessions each athlete has GPS for, and where a session has no GPS data. Use the dropdown in a cell to say whether she trained without working GPS ("No GPS") or wasn't there ("Didn’t train") — this is the same status as in the daily report, so it stays in sync.</span>
+    </div>
+    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:10px 0;">
+      <span style="font-size:11px;color:var(--text-muted);">Period</span>
+      <select class="axis-select" onchange="setGcPeriod(this.value)"><option value="all" ${gcPeriod==='all'?'selected':''}>All sessions (${allDates.length})</option>${weeks.map(w=>`<option value="${w.monday}" ${w.monday===gcPeriod?'selected':''}>Week ${w.n} (${w.monday} – ${w.sunday})</option>`).join('')}</select>
+      <label style="font-size:12px;display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" ${gcGapsOnly?'checked':''} onchange="setGcGapsOnly(this.checked)">Only athletes with a gap (No GPS or Unmarked)</label>
+    </div>
+    <div class="wc-grid">
+      <div class="wc-card"><div class="wc-card-label">Training sessions</div><div class="wc-card-pct">${dates.length}</div><div class="wc-sub">${wk?`Week ${wk.n}`:'All sessions on record'}</div></div>
+      <div class="wc-card"><div class="wc-card-label">Athlete-sessions with GPS</div><div class="wc-card-pct" style="color:var(--c-exceeds-text);">${tot.gps}</div><div class="wc-sub">${totTrained?`${Math.round(tot.gps/totTrained*100)}% of sessions athletes trained`:'—'}</div></div>
+      <div class="wc-card"><div class="wc-card-label">Trained, no GPS</div><div class="wc-card-pct" style="color:var(--c-meets-text);">${tot.nogps}</div><div class="wc-sub">marked as “No GPS”</div></div>
+      <div class="wc-card"><div class="wc-card-label">Unmarked</div><div class="wc-card-pct" style="color:${tot.unmarked?'var(--c-near-text)':'var(--text-muted)'};">${tot.unmarked}</div><div class="wc-sub">no data and not marked — need a call</div></div>
+    </div>
+    <div class="chart-note" style="margin-bottom:12px;"><span>▪ Coverage = GPS sessions ÷ (GPS + No GPS) — unmarked sessions aren't counted either way until you mark them.</span><span>▪ A session only appears here if at least one athlete has GPS data for that date.</span></div>
+    <div class="mp-table-wrap"><table class="mp-table"><thead><tr>
+      <th class="mp-sticky">Athlete</th>
+      <th title="Sessions with GPS data">GPS</th><th title="Trained but GPS wasn't working (marked)">No GPS</th><th title="No data and not marked yet">Unmarked</th><th title="Marked as not there">Didn’t train</th><th title="GPS ÷ (GPS + No GPS)">Coverage</th><th>Mark all unmarked</th>
+      ${dates.map(dt=>`<th style="text-align:center;">${dateLabel(dt)}</th>`).join('')}
+    </tr></thead><tbody>${rowsHtml || `<tr><td class="mp-sticky" colspan="${7+dates.length}" style="color:var(--text-muted);">No athletes with gaps in this period.</td></tr>`}</tbody></table></div>`;
 }
 
 // ============================================================
