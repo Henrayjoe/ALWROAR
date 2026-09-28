@@ -75,6 +75,17 @@
   .mp-target-input { width:60px; }
   .mp-notes-input { width:150px; padding:3px 7px; border:1px solid var(--border); border-radius:4px; font-size:12px; }
   .mp-warn-icon { position:absolute; top:1px; right:2px; font-size:10px; color:#c8483d; cursor:help; }
+  .wc-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:12px; margin:14px 0; }
+  .wc-card { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:14px 16px; }
+  .wc-card-label { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--text-muted); }
+  .wc-card-pct { font-size:28px; font-weight:800; margin:4px 0; line-height:1.1; }
+  .wc-card-vals { display:flex; justify-content:space-between; gap:8px; font-size:12px; color:var(--text-secondary); margin-top:4px; flex-wrap:wrap; }
+  .wc-sub { font-size:10.5px; font-weight:400; color:var(--text-muted); }
+  .wc-tag { font-size:9.5px; font-weight:700; padding:1px 6px; border-radius:8px; background:var(--c-near-bg); color:var(--c-near-text); margin-left:4px; }
+  .wc-bar-track { position:relative; height:8px; background:var(--surface-alt); border-radius:4px; margin:8px 0; }
+  .wc-bar-track.sm { height:5px; width:76px; margin:3px 0 0 auto; }
+  .wc-bar-mid { position:absolute; left:50%; top:-2px; bottom:-2px; width:1px; background:var(--text-muted); opacity:.5; }
+  .wc-bar-fill { position:absolute; top:0; bottom:0; border-radius:4px; }
   .composite-picker label { display:flex; align-items:center; gap:5px; font-size:11.5px; background:#fff; border:1px solid var(--border); border-radius:6px; padding:4px 8px; cursor:pointer; }
   .lb-mode-toggle { display:inline-flex; gap:4px; background:var(--surface-alt); padding:3px; border-radius:8px; border:1px solid var(--border); }
   .lb-mode-toggle button { border:none; background:transparent; padding:6px 12px; border-radius:6px; font-size:11.5px; font-weight:600; color:var(--text-muted); cursor:pointer; transition:background 0.22s ease, color 0.22s ease, transform 0.15s ease; }
@@ -401,7 +412,7 @@
     <div class="alist" id="alist"><div style="padding:16px;font-size:12px;color:#7a8290;text-align:center">No players yet — add one, or import from a Google Sheet in Settings.</div></div>
     <div class="settings-bar"><span id="sheetStatus">No sheet imported</span><button class="btn-sm" onclick="showConfig()">⚙ Settings</button></div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-09-24 10:50</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-09-24 11:25</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -2300,6 +2311,7 @@ function switchTeamTab(t){
   if (t==='mas') setTimeout(drawTeamMasView,60);
   if (t==='summary') setTimeout(()=>{ buildSummaryMetricOptions(); drawAthleteSummary(); },60);
   if (t==='minutesplan') setTimeout(renderMinutesPlan,60);
+  if (t==='weekcompare') setTimeout(renderWeekCompare,60);
 }
 
 // ============================================================
@@ -3011,6 +3023,7 @@ function renderTeam(){
         <div class="team-tab tab" data-t="mas" onclick="switchTeamTab('mas')">MAS / Conditioning</div>
         <div class="team-tab tab" data-t="summary" onclick="switchTeamTab('summary')">Athlete Summary</div>
         <div class="team-tab tab" data-t="minutesplan" onclick="switchTeamTab('minutesplan')">Minutes Plan</div>
+        <div class="team-tab tab" data-t="weekcompare" onclick="switchTeamTab('weekcompare')">Week Comparison</div>
       </div>
       <div class="team-tc tc active" data-t="squad"><div class="quad-body" style="padding-bottom:0;">
         <div class="quad-ctrl-row">${refToggleHtml('heatmap', refFrame.heatmap)}<span class="ref-note">Cell color = status against the selected reference. Toggle changes color only, not the raw values shown.</span></div>
@@ -3109,6 +3122,7 @@ function renderTeam(){
       </div>
       <div id="summaryOutput" style="padding:0 20px 20px;"></div></div>
       <div class="team-tc tc" data-t="minutesplan"><div class="quad-body" id="minutesPlanRoot" style="padding:16px 20px;"></div></div>
+      <div class="team-tc tc" data-t="weekcompare"><div class="quad-body" id="weekCompareRoot" style="padding:16px 20px;"></div></div>
     </div>`;
   buildSquadTable();
   buildTeamTrendMetricOptions();
@@ -5746,6 +5760,186 @@ function buildMinutesPlanReportHtml(){
     <tbody>${bodyRows}</tbody></table>
     <div class="rpt-section-title" style="margin-top:16px;">Budget Check</div>
     <table class="rpt-table"><thead><tr><th></th>${games.map(g=>`<th>${g.name}</th>`).join('')}</tr></thead><tbody>${budgetRows}</tbody></table>`;
+}
+
+// ============================================================
+// WEEK COMPARISON — compare weekly load (TD / HSR / Sprint distance)
+// between any two Monday-start calendar weeks: squad summary as % change,
+// then player by player. Read-only view built from the existing training
+// GPS data -- doesn't store or change anything.
+// ============================================================
+const WC_METRICS = {
+  distance: { short:'TD',     label:'Total Distance',      unit:'m' },
+  hsr:      { short:'HSR',    label:'High Speed Running',  unit:'m' },
+  sprint:   { short:'Sprint', label:'Sprint Distance',     unit:'m' },
+};
+const WC_UP = '#f26522', WC_DOWN = '#3d6fb0'; // neutral colours: higher/lower than the baseline week, not good/bad
+let wcMetrics = new Set(['distance','hsr','sprint']);
+let wcWeekA = null, wcWeekB = null; // Monday date strings: A = baseline, B = comparison
+let wcMode = 'total';               // 'total' | 'perSession'
+let wcFullOnly = true;
+let wcSort = 'name';                // 'name' | '<metric>:desc' | '<metric>:asc'
+function wcNum(v){
+  if (v==null) return '—';
+  return Math.abs(v)>=100 ? Math.round(v).toLocaleString('en-AU') : (Math.round(v*10)/10).toLocaleString('en-AU');
+}
+function wcPctText(p){ return p==null ? '—' : `${p>=0?'+':''}${p.toFixed(1)}%`; }
+// Centre-zero bar: orange grows right (higher than baseline), blue grows
+// left (lower). The full half-width represents +/-50%; anything beyond is
+// capped visually (the number always shows the real value).
+function wcBar(pct, small){
+  if (pct==null) return '';
+  const w = Math.min(Math.abs(pct), 50);
+  const style = pct>=0 ? `left:50%;width:${w}%;background:${WC_UP};` : `left:${50-w}%;width:${w}%;background:${WC_DOWN};`;
+  return `<div class="wc-bar-track${small?' sm':''}"><div class="wc-bar-mid"></div><div class="wc-bar-fill" style="${style}"></div></div>`;
+}
+// Players who did a reduced/modified session on any training day in these
+// weeks (Partial, Rehab or No GPS status) -- excluded from the squad
+// averages, same principle as the weekly report, so a rehab player's very
+// different load doesn't skew the squad % change. Still shown in the table.
+function wcNonFullPlayers(players, weekObjs){
+  const flagged = new Map(); // athleteId -> Set(status labels)
+  const dates = trainingSessionDates(players).filter(d=>weekObjs.some(w=>d>=w.monday && d<=w.sunday));
+  dates.forEach(dt=>{
+    const { playerTotals } = daySquadBreakdown(players, dt);
+    participationStatus(players, dt, playerTotals).forEach(s=>{
+      if (['Partial','Rehab','No GPS'].includes(s.label)){
+        if (!flagged.has(s.id)) flagged.set(s.id, new Set());
+        flagged.get(s.id).add(s.label);
+      }
+    });
+  });
+  return flagged;
+}
+function setWcWeek(which, val){ if (which==='A') wcWeekA = val; else wcWeekB = val; renderWeekCompare(); }
+function swapWcWeeks(){ const t = wcWeekA; wcWeekA = wcWeekB; wcWeekB = t; renderWeekCompare(); }
+function toggleWcMetric(k, on){ if (on) wcMetrics.add(k); else if (wcMetrics.size>1) wcMetrics.delete(k); renderWeekCompare(); }
+function setWcMode(m){ wcMode = m; renderWeekCompare(); }
+function setWcFullOnly(v){ wcFullOnly = v; renderWeekCompare(); }
+function setWcSort(v){ wcSort = v; renderWeekCompare(); }
+function renderWeekCompare(){
+  const root = document.getElementById('weekCompareRoot'); if (!root) return;
+  const players = Object.values(athleteMap).filter(a=>genderFilterVal==='all'||a.gender===genderFilterVal);
+  const weeks = computeCalendarWeeks(players);
+  if (!weeks.length){
+    root.innerHTML = `<div class="quad-ctrl-row"><span class="control-label">Week Comparison</span></div><p class="hint" style="padding:12px 4px;">No training GPS data yet — nothing to compare.</p>`;
+    return;
+  }
+  const mondays = weeks.map(w=>w.monday);
+  if (!mondays.includes(wcWeekB)) wcWeekB = mondays[mondays.length-1];
+  if (!mondays.includes(wcWeekA)) wcWeekA = mondays.length>1 ? mondays[mondays.length-2] : mondays[0];
+  const wA = weeks.find(w=>w.monday===wcWeekA), wB = weeks.find(w=>w.monday===wcWeekB);
+  const keys = Object.keys(WC_METRICS).filter(k=>wcMetrics.has(k));
+  if (wcSort!=='name' && !keys.includes(wcSort.split(':')[0])) wcSort = 'name';
+  const wk = w=>`Wk ${w.n}`;
+
+  const allDates = trainingSessionDates(players);
+  const sessionsIn = w => allDates.filter(d=>d>=w.monday && d<=w.sunday).length;
+  const sessA = sessionsIn(wA), sessB = sessionsIn(wB);
+  const nonFull = wcFullOnly ? wcNonFullPlayers(players, [wA,wB]) : new Map();
+
+  // A player who didn't train that week has no value (null) -- not 0 --
+  // so "didn't train" and "trained but ran 0m of sprints" stay distinct.
+  const val = (l,k)=> l.sessionCount ? (wcMode==='perSession' ? l[k]/l.sessionCount : l[k]) : null;
+  const rows = players.filter(a=>a.trainingGps && a.trainingGps.length).map(a=>{
+    const la = weeklyLoadCalendar(a, wA.monday), lb = weeklyLoadCalendar(a, wB.monday);
+    const m = {};
+    keys.forEach(k=>{
+      const x = val(la,k), y = val(lb,k);
+      m[k] = { a:x, b:y, pct:(x!=null && y!=null && x>0) ? ((y-x)/x)*100 : null };
+    });
+    return { a, m, inA:la.sessionCount>0, inB:lb.sessionCount>0, excluded:nonFull.get(a.id)||null };
+  }).filter(r=>r.inA || r.inB);
+
+  // Squad summary: like-for-like -- only players with training in BOTH
+  // weeks (and not excluded), so a different set of players in each week
+  // can't masquerade as a load change.
+  const paired = rows.filter(r=>r.inA && r.inB && !r.excluded);
+  const summary = {};
+  keys.forEach(k=>{
+    const n = paired.length;
+    const meanA = n ? paired.reduce((s,r)=>s+r.m[k].a,0)/n : null;
+    const meanB = n ? paired.reduce((s,r)=>s+r.m[k].b,0)/n : null;
+    summary[k] = { n, meanA, meanB, pct:(n && meanA>0) ? ((meanB-meanA)/meanA)*100 : null };
+  });
+  const onlyOne = rows.filter(r=>r.inA!==r.inB).length;
+  const excludedN = rows.filter(r=>r.excluded && r.inA && r.inB).length;
+
+  const [sk, dir] = wcSort.split(':');
+  rows.sort((x,y)=>{
+    if (sk==='name') return x.a.name.localeCompare(y.a.name);
+    const px = x.m[sk].pct, py = y.m[sk].pct;
+    if (px==null && py==null) return x.a.name.localeCompare(y.a.name);
+    if (px==null) return 1;
+    if (py==null) return -1;
+    return dir==='asc' ? px-py : py-px;
+  });
+
+  const weekOpts = sel => weeks.map(w=>`<option value="${w.monday}" ${w.monday===sel?'selected':''}>Week ${w.n} (${w.monday} – ${w.sunday})</option>`).join('');
+  const cards = keys.map(k=>{
+    const s = summary[k], info = WC_METRICS[k];
+    const col = s.pct==null ? 'var(--text-muted)' : (s.pct>=0 ? WC_UP : WC_DOWN);
+    const arrow = s.pct==null ? '' : s.pct>0 ? '▲ ' : s.pct<0 ? '▼ ' : '';
+    return `<div class="wc-card">
+      <div class="wc-card-label">${info.label}</div>
+      <div class="wc-card-pct" style="color:${col};">${s.pct==null ? '—' : arrow+wcPctText(s.pct)}</div>
+      ${wcBar(s.pct,false)}
+      <div class="wc-card-vals"><span>${wk(wA)}: <b>${wcNum(s.meanA)}</b> ${info.unit}</span><span>${wk(wB)}: <b>${wcNum(s.meanB)}</b> ${info.unit}</span></div>
+      <div class="wc-sub">${s.n ? `Average per player · n=${s.n} in both weeks` : 'No player trained in both weeks'}</div>
+    </div>`;
+  }).join('');
+
+  const head = `<th class="mp-sticky">Player</th>` + keys.map(k=>{
+    const s = WC_METRICS[k].short;
+    return `<th style="text-align:right;">${s}<div class="wc-sub">${wk(wA)}</div></th><th style="text-align:right;">${s}<div class="wc-sub">${wk(wB)}</div></th><th style="text-align:right;">${s}<div class="wc-sub">Δ %</div></th>`;
+  }).join('');
+  const body = rows.map(r=>{
+    const tag = r.excluded ? `<span class="wc-tag" title="Left out of the squad averages above (${[...r.excluded].join(', ')} status on a training day in these weeks)">${[...r.excluded].join(' · ')}</span>` : '';
+    return `<tr><td class="mp-sticky">${r.a.name}${tag}</td>` + keys.map(k=>{
+      const c = r.m[k];
+      const col = c.pct==null ? 'var(--text-muted)' : (c.pct>=0 ? WC_UP : WC_DOWN);
+      return `<td style="text-align:right;">${wcNum(c.a)}</td><td style="text-align:right;">${wcNum(c.b)}</td><td style="text-align:right;min-width:92px;"><div style="font-weight:700;color:${col};">${wcPctText(c.pct)}</div>${wcBar(c.pct,true)}</td>`;
+    }).join('') + `</tr>`;
+  }).join('');
+
+  const sortOpts = [`<option value="name" ${wcSort==='name'?'selected':''}>Name (A–Z)</option>`]
+    .concat(keys.flatMap(k=>[
+      `<option value="${k}:desc" ${wcSort===k+':desc'?'selected':''}>${WC_METRICS[k].short} Δ% — highest first</option>`,
+      `<option value="${k}:asc" ${wcSort===k+':asc'?'selected':''}>${WC_METRICS[k].short} Δ% — lowest first</option>`,
+    ])).join('');
+
+  const mismatch = (wcMode==='total' && sessA!==sessB && wA.monday!==wB.monday)
+    ? `<div style="background:var(--c-near-bg);color:var(--c-near-text);border-radius:8px;padding:8px 12px;font-size:12px;margin-bottom:12px;">⚠ ${wk(wA)} had ${sessA} training session${sessA===1?'':'s'} and ${wk(wB)} had ${sessB} — weekly totals will differ partly just because of that. Switch to <b>Per-session average</b> for a like-for-like comparison.</div>` : '';
+  const sameWeek = wA.monday===wB.monday ? `<div class="hint" style="padding:0 0 10px;">Both weeks are the same — pick two different weeks to see a change.</div>` : '';
+
+  root.innerHTML = `
+    <div class="quad-ctrl-row">
+      <span class="control-label">Week Comparison</span>
+      <span class="ref-note">Compare training load between any two Monday–Sunday weeks. % change is measured against the baseline week (first dropdown).</span>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:10px 0;">
+      <span style="font-size:11px;color:var(--text-muted);">Baseline</span>
+      <select class="axis-select" onchange="setWcWeek('A',this.value)">${weekOpts(wcWeekA)}</select>
+      <button class="btn-sm" title="Swap baseline and comparison weeks" onclick="swapWcWeeks()">⇄</button>
+      <span style="font-size:11px;color:var(--text-muted);">vs</span>
+      <select class="axis-select" onchange="setWcWeek('B',this.value)">${weekOpts(wcWeekB)}</select>
+    </div>
+    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
+      <div class="composite-picker" style="margin:0;">${Object.keys(WC_METRICS).map(k=>`<label><input type="checkbox" ${wcMetrics.has(k)?'checked':''} onchange="toggleWcMetric('${k}',this.checked)">${WC_METRICS[k].label}</label>`).join('')}</div>
+      <div class="lb-mode-toggle"><button class="${wcMode==='total'?'active':''}" onclick="setWcMode('total')">Weekly total</button><button class="${wcMode==='perSession'?'active':''}" onclick="setWcMode('perSession')">Per-session average</button></div>
+      <label style="font-size:12px;display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" ${wcFullOnly?'checked':''} onchange="setWcFullOnly(this.checked)">Full-status players only (squad averages)</label>
+    </div>
+    ${mismatch}${sameWeek}
+    <div class="wc-grid">${cards}</div>
+    <div class="chart-note" style="margin-bottom:14px;"><span>▪ Orange = higher than the baseline week, blue = lower (not good/bad — that depends on the plan). Bar scale: full half-width = ±50%.</span><span>▪ Squad figures are the average per player, using only players who trained in both weeks${excludedN?` (${excludedN} left out for Partial/Rehab/No GPS days)`:''}${onlyOne?` · ${onlyOne} player${onlyOne===1?'':'s'} trained in only one of the two weeks`:''}.</span></div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:6px 0 8px;">
+      <span class="control-label" style="margin:0;">Player by Player</span>
+      <span style="font-size:11px;color:var(--text-muted);">${wcMode==='perSession'?'Average per session':'Weekly total'}, metres</span>
+      <span style="flex:1;"></span>
+      <span style="font-size:11px;color:var(--text-muted);">Sort</span>
+      <select class="axis-select" onchange="setWcSort(this.value)">${sortOpts}</select>
+    </div>
+    <div class="mp-table-wrap"><table class="mp-table"><thead><tr>${head}</tr></thead><tbody>${body || `<tr><td class="mp-sticky" colspan="${1+keys.length*3}" style="color:var(--text-muted);">No players trained in either week.</td></tr>`}</tbody></table></div>`;
 }
 
 // ============================================================
