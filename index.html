@@ -412,7 +412,7 @@
     <div class="alist" id="alist"><div style="padding:16px;font-size:12px;color:#7a8290;text-align:center">No players yet — add one, or import from a Google Sheet in Settings.</div></div>
     <div class="settings-bar"><span id="sheetStatus">No sheet imported</span><button class="btn-sm" onclick="showConfig()">⚙ Settings</button></div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-09-24 12:05</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-09-24 12:40</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -5781,6 +5781,7 @@ let wcMetrics = new Set(['distance','hsr','sprint']);
 let wcWeekA = null, wcWeekB = null; // Monday date strings: A = baseline, B = comparison
 let wcMode = 'total';               // 'total' | 'perSession'
 let wcFullOnly = true;
+let wcSameSessions = true;      // weekly totals only: compare players with the same number of GPS sessions in both weeks
 let wcSort = 'name';                // 'name' | '<metric>:desc' | '<metric>:asc'
 function wcNum(v){
   if (v==null) return '—';
@@ -5796,30 +5797,14 @@ function wcBar(pct, small){
   const style = pct>=0 ? `left:50%;width:${w}%;background:${WC_UP};` : `left:${50-w}%;width:${w}%;background:${WC_DOWN};`;
   return `<div class="wc-bar-track${small?' sm':''}"><div class="wc-bar-mid"></div><div class="wc-bar-fill" style="${style}"></div></div>`;
 }
-// Players who did a reduced/modified session on any training day in these
-// weeks (Partial, Rehab or No GPS status) -- excluded from the squad
-// averages, same principle as the weekly report, so a rehab player's very
-// different load doesn't skew the squad % change. Still shown in the table.
-function wcNonFullPlayers(players, weekObjs){
-  const flagged = new Map(); // athleteId -> Set(status labels)
-  const dates = trainingSessionDates(players).filter(d=>weekObjs.some(w=>d>=w.monday && d<=w.sunday));
-  dates.forEach(dt=>{
-    const { playerTotals } = daySquadBreakdown(players, dt);
-    participationStatus(players, dt, playerTotals).forEach(s=>{
-      if (['Partial','Rehab','No GPS'].includes(s.label)){
-        if (!flagged.has(s.id)) flagged.set(s.id, new Set());
-        flagged.get(s.id).add(s.label);
-      }
-    });
-  });
-  return flagged;
-}
 function setWcWeek(which, val){ if (which==='A') wcWeekA = val; else wcWeekB = val; renderWeekCompare(); }
 function swapWcWeeks(){ const t = wcWeekA; wcWeekA = wcWeekB; wcWeekB = t; renderWeekCompare(); }
 function toggleWcMetric(k, on){ if (on) wcMetrics.add(k); else if (wcMetrics.size>1) wcMetrics.delete(k); renderWeekCompare(); }
 function setWcMode(m){ wcMode = m; renderWeekCompare(); }
 function setWcFullOnly(v){ wcFullOnly = v; renderWeekCompare(); }
+function setWcSameSessions(v){ wcSameSessions = v; renderWeekCompare(); }
 function setWcSort(v){ wcSort = v; renderWeekCompare(); }
+const WC_REASON_TEXT = { Partial:'Partial status on a training day', Rehab:'Rehab status on a training day', 'Sessions differ':'a different number of GPS sessions in the two weeks' };
 function renderWeekCompare(){
   const root = document.getElementById('weekCompareRoot'); if (!root) return;
   const players = Object.values(athleteMap).filter(a=>genderFilterVal==='all'||a.gender===genderFilterVal);
@@ -5837,26 +5822,46 @@ function renderWeekCompare(){
   const wk = w=>`Wk ${w.n}`;
 
   const allDates = trainingSessionDates(players);
-  const sessionsIn = w => allDates.filter(d=>d>=w.monday && d<=w.sunday).length;
-  const sessA = sessionsIn(wA), sessB = sessionsIn(wB);
-  const nonFull = wcFullOnly ? wcNonFullPlayers(players, [wA,wB]) : new Map();
-
-  // A player who didn't train that week has no value (null) -- not 0 --
-  // so "didn't train" and "trained but ran 0m of sprints" stay distinct.
-  const val = (l,k)=> l.sessionCount ? (wcMode==='perSession' ? l[k]/l.sessionCount : l[k]) : null;
-  const rows = players.filter(a=>a.trainingGps && a.trainingGps.length).map(a=>{
-    const la = weeklyLoadCalendar(a, wA.monday), lb = weeklyLoadCalendar(a, wB.monday);
+  const datesIn = w => allDates.filter(d=>d>=w.monday && d<=w.sunday);
+  const datesA = datesIn(wA), datesB = datesIn(wB);
+  // Same per-session GPS status as the GPS Coverage tab: a session only
+  // counts toward an athlete's weekly load if she actually has usable GPS
+  // for it (sessions marked "No GPS" or with no data are left out, and
+  // shown in the session counts instead).
+  const detail = gcComputeStates(players, [...new Set([...datesA, ...datesB])]);
+  const weekStats = (a, dates)=>{
+    const cells = dates.map(dt=>detail[a.id][dt]);
+    const gps = cells.filter(c=>c.st==='gps');
+    const sum = k => gps.reduce((s,c)=>s+(c.t ? c.t[k] : 0), 0);
+    return {
+      n:gps.length, teamN:dates.length,
+      nogps:cells.filter(c=>c.st==='nogps').length, unmarked:cells.filter(c=>c.st==='unmarked').length,
+      distance:sum('distance'), hsr:sum('hsr'), sprint:sum('sprint'),
+      nonFull:new Set(gps.map(c=>c.label).filter(l=>l==='Partial'||l==='Rehab')),
+    };
+  };
+  // No GPS session that week = no value (null), not 0 -- so "no GPS" and
+  // "ran 0m of sprints" stay distinct.
+  const val = (s,k)=> s.n ? (wcMode==='perSession' ? s[k]/s.n : s[k]) : null;
+  const rows = players.map(a=>{
+    const sa = weekStats(a, datesA), sb = weekStats(a, datesB);
     const m = {};
     keys.forEach(k=>{
-      const x = val(la,k), y = val(lb,k);
+      const x = val(sa,k), y = val(sb,k);
       m[k] = { a:x, b:y, pct:(x!=null && y!=null && x>0) ? ((y-x)/x)*100 : null };
     });
-    return { a, m, inA:la.sessionCount>0, inB:lb.sessionCount>0, excluded:nonFull.get(a.id)||null };
-  }).filter(r=>r.inA || r.inB);
+    const inA = sa.n>0, inB = sb.n>0;
+    const mismatch = inA && inB && sa.n!==sb.n;
+    const reasons = new Set();
+    if (wcFullOnly) [...sa.nonFull, ...sb.nonFull].forEach(l=>reasons.add(l));
+    if (wcMode==='total' && wcSameSessions && mismatch) reasons.add('Sessions differ');
+    return { a, sa, sb, m, inA, inB, mismatch, excluded: reasons.size ? reasons : null };
+  }).filter(r=>r.inA || r.inB || r.sa.nogps>0 || r.sb.nogps>0);
 
-  // Squad summary: like-for-like -- only players with training in BOTH
-  // weeks (and not excluded), so a different set of players in each week
-  // can't masquerade as a load change.
+  // Squad summary: like-for-like -- only athletes with GPS in BOTH weeks
+  // (and not left out for the reasons above), so a different set of
+  // athletes, or a different number of sessions, can't masquerade as a
+  // load change.
   const paired = rows.filter(r=>r.inA && r.inB && !r.excluded);
   const summary = {};
   keys.forEach(k=>{
@@ -5865,8 +5870,13 @@ function renderWeekCompare(){
     const meanB = n ? paired.reduce((s,r)=>s+r.m[k].b,0)/n : null;
     summary[k] = { n, meanA, meanB, pct:(n && meanA>0) ? ((meanB-meanA)/meanA)*100 : null };
   });
-  const onlyOne = rows.filter(r=>r.inA!==r.inB).length;
-  const excludedN = rows.filter(r=>r.excluded && r.inA && r.inB).length;
+  const pairedAll = rows.filter(r=>r.inA && r.inB);
+  const onlyOne = rows.filter(r=>r.inA!==r.inB && (r.inA||r.inB)).length;
+  const nNonFull = pairedAll.filter(r=>r.excluded && [...r.excluded].some(x=>x!=='Sessions differ')).length;
+  const nDiff = pairedAll.filter(r=>r.excluded && r.excluded.has('Sessions differ')).length;
+  const leftOut = [nNonFull?`${nNonFull} for Partial/Rehab days`:'', nDiff?`${nDiff} with a different number of GPS sessions`:''].filter(Boolean).join(', ');
+  const avgSess = key => { const xs = rows.filter(r=>r[key].n>0).map(r=>r[key].n); return xs.length ? xs.reduce((s,v)=>s+v,0)/xs.length : null; };
+  const sessLine = (w, ds, key)=>`<b>${wk(w)}</b>: ${ds.length} team session${ds.length===1?'':'s'} · athletes averaged ${avgSess(key)==null?'—':avgSess(key).toFixed(1)} with GPS`;
 
   const [sk, dir] = wcSort.split(':');
   rows.sort((x,y)=>{
@@ -5888,20 +5898,28 @@ function renderWeekCompare(){
       <div class="wc-card-pct" style="color:${col};">${s.pct==null ? '—' : arrow+wcPctText(s.pct)}</div>
       ${wcBar(s.pct,false)}
       <div class="wc-card-vals"><span>${wk(wA)}: <b>${wcNum(s.meanA)}</b> ${info.unit}</span><span>${wk(wB)}: <b>${wcNum(s.meanB)}</b> ${info.unit}</span></div>
-      <div class="wc-sub">${s.n ? `Average per player · n=${s.n} in both weeks` : 'No player trained in both weeks'}</div>
+      <div class="wc-sub">${s.n ? `Average per athlete · n=${s.n} with GPS in both weeks` : 'No athlete had GPS in both weeks'}</div>
     </div>`;
   }).join('');
 
-  const head = `<th class="mp-sticky">Player</th>` + keys.map(k=>{
-    const s = WC_METRICS[k].short;
-    return `<th style="text-align:right;">${s}<div class="wc-sub">${wk(wA)}</div></th><th style="text-align:right;">${s}<div class="wc-sub">${wk(wB)}</div></th><th style="text-align:right;">${s}<div class="wc-sub">Δ %</div></th>`;
-  }).join('');
+  const head = `<th class="mp-sticky">Player</th>`
+    + `<th style="text-align:center;" title="Sessions with GPS ÷ team training sessions that week">GPS sessions<div class="wc-sub">${wk(wA)}</div></th><th style="text-align:center;" title="Sessions with GPS ÷ team training sessions that week">GPS sessions<div class="wc-sub">${wk(wB)}</div></th>`
+    + keys.map(k=>{
+      const s = WC_METRICS[k].short;
+      return `<th style="text-align:right;">${s}<div class="wc-sub">${wk(wA)}</div></th><th style="text-align:right;">${s}<div class="wc-sub">${wk(wB)}</div></th><th style="text-align:right;">${s}<div class="wc-sub">Δ %</div></th>`;
+    }).join('');
+  const sessCell = (s, mismatch)=>{
+    const extra = [s.nogps?`${s.nogps} no GPS`:'', s.unmarked?`${s.unmarked} unmarked`:''].filter(Boolean).join(' · ');
+    return `<td style="text-align:center;white-space:nowrap;${mismatch?'background:var(--c-near-bg);color:var(--c-near-text);font-weight:700;':''}" title="${s.n} of ${s.teamN} team session${s.teamN===1?'':'s'} had usable GPS${extra?` (${extra})`:''}">${s.n}/${s.teamN}${extra?`<div class="wc-sub">${extra}</div>`:''}</td>`;
+  };
   const body = rows.map(r=>{
-    const tag = r.excluded ? `<span class="wc-tag" title="Left out of the squad averages above (${[...r.excluded].join(', ')} status on a training day in these weeks)">${[...r.excluded].join(' · ')}</span>` : '';
-    return `<tr><td class="mp-sticky">${r.a.name}${tag}</td>` + keys.map(k=>{
+    const why = r.excluded ? [...r.excluded].map(x=>WC_REASON_TEXT[x]||x).join('; ') : '';
+    const tag = r.excluded ? `<span class="wc-tag" title="Left out of the squad averages above (${why})">${[...r.excluded].join(' · ')}</span>` : '';
+    const warn = wcMode==='total' && r.mismatch;
+    return `<tr><td class="mp-sticky">${r.a.name}${tag}</td>${sessCell(r.sa, r.mismatch)}${sessCell(r.sb, r.mismatch)}` + keys.map(k=>{
       const c = r.m[k];
       const col = c.pct==null ? 'var(--text-muted)' : (c.pct>=0 ? WC_UP : WC_DOWN);
-      return `<td style="text-align:right;">${wcNum(c.a)}</td><td style="text-align:right;">${wcNum(c.b)}</td><td style="text-align:right;min-width:92px;"><div style="font-weight:700;color:${col};">${wcPctText(c.pct)}</div>${wcBar(c.pct,true)}</td>`;
+      return `<td style="text-align:right;">${wcNum(c.a)}</td><td style="text-align:right;">${wcNum(c.b)}</td><td style="text-align:right;min-width:92px;"><div style="font-weight:700;color:${col};"${warn?` title="${r.sa.n} GPS session${r.sa.n===1?'':'s'} in ${wk(wA)} vs ${r.sb.n} in ${wk(wB)} — weekly totals aren’t like-for-like. Switch to Per-session average."`:''}>${warn?'⚠ ':''}${wcPctText(c.pct)}</div>${wcBar(c.pct,true)}</td>`;
     }).join('') + `</tr>`;
   }).join('');
 
@@ -5911,14 +5929,14 @@ function renderWeekCompare(){
       `<option value="${k}:asc" ${wcSort===k+':asc'?'selected':''}>${WC_METRICS[k].short} Δ% — lowest first</option>`,
     ])).join('');
 
-  const mismatch = (wcMode==='total' && sessA!==sessB && wA.monday!==wB.monday)
-    ? `<div style="background:var(--c-near-bg);color:var(--c-near-text);border-radius:8px;padding:8px 12px;font-size:12px;margin-bottom:12px;">⚠ ${wk(wA)} had ${sessA} training session${sessA===1?'':'s'} and ${wk(wB)} had ${sessB} — weekly totals will differ partly just because of that. Switch to <b>Per-session average</b> for a like-for-like comparison.</div>` : '';
+  const mismatch = (wcMode==='total' && datesA.length!==datesB.length && wA.monday!==wB.monday)
+    ? `<div style="background:var(--c-near-bg);color:var(--c-near-text);border-radius:8px;padding:8px 12px;font-size:12px;margin-bottom:12px;">⚠ ${wk(wA)} had ${datesA.length} training session${datesA.length===1?'':'s'} and ${wk(wB)} had ${datesB.length} — weekly totals will differ partly just because of that. Switch to <b>Per-session average</b> for a like-for-like comparison.</div>` : '';
   const sameWeek = wA.monday===wB.monday ? `<div class="hint" style="padding:0 0 10px;">Both weeks are the same — pick two different weeks to see a change.</div>` : '';
 
   root.innerHTML = `
     <div class="quad-ctrl-row">
       <span class="control-label">Week Comparison</span>
-      <span class="ref-note">Compare training load between any two Monday–Sunday weeks. % change is measured against the baseline week (first dropdown).</span>
+      <span class="ref-note">Compare training load between any two Monday–Sunday weeks. % change is measured against the baseline week (first dropdown). Only sessions where the athlete has usable GPS are counted — see GPS Coverage to mark sessions with no GPS.</span>
     </div>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:10px 0;">
       <span style="font-size:11px;color:var(--text-muted);">Baseline</span>
@@ -5927,22 +5945,26 @@ function renderWeekCompare(){
       <span style="font-size:11px;color:var(--text-muted);">vs</span>
       <select class="axis-select" onchange="setWcWeek('B',this.value)">${weekOpts(wcWeekB)}</select>
     </div>
-    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
+    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
       <div class="composite-picker" style="margin:0;">${Object.keys(WC_METRICS).map(k=>`<label><input type="checkbox" ${wcMetrics.has(k)?'checked':''} onchange="toggleWcMetric('${k}',this.checked)">${WC_METRICS[k].label}</label>`).join('')}</div>
       <div class="lb-mode-toggle"><button class="${wcMode==='total'?'active':''}" onclick="setWcMode('total')">Weekly total</button><button class="${wcMode==='perSession'?'active':''}" onclick="setWcMode('perSession')">Per-session average</button></div>
-      <label style="font-size:12px;display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" ${wcFullOnly?'checked':''} onchange="setWcFullOnly(this.checked)">Full-status players only (squad averages)</label>
+    </div>
+    <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
+      <label style="font-size:12px;display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" ${wcFullOnly?'checked':''} onchange="setWcFullOnly(this.checked)">Full-status athletes only (squad averages)</label>
+      ${wcMode==='total' ? `<label style="font-size:12px;display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" ${wcSameSessions?'checked':''} onchange="setWcSameSessions(this.checked)">Weekly totals: only athletes with the same number of GPS sessions in both weeks</label>` : ''}
     </div>
     ${mismatch}${sameWeek}
+    <div class="chart-note" style="margin-bottom:10px;"><span>▪ ${sessLine(wA, datesA, 'sa')}</span><span>▪ ${sessLine(wB, datesB, 'sb')}</span></div>
     <div class="wc-grid">${cards}</div>
-    <div class="chart-note" style="margin-bottom:14px;"><span>▪ Orange = higher than the baseline week, blue = lower (not good/bad — that depends on the plan). Bar scale: full half-width = ±50%.</span><span>▪ Squad figures are the average per player, using only players who trained in both weeks${excludedN?` (${excludedN} left out for Partial/Rehab/No GPS days)`:''}${onlyOne?` · ${onlyOne} player${onlyOne===1?'':'s'} trained in only one of the two weeks`:''}.</span></div>
+    <div class="chart-note" style="margin-bottom:14px;"><span>▪ Orange = higher than the baseline week, blue = lower (not good/bad — that depends on the plan). Bar scale: full half-width = ±50%.</span><span>▪ Squad figures are the average per athlete, using only athletes with GPS in both weeks${leftOut?` (left out: ${leftOut})`:''}${onlyOne?` · ${onlyOne} athlete${onlyOne===1?'':'s'} had GPS in only one of the two weeks`:''}.</span></div>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:6px 0 8px;">
       <span class="control-label" style="margin:0;">Player by Player</span>
-      <span style="font-size:11px;color:var(--text-muted);">${wcMode==='perSession'?'Average per session':'Weekly total'}, metres</span>
+      <span style="font-size:11px;color:var(--text-muted);">${wcMode==='perSession'?'Average per GPS session':'Weekly total of GPS sessions'}, metres · “GPS sessions” = sessions with GPS ÷ team sessions that week</span>
       <span style="flex:1;"></span>
       <span style="font-size:11px;color:var(--text-muted);">Sort</span>
       <select class="axis-select" onchange="setWcSort(this.value)">${sortOpts}</select>
     </div>
-    <div class="mp-table-wrap"><table class="mp-table"><thead><tr>${head}</tr></thead><tbody>${body || `<tr><td class="mp-sticky" colspan="${1+keys.length*3}" style="color:var(--text-muted);">No players trained in either week.</td></tr>`}</tbody></table></div>`;
+    <div class="mp-table-wrap"><table class="mp-table"><thead><tr>${head}</tr></thead><tbody>${body || `<tr><td class="mp-sticky" colspan="${3+keys.length*3}" style="color:var(--text-muted);">No athletes had GPS in either week.</td></tr>`}</tbody></table></div>`;
 }
 
 // ============================================================
@@ -5970,6 +5992,7 @@ function gcComputeStates(players, dates){
   dates.forEach(dt=>{
     const { playerTotals } = daySquadBreakdown(players, dt);
     const hasData = new Set(playerTotals.filter(t=>t.duration>0).map(t=>t.id));
+    const totById = {}; playerTotals.forEach(t=>{ totById[t.id] = t; });
     const labelById = {};
     participationStatus(players, dt, playerTotals).forEach(s=>{ labelById[s.id] = s.label; });
     players.forEach(a=>{
@@ -5979,7 +6002,7 @@ function gcComputeStates(players, dates){
       else if (data) st = 'gps';
       else if (['Full','Partial','Rehab'].includes(label)) st = 'nogps';     // marked as participating but no data exists
       else st = STATUS_OVERRIDES[`${dt}|${a.id}`]==='Did Not Train' ? 'dnt' : 'unmarked';
-      states[a.id][dt] = { st, data };
+      states[a.id][dt] = { st, data, label, t: totById[a.id] || null };
     });
   });
   return states;
