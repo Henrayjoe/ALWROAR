@@ -412,7 +412,7 @@
     <div class="alist" id="alist"><div style="padding:16px;font-size:12px;color:#7a8290;text-align:center">No players yet — add one, or import from a Google Sheet in Settings.</div></div>
     <div class="settings-bar"><span id="sheetStatus">No sheet imported</span><button class="btn-sm" onclick="showConfig()">⚙ Settings</button></div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-09-30 06:25</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-09-30 06:45</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -6199,11 +6199,19 @@ let WARMUP_ROUTINES = { routines: [] };
 function wuNewId(){ return 'w'+Date.now()+Math.floor(Math.random()*1000); }
 function wuEnsureDefault(){
   if (!WARMUP_ROUTINES.routines.length){
-    WARMUP_ROUTINES.routines.push({ id:wuNewId(), name:'MD Warm Up Routine', targetMin:8, steps:[] });
+    WARMUP_ROUTINES.routines.push({ id:wuNewId(), name:'MD Warm Up Routine', targetDistance:0, steps:[] });
   }
 }
 function wuGet(rId){ return WARMUP_ROUTINES.routines.find(r=>r.id===rId); }
-function wuTotal(r){ return r.steps.reduce((s,x)=>s+(Number(x.duration)||0),0); }
+// Carries over any routine saved before this switched from minutes to
+// distance, so earlier numbers aren't silently lost -- just re-labelled.
+function wuMigrate(){
+  WARMUP_ROUTINES.routines.forEach(r=>{
+    if (r.targetDistance==null && r.targetMin!=null){ r.targetDistance = r.targetMin; delete r.targetMin; }
+    r.steps.forEach(s=>{ if (s.distance==null && s.duration!=null){ s.distance = s.duration; delete s.duration; } });
+  });
+}
+function wuTotal(r){ return r.steps.reduce((s,x)=>s+(Number(x.distance)||0),0); }
 let wuSaveTimer=null;
 function wuPersist(){
   const ind = document.getElementById('wuSavedIndicator'); if (ind) ind.textContent = 'Saving…';
@@ -6215,7 +6223,7 @@ function wuPersist(){
   }, 400);
 }
 function wuAddRoutine(){
-  WARMUP_ROUTINES.routines.push({ id:wuNewId(), name:`Routine ${WARMUP_ROUTINES.routines.length+1}`, targetMin:8, steps:[] });
+  WARMUP_ROUTINES.routines.push({ id:wuNewId(), name:`Routine ${WARMUP_ROUTINES.routines.length+1}`, targetDistance:0, steps:[] });
   wuPersist(); renderWarmup();
 }
 function wuDeleteRoutine(rId){
@@ -6225,12 +6233,12 @@ function wuDeleteRoutine(rId){
 }
 function wuUpdateRoutine(rId, field, val){
   const r = wuGet(rId); if (!r) return;
-  r[field] = field==='targetMin' ? (Number(val)||0) : val;
+  r[field] = field==='targetDistance' ? (Number(val)||0) : val;
   wuPersist(); renderWarmup();
 }
 function wuAddStep(rId){
   const r = wuGet(rId); if (!r) return;
-  r.steps.push({ id:wuNewId(), name:'', duration:'', notes:'' });
+  r.steps.push({ id:wuNewId(), name:'', distance:'', notes:'' });
   wuPersist(); renderWarmup();
 }
 function wuDeleteStep(rId, sId){
@@ -6241,7 +6249,7 @@ function wuDeleteStep(rId, sId){
 function wuUpdateStep(rId, sId, field, val){
   const r = wuGet(rId); if (!r) return;
   const s = r.steps.find(s=>s.id===sId); if (!s) return;
-  s[field] = field==='duration' ? val : val;
+  s[field] = val;
   wuPersist(); renderWarmup();
 }
 function wuMoveStep(rId, sId, dir){
@@ -6254,10 +6262,11 @@ function wuMoveStep(rId, sId, dir){
 function renderWarmup(){
   const root = document.getElementById('warmupRoot'); if (!root) return;
   wuEnsureDefault();
+  wuMigrate();
   root.innerHTML = `
     <div class="quad-ctrl-row">
       <span class="control-label">Warm Up Routine</span>
-      <span class="ref-note">Write out a routine (e.g. MD Warm Up, MD-1, recovery) as a timed list of steps, with a running total against your target duration, then print it.</span>
+      <span class="ref-note">Write out a routine (e.g. MD Warm Up, MD-1, recovery) as a list of steps with a distance in metres each, with a running total against your target distance, then print it.</span>
     </div>
     <div style="display:flex;gap:8px;align-items:center;margin:10px 0 14px;">
       <button class="btn-sm" onclick="wuAddRoutine()">+ Add Routine</button>
@@ -6265,27 +6274,28 @@ function renderWarmup(){
     </div>
     ${WARMUP_ROUTINES.routines.map(r=>{
       const total = wuTotal(r);
-      const diff = total - (r.targetMin||0);
-      const col = Math.abs(diff)<=0.5 ? {bg:'var(--c-exceeds-bg)',text:'var(--c-exceeds-text)'} : diff>0 ? {bg:'var(--c-priority-bg)',text:'var(--c-priority-text)'} : {bg:'var(--c-near-bg)',text:'var(--c-near-text)'};
+      const diff = total - (r.targetDistance||0);
+      const onTarget = r.targetDistance ? Math.abs(diff)/r.targetDistance<=0.05 : diff===0;
+      const col = onTarget ? {bg:'var(--c-exceeds-bg)',text:'var(--c-exceeds-text)'} : diff>0 ? {bg:'var(--c-priority-bg)',text:'var(--c-priority-text)'} : {bg:'var(--c-near-bg)',text:'var(--c-near-text)'};
       return `<div style="border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:16px;">
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
           <input type="text" value="${r.name.replace(/"/g,'&quot;')}" onchange="wuUpdateRoutine('${r.id}','name',this.value)" style="font-weight:700;font-size:14.5px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;flex:1;min-width:200px;max-width:320px;">
           <span style="font-size:12px;color:var(--text-muted);">Target</span>
-          <input type="number" step="0.5" min="0" value="${r.targetMin}" onchange="wuUpdateRoutine('${r.id}','targetMin',this.value)" style="width:60px;padding:5px 7px;border:1px solid var(--border);border-radius:5px;">
-          <span style="font-size:11px;color:var(--text-muted);">min</span>
-          <span style="font-size:12.5px;font-weight:700;padding:4px 10px;border-radius:14px;background:${col.bg};color:${col.text};" title="Running total vs target">${fmt(total)} / ${fmt(r.targetMin)} min</span>
+          <input type="number" step="5" min="0" value="${r.targetDistance}" onchange="wuUpdateRoutine('${r.id}','targetDistance',this.value)" style="width:70px;padding:5px 7px;border:1px solid var(--border);border-radius:5px;">
+          <span style="font-size:11px;color:var(--text-muted);">m</span>
+          <span style="font-size:12.5px;font-weight:700;padding:4px 10px;border-radius:14px;background:${col.bg};color:${col.text};" title="Running total vs target">${fmt(total)} / ${fmt(r.targetDistance)} m</span>
           <span style="flex:1;"></span>
           <button class="btn-sm" onclick="openWarmupReport('${r.id}')">🖨 Print</button>
           <button class="btn-sm" style="color:#c8483d;" onclick="wuDeleteRoutine('${r.id}')">Delete Routine</button>
         </div>
         <div style="overflow-x:auto;">
         <table class="mp-table" style="width:100%;min-width:540px;">
-          <thead><tr><th style="width:26px;"></th><th>Exercise / Drill</th><th>Duration (min)</th><th>Coaching Cue / Notes</th><th></th></tr></thead>
+          <thead><tr><th style="width:26px;"></th><th>Exercise / Drill</th><th>Distance (m)</th><th>Coaching Cue / Notes</th><th></th></tr></thead>
           <tbody>
           ${r.steps.length ? r.steps.map((s,i)=>`<tr>
             <td style="color:var(--text-muted);text-align:center;">${i+1}</td>
             <td><input value="${(s.name||'').replace(/"/g,'&quot;')}" onchange="wuUpdateStep('${r.id}','${s.id}','name',this.value)" style="width:220px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;"></td>
-            <td><input type="number" step="0.25" min="0" value="${s.duration}" onchange="wuUpdateStep('${r.id}','${s.id}','duration',this.value)" style="width:70px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;"></td>
+            <td><input type="number" step="5" min="0" value="${s.distance}" onchange="wuUpdateStep('${r.id}','${s.id}','distance',this.value)" style="width:70px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;"></td>
             <td><input value="${(s.notes||'').replace(/"/g,'&quot;')}" onchange="wuUpdateStep('${r.id}','${s.id}','notes',this.value)" style="width:260px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;"></td>
             <td style="white-space:nowrap;">
               <button class="btn-sm" title="Move up" ${i===0?'disabled':''} onclick="wuMoveStep('${r.id}','${s.id}',-1)">▲</button>
@@ -6311,10 +6321,10 @@ function openWarmupReport(rId){
 function buildWarmupReportHtml(r){
   const genDate = new Date().toLocaleDateString('en-AU', {day:'numeric', month:'short', year:'numeric'});
   const total = wuTotal(r);
-  return `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">${r.name}</div><div class="rpt-sub">Brisbane Roar · Total ${fmt(total)} min (target ${fmt(r.targetMin)} min) · ${genDate}</div></div>${ROAR_LOGO_SVG}</div>
-    <table class="rpt-table"><thead><tr><th>#</th><th>Exercise / Drill</th><th>Duration</th><th>Coaching Cue / Notes</th></tr></thead><tbody>
-    ${r.steps.length ? r.steps.map((s,i)=>`<tr><td class="lbl">${i+1}</td><td class="lbl">${s.name||'—'}</td><td>${s.duration?fmt(s.duration)+' min':'—'}</td><td>${s.notes||''}</td></tr>`).join('') : '<tr><td colspan="4" style="color:var(--text-muted);">No steps added.</td></tr>'}
-    <tr style="border-top:2px solid var(--border);font-weight:700;"><td></td><td class="lbl">Total</td><td>${fmt(total)} min</td><td></td></tr>
+  return `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">${r.name}</div><div class="rpt-sub">Brisbane Roar · Total ${fmt(total)} m (target ${fmt(r.targetDistance)} m) · ${genDate}</div></div>${ROAR_LOGO_SVG}</div>
+    <table class="rpt-table"><thead><tr><th>#</th><th>Exercise / Drill</th><th>Distance</th><th>Coaching Cue / Notes</th></tr></thead><tbody>
+    ${r.steps.length ? r.steps.map((s,i)=>`<tr><td class="lbl">${i+1}</td><td class="lbl">${s.name||'—'}</td><td>${s.distance?fmt(s.distance)+' m':'—'}</td><td>${s.notes||''}</td></tr>`).join('') : '<tr><td colspan="4" style="color:var(--text-muted);">No steps added.</td></tr>'}
+    <tr style="border-top:2px solid var(--border);font-weight:700;"><td></td><td class="lbl">Total</td><td>${fmt(total)} m</td><td></td></tr>
     </tbody></table>`;
 }
 
