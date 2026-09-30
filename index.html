@@ -412,7 +412,7 @@
     <div class="alist" id="alist"><div style="padding:16px;font-size:12px;color:#7a8290;text-align:center">No players yet — add one, or import from a Google Sheet in Settings.</div></div>
     <div class="settings-bar"><span id="sheetStatus">No sheet imported</span><button class="btn-sm" onclick="showConfig()">⚙ Settings</button></div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-09-30 06:45</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-09-30 07:10</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -6199,16 +6199,17 @@ let WARMUP_ROUTINES = { routines: [] };
 function wuNewId(){ return 'w'+Date.now()+Math.floor(Math.random()*1000); }
 function wuEnsureDefault(){
   if (!WARMUP_ROUTINES.routines.length){
-    WARMUP_ROUTINES.routines.push({ id:wuNewId(), name:'MD Warm Up Routine', targetDistance:0, steps:[] });
+    WARMUP_ROUTINES.routines.push({ id:wuNewId(), name:'MD Warm Up Routine', steps:[], image:null });
   }
 }
 function wuGet(rId){ return WARMUP_ROUTINES.routines.find(r=>r.id===rId); }
 // Carries over any routine saved before this switched from minutes to
-// distance, so earlier numbers aren't silently lost -- just re-labelled.
+// distance, so earlier step numbers aren't silently lost -- just
+// re-labelled (the old per-routine target has been removed entirely).
 function wuMigrate(){
   WARMUP_ROUTINES.routines.forEach(r=>{
-    if (r.targetDistance==null && r.targetMin!=null){ r.targetDistance = r.targetMin; delete r.targetMin; }
     r.steps.forEach(s=>{ if (s.distance==null && s.duration!=null){ s.distance = s.duration; delete s.duration; } });
+    if (r.image===undefined) r.image = null;
   });
 }
 function wuTotal(r){ return r.steps.reduce((s,x)=>s+(Number(x.distance)||0),0); }
@@ -6223,7 +6224,7 @@ function wuPersist(){
   }, 400);
 }
 function wuAddRoutine(){
-  WARMUP_ROUTINES.routines.push({ id:wuNewId(), name:`Routine ${WARMUP_ROUTINES.routines.length+1}`, targetDistance:0, steps:[] });
+  WARMUP_ROUTINES.routines.push({ id:wuNewId(), name:`Routine ${WARMUP_ROUTINES.routines.length+1}`, steps:[], image:null });
   wuPersist(); renderWarmup();
 }
 function wuDeleteRoutine(rId){
@@ -6233,7 +6234,7 @@ function wuDeleteRoutine(rId){
 }
 function wuUpdateRoutine(rId, field, val){
   const r = wuGet(rId); if (!r) return;
-  r[field] = field==='targetDistance' ? (Number(val)||0) : val;
+  r[field] = val;
   wuPersist(); renderWarmup();
 }
 function wuAddStep(rId){
@@ -6259,6 +6260,38 @@ function wuMoveStep(rId, sId, dir){
   [r.steps[i], r.steps[j]] = [r.steps[j], r.steps[i]];
   wuPersist(); renderWarmup();
 }
+// Downscales to a reasonable width before storing (keeps it well under
+// the per-key storage limit regardless of the original photo size) --
+// preserves the original aspect ratio, unlike the square player-photo
+// crop, since a setup diagram's shape matters.
+function wuHandleImageUpload(rId, inputEl){
+  const file = inputEl.files && inputEl.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e=>{
+    const img = new Image();
+    img.onload = ()=>{
+      const maxSide = 1100;
+      const scale = Math.min(1, maxSide/Math.max(img.width, img.height));
+      const w2 = Math.round(img.width*scale), h2 = Math.round(img.height*scale);
+      const canvas = document.createElement('canvas');
+      canvas.width = w2; canvas.height = h2;
+      canvas.getContext('2d').drawImage(img, 0, 0, w2, h2);
+      const r = wuGet(rId); if (!r) return;
+      r.image = canvas.toDataURL('image/jpeg', 0.85);
+      wuPersist(); renderWarmup();
+    };
+    img.onerror = ()=>alert('Could not read that image file.');
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+  inputEl.value = '';
+}
+function wuRemoveImage(rId){
+  const r = wuGet(rId); if (!r) return;
+  r.image = null;
+  wuPersist(); renderWarmup();
+}
 function renderWarmup(){
   const root = document.getElementById('warmupRoot'); if (!root) return;
   wuEnsureDefault();
@@ -6266,7 +6299,7 @@ function renderWarmup(){
   root.innerHTML = `
     <div class="quad-ctrl-row">
       <span class="control-label">Warm Up Routine</span>
-      <span class="ref-note">Write out a routine (e.g. MD Warm Up, MD-1, recovery) as a list of steps with a distance in metres each, with a running total against your target distance, then print it.</span>
+      <span class="ref-note">Write out a routine (e.g. MD Warm Up, MD-1, recovery) as a list of steps with a distance in metres each, add a photo of the setup if useful, then print it.</span>
     </div>
     <div style="display:flex;gap:8px;align-items:center;margin:10px 0 14px;">
       <button class="btn-sm" onclick="wuAddRoutine()">+ Add Routine</button>
@@ -6274,19 +6307,24 @@ function renderWarmup(){
     </div>
     ${WARMUP_ROUTINES.routines.map(r=>{
       const total = wuTotal(r);
-      const diff = total - (r.targetDistance||0);
-      const onTarget = r.targetDistance ? Math.abs(diff)/r.targetDistance<=0.05 : diff===0;
-      const col = onTarget ? {bg:'var(--c-exceeds-bg)',text:'var(--c-exceeds-text)'} : diff>0 ? {bg:'var(--c-priority-bg)',text:'var(--c-priority-text)'} : {bg:'var(--c-near-bg)',text:'var(--c-near-text)'};
       return `<div style="border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:16px;">
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
           <input type="text" value="${r.name.replace(/"/g,'&quot;')}" onchange="wuUpdateRoutine('${r.id}','name',this.value)" style="font-weight:700;font-size:14.5px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;flex:1;min-width:200px;max-width:320px;">
-          <span style="font-size:12px;color:var(--text-muted);">Target</span>
-          <input type="number" step="5" min="0" value="${r.targetDistance}" onchange="wuUpdateRoutine('${r.id}','targetDistance',this.value)" style="width:70px;padding:5px 7px;border:1px solid var(--border);border-radius:5px;">
-          <span style="font-size:11px;color:var(--text-muted);">m</span>
-          <span style="font-size:12.5px;font-weight:700;padding:4px 10px;border-radius:14px;background:${col.bg};color:${col.text};" title="Running total vs target">${fmt(total)} / ${fmt(r.targetDistance)} m</span>
+          <span style="font-size:12.5px;font-weight:700;padding:4px 10px;border-radius:14px;background:var(--surface-alt);color:var(--text-secondary);">Total ${fmt(total)} m</span>
           <span style="flex:1;"></span>
           <button class="btn-sm" onclick="openWarmupReport('${r.id}')">🖨 Print</button>
           <button class="btn-sm" style="color:#c8483d;" onclick="wuDeleteRoutine('${r.id}')">Delete Routine</button>
+        </div>
+        <div style="margin-bottom:12px;">
+          ${r.image ? `
+            <div style="display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap;">
+              <img src="${r.image}" style="max-width:280px;max-height:200px;border-radius:8px;border:1px solid var(--border);object-fit:contain;background:var(--surface-alt);">
+              <div style="display:flex;flex-direction:column;gap:6px;">
+                <label class="btn-sm" style="cursor:pointer;text-align:center;">Replace Image<input type="file" accept="image/*" style="display:none;" onchange="wuHandleImageUpload('${r.id}',this)"></label>
+                <button class="btn-sm" style="color:#c8483d;" onclick="wuRemoveImage('${r.id}')">Remove Image</button>
+              </div>
+            </div>`
+            : `<label class="btn-sm" style="cursor:pointer;display:inline-block;">📷 Add Setup Image<input type="file" accept="image/*" style="display:none;" onchange="wuHandleImageUpload('${r.id}',this)"></label>`}
         </div>
         <div style="overflow-x:auto;">
         <table class="mp-table" style="width:100%;min-width:540px;">
@@ -6321,7 +6359,9 @@ function openWarmupReport(rId){
 function buildWarmupReportHtml(r){
   const genDate = new Date().toLocaleDateString('en-AU', {day:'numeric', month:'short', year:'numeric'});
   const total = wuTotal(r);
-  return `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">${r.name}</div><div class="rpt-sub">Brisbane Roar · Total ${fmt(total)} m (target ${fmt(r.targetDistance)} m) · ${genDate}</div></div>${ROAR_LOGO_SVG}</div>
+  const imageHtml = r.image ? `<div class="chart-block" style="text-align:center;margin-bottom:16px;"><img src="${r.image}" style="max-width:100%;max-height:340px;object-fit:contain;border-radius:8px;border:1px solid var(--border);"></div>` : '';
+  return `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">${r.name}</div><div class="rpt-sub">Brisbane Roar · Total ${fmt(total)} m · ${genDate}</div></div>${ROAR_LOGO_SVG}</div>
+    ${imageHtml}
     <table class="rpt-table"><thead><tr><th>#</th><th>Exercise / Drill</th><th>Distance</th><th>Coaching Cue / Notes</th></tr></thead><tbody>
     ${r.steps.length ? r.steps.map((s,i)=>`<tr><td class="lbl">${i+1}</td><td class="lbl">${s.name||'—'}</td><td>${s.distance?fmt(s.distance)+' m':'—'}</td><td>${s.notes||''}</td></tr>`).join('') : '<tr><td colspan="4" style="color:var(--text-muted);">No steps added.</td></tr>'}
     <tr style="border-top:2px solid var(--border);font-weight:700;"><td></td><td class="lbl">Total</td><td>${fmt(total)} m</td><td></td></tr>
