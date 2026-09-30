@@ -158,8 +158,8 @@
   .cat-name   { font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.08em; font-weight:700; margin-bottom:6px; }
   .cat-status { font-size:17px; font-weight:800; letter-spacing:-.01em; }
   .tab-card { background:var(--surface); box-shadow:var(--shadow-md); border-radius:var(--radius-lg); overflow:hidden; }
-  .tabs { display:flex; border-bottom:1px solid var(--border); background:var(--surface-alt); }
-  .tab { padding:10px 18px; font-size:13px; font-weight:500; color:var(--text-muted); cursor:pointer; border-bottom:2px solid transparent; transition:color 0.2s ease, border-color 0.2s ease, background 0.2s ease; }
+  .tabs { display:flex; border-bottom:1px solid var(--border); background:var(--surface-alt); overflow-x:auto; overflow-y:hidden; -webkit-overflow-scrolling:touch; scrollbar-width:thin; }
+  .tab { padding:10px 18px; font-size:13px; font-weight:500; color:var(--text-muted); cursor:pointer; border-bottom:2px solid transparent; transition:color 0.2s ease, border-color 0.2s ease, background 0.2s ease; white-space:nowrap; flex-shrink:0; }
   .tab:hover { color:var(--text-primary); }
   .tab.active { color:var(--accent); border-bottom-color:var(--accent); background:var(--surface); }
   .tc { display:none; }
@@ -412,7 +412,7 @@
     <div class="alist" id="alist"><div style="padding:16px;font-size:12px;color:#7a8290;text-align:center">No players yet — add one, or import from a Google Sheet in Settings.</div></div>
     <div class="settings-bar"><span id="sheetStatus">No sheet imported</span><button class="btn-sm" onclick="showConfig()">⚙ Settings</button></div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-09-30 07:10</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-09-30 08:05</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -1050,8 +1050,25 @@ function gpsDailyLoads(a){
   });
   return byDate;
 }
+// How many calendar days back from asOfDate you'd have to go to reach the
+// EARLIEST date with any recorded load. This is the piece the ACWR bug
+// below was missing: a rolling chronic average is only valid once it's
+// actually built from 28 real tracked days -- before that, days before
+// tracking began aren't "rest days" (load=0), they're "no data exists",
+// and treating them as zero artificially deflates the chronic average,
+// which inflates acute/chronic into a meaningless, guaranteed-high number
+// for the entire first ~4 weeks of using this dashboard.
+function acwrHistoryDays(byDate, asOfDate){
+  const dates = Object.keys(byDate);
+  if (!dates.length) return 0;
+  const first = new Date(dates.sort()[0]);
+  const asOf = new Date(asOfDate);
+  return Math.floor((asOf-first)/86400000)+1;
+}
+const ACWR_MIN_HISTORY_DAYS = 28;
 function computeACWR(a, asOfDate){
   const byDate = gpsDailyLoads(a);
+  const daysTracked = acwrHistoryDays(byDate, asOfDate);
   const asOf = new Date(asOfDate);
   let acuteSum=0, acuteDays=0, chronicSum=0, chronicDays=0;
   for (let i=0;i<28;i++){
@@ -1062,14 +1079,14 @@ function computeACWR(a, asOfDate){
     if (i<7){ acuteSum += load; acuteDays++; }
   }
   const acute = acuteSum/acuteDays, chronic = chronicSum/chronicDays;
-  if (chronic===0) return { acute, chronic, acwr:null, zone:null };
+  if (chronic===0 || daysTracked<ACWR_MIN_HISTORY_DAYS) return { acute, chronic, acwr:null, zone:null, daysTracked };
   const acwr = acute/chronic;
   let zone;
   if (acwr<0.8) zone='undertrained';
   else if (acwr<=1.3) zone='sweet-spot';
   else if (acwr<=1.5) zone='caution';
   else zone='high-risk';
-  return { acute, chronic, acwr, zone };
+  return { acute, chronic, acwr, zone, daysTracked };
 }
 const ACWR_ZONE_COLOR = { undertrained:'#3d6fb0', 'sweet-spot':'#2f8f5b', caution:'#d97f3d', 'high-risk':'#c8483d' };
 const ACWR_ZONE_LABEL = { undertrained:'Undertrained', 'sweet-spot':'Sweet Spot', caution:'Caution', 'high-risk':'High Risk' };
@@ -1098,14 +1115,21 @@ function teamDailyLoads(players, metricKey){
   });
   return byDate;
 }
+// Returns { series, daysTracked, daysNeeded } -- series only contains
+// points from the day a genuine 28-day chronic window exists onward (see
+// acwrHistoryDays above for why). daysTracked/daysNeeded let the caller
+// show "building history, 12 of 28 days" instead of either an empty chart
+// or a mathematically-guaranteed-wrong early number.
 function teamAcwrTimeSeries(players, metricKey){
   const byDate = teamDailyLoads(players, metricKey);
   const dates = Object.keys(byDate).sort();
-  if (!dates.length) return [];
+  if (!dates.length) return { series:[], daysTracked:0, daysNeeded:ACWR_MIN_HISTORY_DAYS };
   const first = new Date(dates[0]), last = new Date(dates[dates.length-1]);
+  const daysTracked = Math.floor((last-first)/86400000)+1;
   const series = [];
   for (let d=new Date(first); d<=last; d.setDate(d.getDate()+1)){
     const asOfKey = toLocalDateStr(d);
+    if (acwrHistoryDays(byDate, asOfKey) < ACWR_MIN_HISTORY_DAYS) continue;
     let acuteSum=0, chronicSum=0;
     for (let i=0;i<28;i++){
       const dd = new Date(d); dd.setDate(dd.getDate()-i);
@@ -1119,7 +1143,7 @@ function teamAcwrTimeSeries(players, metricKey){
     let zone = acwr<0.8?'undertrained':acwr<=1.3?'sweet-spot':acwr<=1.5?'caution':'high-risk';
     series.push({ date: asOfKey, acwr, zone });
   }
-  return series;
+  return { series, daysTracked, daysNeeded:ACWR_MIN_HISTORY_DAYS };
 }
 function teamSessionLoadSeries(players){
   const byDate = {};
@@ -3983,15 +4007,50 @@ function drawTeamGpsTraining(){
   const sessionDates = trainingSessionDates(players);
   const today = sessionDates.length ? sessionDates[sessionDates.length-1] : toLocalDateStr(new Date());
   const target = SETTINGS.weeklyTargetMultiplier;
+  const loadSeries = teamSessionLoadSeries(players);
+  const acwrResult = teamAcwrTimeSeries(players, teamAcwrMetric);
+  const latestLoad = loadSeries.length ? loadSeries[loadSeries.length-1] : null;
+  const recentN = Math.min(5, loadSeries.length);
+  const recentAvg = recentN ? loadSeries.slice(-recentN).reduce((s,p)=>s+p.avgPerPlayer,0)/recentN : null;
+  const loadDelta = (latestLoad && recentAvg) ? ((latestLoad.avgPerPlayer-recentAvg)/recentAvg)*100 : null;
+  const latestAcwr = acwrResult.series.length ? acwrResult.series[acwrResult.series.length-1] : null;
 
   let html = `<div class="quad-ctrl-row" style="margin-bottom:14px;"><button class="btn" onclick="openReportModal()">📄 Print Training Report</button></div>`;
+
+  html += `<div class="tp-sw-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:18px;">
+    <div class="cat-card">
+      <div class="cat-name">Latest Session Load</div>
+      <div class="cat-status">${latestLoad?fmt(latestLoad.avgPerPlayer)+' m':'—'}</div>
+      <div class="pq-sub">${latestLoad?`${latestLoad.date} avg/player${loadDelta!=null?` · ${loadDelta>=0?'+':''}${fmt(loadDelta)}% vs last ${recentN}`:''}`:'No sessions yet'}</div>
+    </div>
+    <div class="cat-card">
+      <div class="cat-name">Squad ACWR</div>
+      <div class="cat-status" style="${latestAcwr?`color:${ACWR_ZONE_COLOR[latestAcwr.zone]}`:'font-size:16px;color:var(--text-muted);'}">${latestAcwr?fmt(latestAcwr.acwr):'Building'}</div>
+      <div class="pq-sub">${latestAcwr?ACWR_ZONE_LABEL[latestAcwr.zone]:`${acwrResult.daysTracked} of ${acwrResult.daysNeeded} days tracked`}</div>
+    </div>
+    <div class="cat-card">
+      <div class="cat-name">Training Days Logged</div>
+      <div class="cat-status">${sessionDates.length}</div>
+      <div class="pq-sub">${sessionDates.length?`${sessionDates[0]} to ${today}`:'No sessions yet'}</div>
+    </div>
+  </div>`;
+
   html += `<div class="pq-heading" style="display:flex;align-items:center;justify-content:space-between;">Squad Training Load Trend
     <div class="lb-mode-toggle" id="teamAcwrMetricToggle">
       ${Object.keys(ACWR_METRIC_INFO).map(k=>`<button data-m="${k}" class="${teamAcwrMetric===k?'active':''}" onclick="setTeamAcwrMetric('${k}')">${ACWR_METRIC_INFO[k].label}</button>`).join('')}
-    </div></div>
-    <canvas id="teamAcwrChart" height="80"></canvas>
-    <div class="chart-note"><span>▪ Team ACWR = squad's total daily ${ACWR_METRIC_INFO[teamAcwrMetric].label.toLowerCase()}, acute (7-day) vs chronic (28-day) average. Different metrics can genuinely disagree — a session can look fine on volume while spiking on high-speed or mechanical load, so it's worth checking more than one. Bands: below 0.8 undertrained, 0.8–1.3 sweet spot, 1.3–1.5 caution, above 1.5 high injury risk (Gabbett et al.).</span></div>
-    <div class="pq-heading" style="margin-top:18px;">Session Load by Day (Squad Average)</div>
+    </div></div>`;
+  if (acwrResult.series.length){
+    html += `<canvas id="teamAcwrChart" height="80"></canvas>
+      <div class="chart-note"><span>▪ Team ACWR = squad's total daily ${ACWR_METRIC_INFO[teamAcwrMetric].label.toLowerCase()}, acute (7-day) vs chronic (28-day) average, shown only once a genuine 28-day history exists. Different metrics can genuinely disagree — a session can look fine on volume while spiking on high-speed or mechanical load, so it's worth checking more than one. Bands: below 0.8 undertrained, 0.8–1.3 sweet spot, 1.3–1.5 caution, above 1.5 high injury risk (Gabbett et al.).</span></div>`;
+  } else {
+    const pct = Math.min(100, (acwrResult.daysTracked/acwrResult.daysNeeded)*100);
+    html += `<div class="hint" style="padding:14px 16px;background:var(--surface-alt);border-radius:10px;">
+      <div style="font-weight:700;margin-bottom:8px;">Building chronic training history — ${acwrResult.daysTracked} of ${acwrResult.daysNeeded} days tracked</div>
+      <div style="height:8px;background:var(--border);border-radius:4px;overflow:hidden;margin-bottom:8px;"><div style="height:100%;width:${pct}%;background:#f26522;"></div></div>
+      <div style="font-size:12.5px;color:var(--text-muted);">A rolling ACWR needs a real 28-day chronic window before it means anything — showing one earlier would treat the days before tracking began as if they were real rest days at zero load, which artificially inflates the ratio (that's why it can look alarmingly high in the first few weeks — it isn't real). This chart appears automatically once there's enough history behind it.</div>
+    </div>`;
+  }
+  html += `<div class="pq-heading" style="margin-top:18px;">Session Load by Day (Squad Average)</div>
     <canvas id="teamSessionLoadChart" height="80"></canvas>
     <div class="chart-note"><span>▪ Average distance per player who trained that day — stays comparable even as squad availability changes, unlike a raw squad total.</span></div>`;
   html += `<div class="pq-heading" style="margin-top:18px;">Match-Demand Reference</div>`;
@@ -4051,9 +4110,10 @@ function drawTeamGpsTraining(){
 
   el.innerHTML = `<div class="fade-redraw">${html}</div>`;
 
-  const acwrSeries = teamAcwrTimeSeries(players, teamAcwrMetric);
-  if (acwrSeries.length){
-    const ctx = document.getElementById('teamAcwrChart').getContext('2d');
+  const acwrSeries = acwrResult.series;
+  const acwrCanvas = document.getElementById('teamAcwrChart');
+  if (acwrSeries.length && acwrCanvas){
+    const ctx = acwrCanvas.getContext('2d');
     if (teamAcwrChartInstance) teamAcwrChartInstance.destroy();
     teamAcwrChartInstance = new Chart(ctx, { type:'line', data:{ labels:acwrSeries.map(p=>p.date), datasets:[
       { label:'Team ACWR ('+ACWR_METRIC_INFO[teamAcwrMetric].label+')', data:acwrSeries.map(p=>p.acwr), borderColor:'#f26522', backgroundColor:'#f26522', tension:0.2, pointRadius:0, borderWidth:2 },
@@ -4063,7 +4123,6 @@ function drawTeamGpsTraining(){
           grid:{ color: gridCtx => { const v=gridCtx.tick.value; return (v>=0.8&&v<=1.3)?'rgba(47,143,91,0.15)':'rgba(0,0,0,0.06)'; } } }
     }} });
   }
-  const loadSeries = teamSessionLoadSeries(players);
   if (loadSeries.length){
     const ctx2 = document.getElementById('teamSessionLoadChart').getContext('2d');
     if (teamSessionLoadChartInstance) teamSessionLoadChartInstance.destroy();
