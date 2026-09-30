@@ -412,7 +412,7 @@
     <div class="alist" id="alist"><div style="padding:16px;font-size:12px;color:#7a8290;text-align:center">No players yet — add one, or import from a Google Sheet in Settings.</div></div>
     <div class="settings-bar"><span id="sheetStatus">No sheet imported</span><button class="btn-sm" onclick="showConfig()">⚙ Settings</button></div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-09-24 13:20</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-09-30 06:25</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -2160,6 +2160,10 @@ async function loadPersisted(){
     const raw = await storageGet('roar-trainingprograms');
     if (raw) TRAINING_PROGRAMS = Object.assign(TRAINING_PROGRAMS, JSON.parse(raw));
   }catch(e){ /* nothing saved yet */ }
+  try{
+    const raw = await storageGet('roar-warmup');
+    if (raw) WARMUP_ROUTINES = Object.assign(WARMUP_ROUTINES, JSON.parse(raw));
+  }catch(e){ /* nothing saved yet */ }
   purgeNamelessAthletes();
 }
 
@@ -2317,6 +2321,7 @@ function switchTeamTab(t){
   if (t==='minutesplan') setTimeout(renderMinutesPlan,60);
   if (t==='weekcompare') setTimeout(renderWeekCompare,60);
   if (t==='gpscoverage') setTimeout(renderGpsCoverage,60);
+  if (t==='warmup') setTimeout(renderWarmup,60);
 }
 
 // ============================================================
@@ -3030,6 +3035,7 @@ function renderTeam(){
         <div class="team-tab tab" data-t="minutesplan" onclick="switchTeamTab('minutesplan')">Minutes Plan</div>
         <div class="team-tab tab" data-t="weekcompare" onclick="switchTeamTab('weekcompare')">Week Comparison</div>
         <div class="team-tab tab" data-t="gpscoverage" onclick="switchTeamTab('gpscoverage')">GPS Coverage</div>
+        <div class="team-tab tab" data-t="warmup" onclick="switchTeamTab('warmup')">Warm Up Routine</div>
       </div>
       <div class="team-tc tc active" data-t="squad"><div class="quad-body" style="padding-bottom:0;">
         <div class="quad-ctrl-row">${refToggleHtml('heatmap', refFrame.heatmap)}<span class="ref-note">Cell color = status against the selected reference. Toggle changes color only, not the raw values shown.</span></div>
@@ -3130,6 +3136,7 @@ function renderTeam(){
       <div class="team-tc tc" data-t="minutesplan"><div class="quad-body" id="minutesPlanRoot" style="padding:16px 20px;"></div></div>
       <div class="team-tc tc" data-t="weekcompare"><div class="quad-body" id="weekCompareRoot" style="padding:16px 20px;"></div></div>
       <div class="team-tc tc" data-t="gpscoverage"><div class="quad-body" id="gpsCoverageRoot" style="padding:16px 20px;"></div></div>
+      <div class="team-tc tc" data-t="warmup"><div class="quad-body" id="warmupRoot" style="padding:16px 20px;"></div></div>
     </div>`;
   buildSquadTable();
   buildTeamTrendMetricOptions();
@@ -6180,6 +6187,135 @@ function renderGpsCoverage(){
       <th title="Sessions with GPS data">GPS</th><th title="Trained but GPS wasn't working (marked)">No GPS</th><th title="No data and not marked yet">Unmarked</th><th title="Marked as not there">Didn’t train</th><th title="GPS ÷ (GPS + No GPS)">Coverage</th><th>Mark all unmarked</th>
       ${dates.map(dt=>`<th style="text-align:center;">${dateLabel(dt)}</th>`).join('')}
     </tr></thead><tbody>${rowsHtml || `<tr><td class="mp-sticky" colspan="${7+dates.length}" style="color:var(--text-muted);">No athletes with gaps in this period.</td></tr>`}</tbody></table></div>`;
+}
+
+// ============================================================
+// WARM UP ROUTINE — squad-level, not per-athlete: write out a routine
+// (e.g. "MD Warm Up") as a timed list of steps, with a running total
+// against a target duration, then print in the same Brisbane Roar
+// format as everything else. Own storage key, same autosave pattern.
+// ============================================================
+let WARMUP_ROUTINES = { routines: [] };
+function wuNewId(){ return 'w'+Date.now()+Math.floor(Math.random()*1000); }
+function wuEnsureDefault(){
+  if (!WARMUP_ROUTINES.routines.length){
+    WARMUP_ROUTINES.routines.push({ id:wuNewId(), name:'MD Warm Up Routine', targetMin:8, steps:[] });
+  }
+}
+function wuGet(rId){ return WARMUP_ROUTINES.routines.find(r=>r.id===rId); }
+function wuTotal(r){ return r.steps.reduce((s,x)=>s+(Number(x.duration)||0),0); }
+let wuSaveTimer=null;
+function wuPersist(){
+  const ind = document.getElementById('wuSavedIndicator'); if (ind) ind.textContent = 'Saving…';
+  clearTimeout(wuSaveTimer);
+  wuSaveTimer = setTimeout(async ()=>{
+    await storageSet('roar-warmup', JSON.stringify(WARMUP_ROUTINES));
+    const el = document.getElementById('wuSavedIndicator');
+    if (el){ el.textContent = 'Saved ✓'; setTimeout(()=>{ if (el && el.textContent==='Saved ✓') el.textContent=''; }, 2000); }
+  }, 400);
+}
+function wuAddRoutine(){
+  WARMUP_ROUTINES.routines.push({ id:wuNewId(), name:`Routine ${WARMUP_ROUTINES.routines.length+1}`, targetMin:8, steps:[] });
+  wuPersist(); renderWarmup();
+}
+function wuDeleteRoutine(rId){
+  if (!confirm('Delete this routine and its steps?')) return;
+  WARMUP_ROUTINES.routines = WARMUP_ROUTINES.routines.filter(r=>r.id!==rId);
+  wuPersist(); renderWarmup();
+}
+function wuUpdateRoutine(rId, field, val){
+  const r = wuGet(rId); if (!r) return;
+  r[field] = field==='targetMin' ? (Number(val)||0) : val;
+  wuPersist(); renderWarmup();
+}
+function wuAddStep(rId){
+  const r = wuGet(rId); if (!r) return;
+  r.steps.push({ id:wuNewId(), name:'', duration:'', notes:'' });
+  wuPersist(); renderWarmup();
+}
+function wuDeleteStep(rId, sId){
+  const r = wuGet(rId); if (!r) return;
+  r.steps = r.steps.filter(s=>s.id!==sId);
+  wuPersist(); renderWarmup();
+}
+function wuUpdateStep(rId, sId, field, val){
+  const r = wuGet(rId); if (!r) return;
+  const s = r.steps.find(s=>s.id===sId); if (!s) return;
+  s[field] = field==='duration' ? val : val;
+  wuPersist(); renderWarmup();
+}
+function wuMoveStep(rId, sId, dir){
+  const r = wuGet(rId); if (!r) return;
+  const i = r.steps.findIndex(s=>s.id===sId), j = i+dir;
+  if (i<0 || j<0 || j>=r.steps.length) return;
+  [r.steps[i], r.steps[j]] = [r.steps[j], r.steps[i]];
+  wuPersist(); renderWarmup();
+}
+function renderWarmup(){
+  const root = document.getElementById('warmupRoot'); if (!root) return;
+  wuEnsureDefault();
+  root.innerHTML = `
+    <div class="quad-ctrl-row">
+      <span class="control-label">Warm Up Routine</span>
+      <span class="ref-note">Write out a routine (e.g. MD Warm Up, MD-1, recovery) as a timed list of steps, with a running total against your target duration, then print it.</span>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;margin:10px 0 14px;">
+      <button class="btn-sm" onclick="wuAddRoutine()">+ Add Routine</button>
+      <span id="wuSavedIndicator" style="font-size:11px;color:var(--text-muted);"></span>
+    </div>
+    ${WARMUP_ROUTINES.routines.map(r=>{
+      const total = wuTotal(r);
+      const diff = total - (r.targetMin||0);
+      const col = Math.abs(diff)<=0.5 ? {bg:'var(--c-exceeds-bg)',text:'var(--c-exceeds-text)'} : diff>0 ? {bg:'var(--c-priority-bg)',text:'var(--c-priority-text)'} : {bg:'var(--c-near-bg)',text:'var(--c-near-text)'};
+      return `<div style="border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:16px;">
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+          <input type="text" value="${r.name.replace(/"/g,'&quot;')}" onchange="wuUpdateRoutine('${r.id}','name',this.value)" style="font-weight:700;font-size:14.5px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;flex:1;min-width:200px;max-width:320px;">
+          <span style="font-size:12px;color:var(--text-muted);">Target</span>
+          <input type="number" step="0.5" min="0" value="${r.targetMin}" onchange="wuUpdateRoutine('${r.id}','targetMin',this.value)" style="width:60px;padding:5px 7px;border:1px solid var(--border);border-radius:5px;">
+          <span style="font-size:11px;color:var(--text-muted);">min</span>
+          <span style="font-size:12.5px;font-weight:700;padding:4px 10px;border-radius:14px;background:${col.bg};color:${col.text};" title="Running total vs target">${fmt(total)} / ${fmt(r.targetMin)} min</span>
+          <span style="flex:1;"></span>
+          <button class="btn-sm" onclick="openWarmupReport('${r.id}')">🖨 Print</button>
+          <button class="btn-sm" style="color:#c8483d;" onclick="wuDeleteRoutine('${r.id}')">Delete Routine</button>
+        </div>
+        <div style="overflow-x:auto;">
+        <table class="mp-table" style="width:100%;min-width:540px;">
+          <thead><tr><th style="width:26px;"></th><th>Exercise / Drill</th><th>Duration (min)</th><th>Coaching Cue / Notes</th><th></th></tr></thead>
+          <tbody>
+          ${r.steps.length ? r.steps.map((s,i)=>`<tr>
+            <td style="color:var(--text-muted);text-align:center;">${i+1}</td>
+            <td><input value="${(s.name||'').replace(/"/g,'&quot;')}" onchange="wuUpdateStep('${r.id}','${s.id}','name',this.value)" style="width:220px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;"></td>
+            <td><input type="number" step="0.25" min="0" value="${s.duration}" onchange="wuUpdateStep('${r.id}','${s.id}','duration',this.value)" style="width:70px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;"></td>
+            <td><input value="${(s.notes||'').replace(/"/g,'&quot;')}" onchange="wuUpdateStep('${r.id}','${s.id}','notes',this.value)" style="width:260px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;"></td>
+            <td style="white-space:nowrap;">
+              <button class="btn-sm" title="Move up" ${i===0?'disabled':''} onclick="wuMoveStep('${r.id}','${s.id}',-1)">▲</button>
+              <button class="btn-sm" title="Move down" ${i===r.steps.length-1?'disabled':''} onclick="wuMoveStep('${r.id}','${s.id}',1)">▼</button>
+              <button class="btn-sm" style="color:#c8483d;" onclick="wuDeleteStep('${r.id}','${s.id}')">✕</button>
+            </td>
+          </tr>`).join('') : `<tr><td colspan="5" style="color:var(--text-muted);">No steps yet — click "+ Add Step" to start.</td></tr>`}
+          </tbody>
+        </table>
+        </div>
+        <button class="btn-sm" style="margin-top:8px;" onclick="wuAddStep('${r.id}')">+ Add Step</button>
+      </div>`;
+    }).join('')}`;
+}
+function openWarmupReport(rId){
+  const r = wuGet(rId); if (!r) return;
+  reportKind = 'warmup';
+  mpSetLandscape(false);
+  document.getElementById('rptTrainingControls').style.display = 'none';
+  document.getElementById('reportContent').innerHTML = buildWarmupReportHtml(r);
+  document.getElementById('overlayReport').classList.add('show');
+}
+function buildWarmupReportHtml(r){
+  const genDate = new Date().toLocaleDateString('en-AU', {day:'numeric', month:'short', year:'numeric'});
+  const total = wuTotal(r);
+  return `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">${r.name}</div><div class="rpt-sub">Brisbane Roar · Total ${fmt(total)} min (target ${fmt(r.targetMin)} min) · ${genDate}</div></div>${ROAR_LOGO_SVG}</div>
+    <table class="rpt-table"><thead><tr><th>#</th><th>Exercise / Drill</th><th>Duration</th><th>Coaching Cue / Notes</th></tr></thead><tbody>
+    ${r.steps.length ? r.steps.map((s,i)=>`<tr><td class="lbl">${i+1}</td><td class="lbl">${s.name||'—'}</td><td>${s.duration?fmt(s.duration)+' min':'—'}</td><td>${s.notes||''}</td></tr>`).join('') : '<tr><td colspan="4" style="color:var(--text-muted);">No steps added.</td></tr>'}
+    <tr style="border-top:2px solid var(--border);font-weight:700;"><td></td><td class="lbl">Total</td><td>${fmt(total)} min</td><td></td></tr>
+    </tbody></table>`;
 }
 
 // ============================================================
