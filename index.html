@@ -365,6 +365,9 @@
     .rpt-table th { font-size:9.5px; padding:5px 6px; white-space:normal; }
     .rpt-table td { padding:4px 6px; }
     .rpt-table th:first-child, .rpt-table td:first-child { white-space:nowrap; }
+    .mdr-table { font-size:13px !important; }
+    .mdr-table th { font-size:11px !important; padding:9px 12px !important; }
+    .mdr-table td { padding:11px 14px !important; font-size:13.5px !important; }
     .rpt-section-title { font-size:12px; margin:16px 0 7px; page-break-after:avoid; break-after:avoid-page; }
     .rpt-section-title + table, .rpt-section-title + .drill-bar-legend, .rpt-section-title + .kpi-cards { page-break-before:avoid; break-before:avoid-page; }
     .rpt-table thead { display:table-header-group; }
@@ -412,7 +415,7 @@
     <div class="alist" id="alist"><div style="padding:16px;font-size:12px;color:#7a8290;text-align:center">No players yet — add one, or import from a Google Sheet in Settings.</div></div>
     <div class="settings-bar"><span id="sheetStatus">No sheet imported</span><button class="btn-sm" onclick="showConfig()">⚙ Settings</button></div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-01 09:15</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-01 09:50</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -1015,7 +1018,14 @@ function mergeTrainingGpsFromSheet(rows){
 function mapSonraGameRow(row){
   const title = (row.drillTitle||'').trim();
   const sessTitle = (row.sessionTitle||'').trim();
-  const looksLikeDate = /^\d{4}-\d{2}-\d{2}/.test(sessTitle) || /^\d{1,2}\/\d{1,2}\/\d{2,4}/.test(sessTitle);
+  // Checking the string's own format (ISO, D/M/Y, etc.) misses long-form
+  // dates like "September 26, 2026" -- comparing the PARSED date against
+  // sessionDate catches any format: if they land on the same day, it's
+  // just a duplicated date (same issue training's sessionTitle has), not
+  // a real opponent name.
+  const titleAsDate = Date.parse(sessTitle);
+  const sessionAsDate = Date.parse(row.sessionDate);
+  const looksLikeDate = !isNaN(titleAsDate) && !isNaN(sessionAsDate) && Math.abs(titleAsDate-sessionAsDate) < 36*60*60*1000;
   const totalTimeSec = parseTimeToSeconds(row.totalTime);
   return {
     date: sonraDateToISO(row.sessionDate),
@@ -5863,7 +5873,7 @@ function openMinutesPlanReport(){
 function mpSetLandscape(on){
   let styleEl = document.getElementById('mpLandscapeStyle');
   if (!styleEl){ styleEl = document.createElement('style'); styleEl.id = 'mpLandscapeStyle'; document.head.appendChild(styleEl); }
-  styleEl.textContent = on ? '@media print { @page { size: A4 landscape; margin: 10mm; } }' : '';
+  styleEl.textContent = on ? '@media print { @page { size: A4 landscape !important; margin: 10mm !important; } }' : '';
 }
 function buildMinutesPlanReportHtml(){
   const players = mpPlayers();
@@ -6518,7 +6528,6 @@ function buildMatchDayReportHtml(dateStr){
       accel_count: g.accel_count!=null ? g.accel_count : null, decel_count: g.decel_count!=null ? g.decel_count : null,
       opponent:g.opponent, round:g.round };
   }).filter(Boolean).sort((a,b)=>(b.total_distance_m||0)-(a.total_distance_m||0));
-  const genDate = new Date().toLocaleDateString('en-AU', {day:'numeric', month:'short', year:'numeric'});
   const meta = rows[0] || {};
   if (!rows.length){
     return `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">Match Day Report</div><div class="rpt-sub">Brisbane Roar · ${dateStr}</div></div>${ROAR_LOGO_SVG}</div>
@@ -6532,8 +6541,8 @@ function buildMatchDayReportHtml(dateStr){
     const pct = Math.max(2, Math.min(100, (val/colMax[c.key])*100));
     return `<td style="background:linear-gradient(to right, ${c.color}66 ${pct}%, ${c.color}17 ${pct}%); font-weight:700; text-align:center;">${c.fmt(val)}</td>`;
   };
-  return `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">Match Day Report</div><div class="rpt-sub">Brisbane Roar${meta.opponent?' vs '+meta.opponent:''} · ${dateStr}${meta.round?' · Round '+meta.round:''} · Generated ${genDate}</div></div>${ROAR_LOGO_SVG}</div>
-    <table class="rpt-table"><thead><tr><th>Athlete</th>${cols.map(c=>`<th style="text-align:center;">${c.label}</th>`).join('')}</tr></thead><tbody>
+  return `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">Match Day Report</div><div class="rpt-sub">Brisbane Roar${meta.opponent?' vs '+meta.opponent:''} · ${dateStr}${meta.round?' · Round '+meta.round:''}</div></div>${ROAR_LOGO_SVG}</div>
+    <table class="rpt-table mdr-table"><thead><tr><th>Athlete</th>${cols.map(c=>`<th style="text-align:center;">${c.label}</th>`).join('')}</tr></thead><tbody>
     ${rows.map(r=>`<tr><td class="lbl">${r.name}</td>${cols.map(c=>barCell(c, r[c.key])).join('')}</tr>`).join('')}
     <tr style="border-top:2px solid var(--border);font-weight:700;"><td class="lbl">Averages</td>${cols.map(c=>`<td style="text-align:center;">${c.fmt(avg(c.key))}</td>`).join('')}</tr>
     </tbody></table>
