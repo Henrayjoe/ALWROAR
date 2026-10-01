@@ -412,7 +412,7 @@
     <div class="alist" id="alist"><div style="padding:16px;font-size:12px;color:#7a8290;text-align:center">No players yet — add one, or import from a Google Sheet in Settings.</div></div>
     <div class="settings-bar"><span id="sheetStatus">No sheet imported</span><button class="btn-sm" onclick="showConfig()">⚙ Settings</button></div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-09-30 08:25</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-01 09:15</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -1006,22 +1006,84 @@ function mergeTrainingGpsFromSheet(rows){
   });
   return {added, updated, skipped};
 }
+// Maps the same lightweight Sonra camelCase export training GPS uses
+// (sessionDate/playerDisplayName/distanceTotal/.../drillTitle) onto match
+// GPS fields. Same caveats as that training branch: maxSpeed here is
+// already km/h (not m/s -- confirmed against a real export earlier), and
+// sprintDistance is the raw, unreliable field since this export has no
+// per-speed-zone data to derive a corrected figure from.
+function mapSonraGameRow(row){
+  const title = (row.drillTitle||'').trim();
+  const sessTitle = (row.sessionTitle||'').trim();
+  const looksLikeDate = /^\d{4}-\d{2}-\d{2}/.test(sessTitle) || /^\d{1,2}\/\d{1,2}\/\d{2,4}/.test(sessTitle);
+  const totalTimeSec = parseTimeToSeconds(row.totalTime);
+  return {
+    date: sonraDateToISO(row.sessionDate),
+    opponent: looksLikeDate ? '' : sessTitle, // sheet-dependent: sometimes a duplicated date (like training's sessionTitle), sometimes the actual fixture -- left blank rather than guessed when it's clearly just a date
+    round: '',
+    player_name: row.playerDisplayName,
+    minutes_played: totalTimeSec!=null ? totalTimeSec/60 : null,
+    total_distance_m: pf(row.distanceTotal),
+    hsr_distance_m: pf(row.highSpeedRunningAbs),
+    sprint_distance_m: pf(row.sprintDistance),
+    accel_count: pf(row.accelerationsAbs)||0,
+    decel_count: pf(row.decelerationsAbs)||0,
+    accel_decel_count: (pf(row.accelerationsAbs)||0) + (pf(row.decelerationsAbs)||0),
+    max_velocity_kmh: pf(row.maxSpeed),
+    half1_distance_m: null, half1_hsr_m: null, half2_distance_m: null, half2_hsr_m: null,
+    _whole: isWholeSessionTitle(title),
+  };
+}
 function mergeGameGpsFromSheet(rows){
   let added=0, updated=0, skipped=0;
-  rows.forEach(r=>{
-    const id = r.player_name ? resolvePlayerId(r.player_name) : null;
-    if (!id || !athleteMap[id]){ skipped++; return; }
-    const a = athleteMap[id];
-    if (!a.gameGps) a.gameGps = [];
-    const rowKey = gameGpsKey(r);
-    const entry = {
-      date: r.date, opponent: r.opponent||'', round: r.round||'', minutes_played: pf(r.minutes_played),
-      total_distance_m: pf(r.total_distance_m), hsr_distance_m: pf(r.hsr_distance_m),
+  // Normalize every row to one shape first, whichever export format it
+  // came from -- the original bespoke one this was built for
+  // (player_name/total_distance_m/...) or the Sonra lightweight format
+  // above. Then group by player+date, since the Sonra format can have
+  // more than one row per player per match (e.g. separate halves): sum
+  // them into one entry unless a row is explicitly marked as the whole
+  // match, same "whole session wins, otherwise sum" rule training uses.
+  const normalized = rows.map(r=>{
+    if ('playerDisplayName' in r) return mapSonraGameRow(r);
+    return {
+      date: r.date, opponent: r.opponent||'', round: r.round||'', player_name: r.player_name,
+      minutes_played: pf(r.minutes_played), total_distance_m: pf(r.total_distance_m), hsr_distance_m: pf(r.hsr_distance_m),
       sprint_distance_m: pf(r.sprint_distance_m), accel_decel_count: pf(r.accel_decel_count),
+      accel_count: pf(r.accel_count), decel_count: pf(r.decel_count),
       max_velocity_kmh: pf(r.max_velocity_kmh),
       half1_distance_m: pf(r.half1_distance_m), half1_hsr_m: pf(r.half1_hsr_m),
       half2_distance_m: pf(r.half2_distance_m), half2_hsr_m: pf(r.half2_hsr_m),
+      _whole: true,
     };
+  });
+  const groups = {};
+  normalized.forEach(r=>{
+    if (!r.player_name || !r.date) return;
+    const key = r.player_name+'|'+r.date;
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(r);
+  });
+  Object.values(groups).forEach(group=>{
+    const id = resolvePlayerId(group[0].player_name);
+    if (!id || !athleteMap[id]){ skipped += group.length; return; }
+    const a = athleteMap[id];
+    if (!a.gameGps) a.gameGps = [];
+    const whole = group.length===1 ? group[0] : group.find(r=>r._whole);
+    const sum = f => group.reduce((s,r)=>s+(r[f]||0),0);
+    const entry = whole ? {
+      date: whole.date, opponent: whole.opponent, round: whole.round, minutes_played: whole.minutes_played,
+      total_distance_m: whole.total_distance_m, hsr_distance_m: whole.hsr_distance_m, sprint_distance_m: whole.sprint_distance_m,
+      accel_decel_count: whole.accel_decel_count, accel_count: whole.accel_count, decel_count: whole.decel_count,
+      max_velocity_kmh: whole.max_velocity_kmh,
+      half1_distance_m: whole.half1_distance_m, half1_hsr_m: whole.half1_hsr_m, half2_distance_m: whole.half2_distance_m, half2_hsr_m: whole.half2_hsr_m,
+    } : {
+      date: group[0].date, opponent: (group.map(r=>r.opponent).find(Boolean))||'', round: (group.map(r=>r.round).find(Boolean))||'',
+      minutes_played: sum('minutes_played'), total_distance_m: sum('total_distance_m'), hsr_distance_m: sum('hsr_distance_m'),
+      sprint_distance_m: sum('sprint_distance_m'), accel_decel_count: sum('accel_decel_count'), accel_count: sum('accel_count'), decel_count: sum('decel_count'),
+      max_velocity_kmh: Math.max(0, ...group.map(r=>r.max_velocity_kmh||0)) || null,
+      half1_distance_m: group[0].half1_distance_m, half1_hsr_m: group[0].half1_hsr_m, half2_distance_m: group[0].half2_distance_m, half2_hsr_m: group[0].half2_hsr_m,
+    };
+    const rowKey = gameGpsKey(entry);
     const i = a.gameGps.findIndex(e=>gameGpsKey(e)===rowKey);
     if (i>=0){ a.gameGps[i] = entry; updated++; } else { a.gameGps.push(entry); added++; }
   });
@@ -4149,7 +4211,11 @@ function drawTeamGpsMatch(){
     el.innerHTML = `<div class="hint" style="padding:10px 4px;">No match GPS data yet for this filter.</div>`;
     return;
   }
-  let html = `<div class="pq-heading">Team Totals per Match</div>
+  let html = `<div class="quad-ctrl-row" style="margin-bottom:14px;">
+      <select id="matchDayReportSelect" class="axis-select">${[...matches].reverse().map(m=>`<option value="${m.date}">${m.date}${m.opponent?' vs '+m.opponent:''}</option>`).join('')}</select>
+      <button class="btn-sm" onclick="openMatchDayReport(document.getElementById('matchDayReportSelect').value)">🖨 Print Match Day Report</button>
+    </div>
+    <div class="pq-heading">Team Totals per Match</div>
     <canvas id="teamGpsMatchChart" height="90"></canvas>
     <div class="pq-heading" style="margin-top:18px;">Round-by-Round</div>
     <div class="squad-table-scroll"><table><thead><tr><th>Date</th><th>Round</th><th>Opponent</th><th>Players Tracked</th><th>Team Distance</th><th>Team HSR</th></tr></thead><tbody>
@@ -6415,6 +6481,63 @@ function renderWarmup(){
         <button class="btn-sm" style="margin-top:8px;" onclick="wuAddStep('${r.id}')">+ Add Step</button>
       </div>`;
     }).join('')}`;
+}
+// ============================================================
+// MATCH DAY REPORT — one match's GPS numbers per player, styled as a
+// bar-in-cell table (each cell's fill width = that value relative to the
+// column's own max for this match, independent per column). "# Sprints"
+// isn't something this export provides -- only Sprint Distance -- so
+// that's what's shown, labelled honestly rather than mislabelled as a
+// count.
+// ============================================================
+const MDR_COLS = [
+  { key:'total_distance_m',  label:'TD (m)',        color:'#3d6fb0', fmt:v=>fmt(v) },
+  { key:'hsr_distance_m',    label:'HSR (m)',        color:'#3d6fb0', fmt:v=>fmt(v) },
+  { key:'work_rate',         label:'Ave. M/min',     color:'#2f8f5b', fmt:v=>fmt(v) },
+  { key:'max_velocity_kmh',  label:'Top Speed (kph)',color:'#c8483d', fmt:v=>fmt(v) },
+  { key:'sprint_distance_m', label:'Sprint Dist (m)',color:'#c8483d', fmt:v=>fmt(v) },
+  { key:'accel_count',       label:'#Accelerations', color:'#f26522', fmt:v=>fmt(v) },
+  { key:'decel_count',       label:'#Decelerations', color:'#f26522', fmt:v=>fmt(v) },
+];
+function openMatchDayReport(dateStr){
+  if (!dateStr){ alert('Pick a match first.'); return; }
+  reportKind = 'matchday';
+  mpSetLandscape(true);
+  document.getElementById('rptTrainingControls').style.display = 'none';
+  document.getElementById('reportContent').innerHTML = buildMatchDayReportHtml(dateStr);
+  document.getElementById('overlayReport').classList.add('show');
+}
+function buildMatchDayReportHtml(dateStr){
+  const players = Object.values(athleteMap).filter(a=>genderFilterVal==='all'||a.gender===genderFilterVal);
+  const rows = players.map(a=>{
+    const g = (a.gameGps||[]).find(x=>x.date===dateStr);
+    if (!g) return null;
+    const work_rate = (g.total_distance_m!=null && g.minutes_played) ? g.total_distance_m/g.minutes_played : null;
+    return { name:a.name, total_distance_m:g.total_distance_m, hsr_distance_m:g.hsr_distance_m, work_rate,
+      max_velocity_kmh:g.max_velocity_kmh, sprint_distance_m:g.sprint_distance_m,
+      accel_count: g.accel_count!=null ? g.accel_count : null, decel_count: g.decel_count!=null ? g.decel_count : null,
+      opponent:g.opponent, round:g.round };
+  }).filter(Boolean).sort((a,b)=>(b.total_distance_m||0)-(a.total_distance_m||0));
+  const genDate = new Date().toLocaleDateString('en-AU', {day:'numeric', month:'short', year:'numeric'});
+  const meta = rows[0] || {};
+  if (!rows.length){
+    return `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">Match Day Report</div><div class="rpt-sub">Brisbane Roar · ${dateStr}</div></div>${ROAR_LOGO_SVG}</div>
+      <p style="padding:20px 4px;color:var(--text-muted);">No match GPS data for ${dateStr}.</p>`;
+  }
+  const cols = MDR_COLS.filter(c=>rows.some(r=>r[c.key]!=null));
+  const colMax = {}; cols.forEach(c=>{ colMax[c.key] = Math.max(1, ...rows.map(r=>r[c.key]||0)); });
+  const avg = k => { const vs = rows.map(r=>r[k]).filter(v=>v!=null); return vs.length ? vs.reduce((s,v)=>s+v,0)/vs.length : null; };
+  const barCell = (c, val)=>{
+    if (val==null) return `<td>—</td>`;
+    const pct = Math.max(2, Math.min(100, (val/colMax[c.key])*100));
+    return `<td style="background:linear-gradient(to right, ${c.color}66 ${pct}%, ${c.color}17 ${pct}%); font-weight:700; text-align:center;">${c.fmt(val)}</td>`;
+  };
+  return `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">Match Day Report</div><div class="rpt-sub">Brisbane Roar${meta.opponent?' vs '+meta.opponent:''} · ${dateStr}${meta.round?' · Round '+meta.round:''} · Generated ${genDate}</div></div>${ROAR_LOGO_SVG}</div>
+    <table class="rpt-table"><thead><tr><th>Athlete</th>${cols.map(c=>`<th style="text-align:center;">${c.label}</th>`).join('')}</tr></thead><tbody>
+    ${rows.map(r=>`<tr><td class="lbl">${r.name}</td>${cols.map(c=>barCell(c, r[c.key])).join('')}</tr>`).join('')}
+    <tr style="border-top:2px solid var(--border);font-weight:700;"><td class="lbl">Averages</td>${cols.map(c=>`<td style="text-align:center;">${c.fmt(avg(c.key))}</td>`).join('')}</tr>
+    </tbody></table>
+    <div class="chart-note" style="padding-top:8px;"><span>▪ Bar fill is relative to the highest value in that column for this match, not a fixed scale. "Sprint Dist" is distance, not a sprint-effort count — this data export doesn't provide a count.</span></div>`;
 }
 function openWarmupReport(rId){
   const r = wuGet(rId); if (!r) return;
