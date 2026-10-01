@@ -412,7 +412,7 @@
     <div class="alist" id="alist"><div style="padding:16px;font-size:12px;color:#7a8290;text-align:center">No players yet — add one, or import from a Google Sheet in Settings.</div></div>
     <div class="settings-bar"><span id="sheetStatus">No sheet imported</span><button class="btn-sm" onclick="showConfig()">⚙ Settings</button></div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-09-30 08:05</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-09-30 08:25</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -6267,11 +6267,17 @@ function wuGet(rId){ return WARMUP_ROUTINES.routines.find(r=>r.id===rId); }
 // re-labelled (the old per-routine target has been removed entirely).
 function wuMigrate(){
   WARMUP_ROUTINES.routines.forEach(r=>{
-    r.steps.forEach(s=>{ if (s.distance==null && s.duration!=null){ s.distance = s.duration; delete s.duration; } });
+    r.steps.forEach(s=>{ if (s.distance==null && s.duration!=null){ s.distance = s.duration; delete s.duration; } if (s.seconds===undefined) s.seconds=''; });
     if (r.image===undefined) r.image = null;
   });
 }
 function wuTotal(r){ return r.steps.reduce((s,x)=>s+(Number(x.distance)||0),0); }
+function wuTotalSeconds(r){ return r.steps.reduce((s,x)=>s+(Number(x.seconds)||0),0); }
+function wuMMSS(totalSeconds){
+  totalSeconds = Math.round(Number(totalSeconds)||0);
+  const m = Math.floor(totalSeconds/60), s = totalSeconds%60;
+  return `${m}:${String(s).padStart(2,'0')}`;
+}
 let wuSaveTimer=null;
 function wuPersist(){
   const ind = document.getElementById('wuSavedIndicator'); if (ind) ind.textContent = 'Saving…';
@@ -6298,7 +6304,7 @@ function wuUpdateRoutine(rId, field, val){
 }
 function wuAddStep(rId){
   const r = wuGet(rId); if (!r) return;
-  r.steps.push({ id:wuNewId(), name:'', distance:'', notes:'' });
+  r.steps.push({ id:wuNewId(), name:'', distance:'', seconds:'', notes:'' });
   wuPersist(); renderWarmup();
 }
 function wuDeleteStep(rId, sId){
@@ -6358,7 +6364,7 @@ function renderWarmup(){
   root.innerHTML = `
     <div class="quad-ctrl-row">
       <span class="control-label">Warm Up Routine</span>
-      <span class="ref-note">Write out a routine (e.g. MD Warm Up, MD-1, recovery) as a list of steps with a distance in metres each, add a photo of the setup if useful, then print it.</span>
+      <span class="ref-note">Write out a routine (e.g. MD Warm Up, MD-1, recovery) as a list of steps with a distance in metres and a time in seconds each, add a photo of the setup if useful, then print it.</span>
     </div>
     <div style="display:flex;gap:8px;align-items:center;margin:10px 0 14px;">
       <button class="btn-sm" onclick="wuAddRoutine()">+ Add Routine</button>
@@ -6366,10 +6372,12 @@ function renderWarmup(){
     </div>
     ${WARMUP_ROUTINES.routines.map(r=>{
       const total = wuTotal(r);
+      const totalSec = wuTotalSeconds(r);
       return `<div style="border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:16px;">
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
           <input type="text" value="${r.name.replace(/"/g,'&quot;')}" onchange="wuUpdateRoutine('${r.id}','name',this.value)" style="font-weight:700;font-size:14.5px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;flex:1;min-width:200px;max-width:320px;">
           <span style="font-size:12.5px;font-weight:700;padding:4px 10px;border-radius:14px;background:var(--surface-alt);color:var(--text-secondary);">Total ${fmt(total)} m</span>
+          <span style="font-size:12.5px;font-weight:700;padding:4px 10px;border-radius:14px;background:var(--surface-alt);color:var(--text-secondary);" title="${totalSec} seconds">Total ${wuMMSS(totalSec)} min</span>
           <span style="flex:1;"></span>
           <button class="btn-sm" onclick="openWarmupReport('${r.id}')">🖨 Print</button>
           <button class="btn-sm" style="color:#c8483d;" onclick="wuDeleteRoutine('${r.id}')">Delete Routine</button>
@@ -6387,19 +6395,20 @@ function renderWarmup(){
         </div>
         <div style="overflow-x:auto;">
         <table class="mp-table" style="width:100%;min-width:540px;">
-          <thead><tr><th style="width:26px;"></th><th>Exercise / Drill</th><th>Distance (m)</th><th>Coaching Cue / Notes</th><th></th></tr></thead>
+          <thead><tr><th style="width:26px;"></th><th>Exercise / Drill</th><th>Distance (m)</th><th>Time (sec)</th><th>Coaching Cue / Notes</th><th></th></tr></thead>
           <tbody>
           ${r.steps.length ? r.steps.map((s,i)=>`<tr>
             <td style="color:var(--text-muted);text-align:center;">${i+1}</td>
             <td><input value="${(s.name||'').replace(/"/g,'&quot;')}" onchange="wuUpdateStep('${r.id}','${s.id}','name',this.value)" style="width:220px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;"></td>
             <td><input type="number" step="5" min="0" value="${s.distance}" onchange="wuUpdateStep('${r.id}','${s.id}','distance',this.value)" style="width:70px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;"></td>
+            <td><input type="number" step="5" min="0" value="${s.seconds}" onchange="wuUpdateStep('${r.id}','${s.id}','seconds',this.value)" style="width:70px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;"></td>
             <td><input value="${(s.notes||'').replace(/"/g,'&quot;')}" onchange="wuUpdateStep('${r.id}','${s.id}','notes',this.value)" style="width:260px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;"></td>
             <td style="white-space:nowrap;">
               <button class="btn-sm" title="Move up" ${i===0?'disabled':''} onclick="wuMoveStep('${r.id}','${s.id}',-1)">▲</button>
               <button class="btn-sm" title="Move down" ${i===r.steps.length-1?'disabled':''} onclick="wuMoveStep('${r.id}','${s.id}',1)">▼</button>
               <button class="btn-sm" style="color:#c8483d;" onclick="wuDeleteStep('${r.id}','${s.id}')">✕</button>
             </td>
-          </tr>`).join('') : `<tr><td colspan="5" style="color:var(--text-muted);">No steps yet — click "+ Add Step" to start.</td></tr>`}
+          </tr>`).join('') : `<tr><td colspan="6" style="color:var(--text-muted);">No steps yet — click "+ Add Step" to start.</td></tr>`}
           </tbody>
         </table>
         </div>
@@ -6418,12 +6427,13 @@ function openWarmupReport(rId){
 function buildWarmupReportHtml(r){
   const genDate = new Date().toLocaleDateString('en-AU', {day:'numeric', month:'short', year:'numeric'});
   const total = wuTotal(r);
+  const totalSec = wuTotalSeconds(r);
   const imageHtml = r.image ? `<div class="chart-block" style="text-align:center;margin-bottom:16px;"><img src="${r.image}" style="max-width:100%;max-height:340px;object-fit:contain;border-radius:8px;border:1px solid var(--border);"></div>` : '';
-  return `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">${r.name}</div><div class="rpt-sub">Brisbane Roar · Total ${fmt(total)} m · ${genDate}</div></div>${ROAR_LOGO_SVG}</div>
+  return `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">${r.name}</div><div class="rpt-sub">Brisbane Roar · Total ${fmt(total)} m · ${wuMMSS(totalSec)} min · ${genDate}</div></div>${ROAR_LOGO_SVG}</div>
     ${imageHtml}
-    <table class="rpt-table"><thead><tr><th>#</th><th>Exercise / Drill</th><th>Distance</th><th>Coaching Cue / Notes</th></tr></thead><tbody>
-    ${r.steps.length ? r.steps.map((s,i)=>`<tr><td class="lbl">${i+1}</td><td class="lbl">${s.name||'—'}</td><td>${s.distance?fmt(s.distance)+' m':'—'}</td><td>${s.notes||''}</td></tr>`).join('') : '<tr><td colspan="4" style="color:var(--text-muted);">No steps added.</td></tr>'}
-    <tr style="border-top:2px solid var(--border);font-weight:700;"><td></td><td class="lbl">Total</td><td>${fmt(total)} m</td><td></td></tr>
+    <table class="rpt-table"><thead><tr><th>#</th><th>Exercise / Drill</th><th>Distance</th><th>Time</th><th>Coaching Cue / Notes</th></tr></thead><tbody>
+    ${r.steps.length ? r.steps.map((s,i)=>`<tr><td class="lbl">${i+1}</td><td class="lbl">${s.name||'—'}</td><td>${s.distance?fmt(s.distance)+' m':'—'}</td><td>${s.seconds?wuMMSS(s.seconds):'—'}</td><td>${s.notes||''}</td></tr>`).join('') : '<tr><td colspan="5" style="color:var(--text-muted);">No steps added.</td></tr>'}
+    <tr style="border-top:2px solid var(--border);font-weight:700;"><td></td><td class="lbl">Total</td><td>${fmt(total)} m</td><td>${wuMMSS(totalSec)} min</td><td></td></tr>
     </tbody></table>`;
 }
 
