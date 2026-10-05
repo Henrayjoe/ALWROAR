@@ -425,7 +425,7 @@
     <div class="alist" id="alist"><div style="padding:16px;font-size:12px;color:#7a8290;text-align:center">No players yet — add one, or import from a Google Sheet in Settings.</div></div>
     <div class="settings-bar"><span id="sheetStatus">No sheet imported</span><button class="btn-sm" onclick="showConfig()">⚙ Settings</button></div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-05 06:07</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-05 06:10</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -6624,8 +6624,7 @@ function buildMatchDayReportHtml(dateStr){
     <thead><tr><th>Athlete</th>${cols.map(c=>`<th>${c.label}</th>`).join('')}</tr></thead><tbody>
     ${rows.map(r=>`<tr><td class="lbl">${r.name}</td>${cols.map(c=>barCell(c, r[c.key])).join('')}</tr>`).join('')}
     <tr class="mdr-avg-row"><td class="lbl">Averages</td>${cols.map(c=>`<td class="mdr-c"><div class="mdr-bar"><span class="mdr-v">${c.fmt(avg(c.key))}</span></div></td>`).join('')}</tr>
-    </tbody></table>
-    <div class="chart-note" style="padding-top:8px;"><span>▪ Bar length is relative to the highest value in that column for this match. "Sprint Dist" is distance, not a sprint-effort count (this export doesn't provide one).</span></div>`;
+    </tbody></table>`;
 }
 function openWarmupReport(rId){
   const r = wuGet(rId); if (!r) return;
