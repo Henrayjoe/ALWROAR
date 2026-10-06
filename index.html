@@ -424,8 +424,12 @@
     </div>
     <div class="alist" id="alist"><div style="padding:16px;font-size:12px;color:#7a8290;text-align:center">No players yet — add one, or import from a Google Sheet in Settings.</div></div>
     <div class="settings-bar"><span id="sheetStatus">No sheet imported</span><button class="btn-sm" onclick="showConfig()">⚙ Settings</button></div>
+    <div class="settings-bar" style="flex-wrap:wrap;">
+      <button class="btn-sm" id="btnSaveAll" onclick="saveAllData()" title="Keeps everything currently in the dashboard, even if it's later deleted from the Google Sheets. Without this, the dashboard follows the sheets exactly.">💾 Save all data</button>
+      <span id="saveAllStatus" style="flex:1;text-align:right;white-space:nowrap;">Following the sheet</span>
+    </div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-05 06:10</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-06 03:03</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -808,16 +812,59 @@ function purgeNamelessAthletes(){
   if (removed>0) persistData();
   return removed;
 }
+// Test results FOLLOW the sheet: after a sync each athlete's sessions are
+// exactly what the Results sheet holds right now -- a deleted row is gone,
+// a cleared cell is cleared, a removed "Weekly Screening" tag is removed.
+// (The old merge only ever added/overwrote-with-non-blank, so none of that
+// carried over.) Exempt: sessions typed in with Add Session (_manual) and
+// anything saved with "Save all data" / restored from a backup (_saved).
+// Anything removed is archived for one-click restore. Safeguard: if no row
+// of a non-empty download matched anyone on the roster, nothing is removed
+// (a naming problem or an error page, not an intentionally changed sheet).
 function mergeResultsFromSheet(resultRows){
-  let matched=0, unmatched=0;
+  let matched=0, unmatched=0, removed=0;
+  const fresh = {};   // athleteId -> { test_date -> session built from the sheet }
   resultRows.forEach(r=>{
     const id = resolvePlayerId(r.name);
     if (!id){ unmatched++; return; }
-    const parsed = deriveSession(r); // parses + computes derived fields
-    upsertSession(id, r.test_date, parsed);
+    if (!r.test_date) return;                       // no date = can't be a session
+    const parsed = deriveSession(r);                // parses + computes derived fields
+    if (!fresh[id]) fresh[id] = {};
+    const sess = fresh[id][r.test_date] || (fresh[id][r.test_date] = { test_date: r.test_date });
+    Object.keys(parsed).forEach(k=>{ if (parsed[k]!=null && parsed[k]!=='') sess[k] = parsed[k]; });
     matched++;
   });
-  return {matched, unmatched};
+  if (resultRows.length>0 && matched===0){
+    console.warn('Results sync: no row matched anyone on the roster -- existing test data left in place.');
+    return {matched, unmatched, removed:0, pruned:false};
+  }
+  Object.keys(athleteMap).forEach(id=>{
+    const a = athleteMap[id];
+    const existing = a.sessions || [];
+    const freshByDate = fresh[id] || {};
+    const out = [], seen = new Set();
+    Object.keys(freshByDate).forEach(date=>{
+      const old = existing.find(x=>x.test_date===date);
+      let sess = freshByDate[date];
+      if (old && old._manual){                      // typed in by hand for this same date: keep those values, sheet values fill/override on top
+        const base = Object.assign({}, old);
+        Object.keys(sess).forEach(k=>{ if (sess[k]!=null && sess[k]!=='') base[k] = sess[k]; });
+        sess = base;
+      }
+      if (old && old._manual) sess._manual = true;
+      if (old && old._saved) sess._saved = true;
+      recomputeDerived(sess);
+      out.push(sess); seen.add(date);
+    });
+    existing.forEach(old=>{
+      if (seen.has(old.test_date)) return;
+      if (old._manual || old._saved){ out.push(old); }
+      else { removed++; archiveRemoved('sessions', a, old); }
+    });
+    out.sort((x,y)=> new Date(y.test_date) - new Date(x.test_date));
+    a.sessions = out;
+  });
+  return {matched, unmatched, removed, pruned:true};
 }
 // ============================================================
 // GPS DATA (STATSports) — training-load and match-load tracking,
@@ -1133,11 +1180,20 @@ function mergeGameGpsFromSheet(rows){
       const a = athleteMap[id];
       const before = a.gameGps || [];
       const next = fresh[id] || [];
-      const nextKeys = new Set(next.map(gameGpsKey));
-      const beforeKeys = new Set(before.map(gameGpsKey));
-      removed += before.filter(e=>!nextKeys.has(gameGpsKey(e))).length;
-      next.forEach(e=>{ if (beforeKeys.has(gameGpsKey(e))) updated++; else added++; });
-      a.gameGps = next;
+      const nextDates = new Set(next.map(e=>e.date));
+      const beforeByKey = {}; before.forEach(e=>{ beforeByKey[gameGpsKey(e)] = e; });
+      next.forEach(e=>{
+        const old = beforeByKey[gameGpsKey(e)];
+        if (old){ updated++; if (old._saved) e._saved = true; } else added++;
+      });
+      // A match that's no longer in the sheet survives only if it was saved
+      // ("Save all data"); otherwise it's removed and archived for restore. A
+      // saved copy is dropped if the sheet now has a match on that same date
+      // (the sheet's version wins).
+      const gone = before.filter(e=>!next.some(n=>gameGpsKey(n)===gameGpsKey(e)));
+      const kept = gone.filter(e=>e._saved && !nextDates.has(e.date));
+      gone.filter(e=>!kept.includes(e) && !e._saved).forEach(e=>{ removed++; archiveRemoved('games', a, e); });
+      a.gameGps = [...next, ...kept];
     });
   } else {
     // Couldn't trust this download as a full picture of the sheet: fall back to
@@ -2221,6 +2277,91 @@ function persistData(){
     storageSet('roar-data', JSON.stringify({athletes:Object.values(athleteMap)}));
   }, 200);
 }
+// ============================================================
+// KEEP LAYER — what survives when something disappears from the sheets.
+// By default the dashboard FOLLOWS the Google Sheets exactly (test results
+// and match GPS rebuilt from the sheet on every sync, so deleted rows,
+// cleared cells and removed tags all carry over). Three things are exempt:
+//   _manual : a test session typed in with Add Session
+//   _saved  : anything present when "Save all data" was pressed, or
+//             restored from a backup file
+// Anything a sync does remove is parked in KEEP.removed so a wrong guess
+// (or the first sync after this feature arrived, which tidies away old
+// entries that were never in the sheet) is one click to undo.
+// ============================================================
+let KEEP = { savedAt:null, savedSessions:0, savedGames:0, removed:{ sessions:[], games:[] } };
+const KEEP_ARCHIVE_CAP = 400;
+function persistKeep(){ storageSet('roar-keep', JSON.stringify(KEEP)); }
+function archiveRemoved(kind, athlete, item){
+  const list = KEEP.removed[kind];
+  list.push({ id:athlete.id, name:athlete.name, at:new Date().toISOString(), item });
+  if (list.length > KEEP_ARCHIVE_CAP) list.splice(0, list.length-KEEP_ARCHIVE_CAP);
+}
+function keepWhenText(){
+  const d = new Date(KEEP.savedAt);
+  return d.toLocaleDateString('en-AU',{day:'numeric',month:'short'})+' '+d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+}
+function keepSummaryText(){
+  if (!KEEP.savedAt) return 'Following the sheet — nothing saved';
+  return `Saved ${keepWhenText()} · ${KEEP.savedSessions} test session${KEEP.savedSessions===1?'':'s'}, ${KEEP.savedGames} match${KEEP.savedGames===1?'':'es'}`;
+}
+function updateKeepStatus(){
+  const el = document.getElementById('saveAllStatus');
+  if (el){                                   // short in the narrow sidebar; full detail on hover and in Settings
+    el.textContent = KEEP.savedAt ? `Saved ${keepWhenText()}` : 'Following the sheet';
+    el.title = keepSummaryText();
+  }
+  const pane = document.getElementById('paneBackup');
+  if (pane && document.getElementById('overlaySettings')?.classList.contains('show')) buildPaneBackup();
+}
+// Marks every test session and match currently in the dashboard as kept.
+function saveAllData(){
+  let sessions=0, games=0;
+  Object.values(athleteMap).forEach(a=>{
+    (a.sessions||[]).forEach(x=>{ x._saved = true; sessions++; });
+    (a.gameGps||[]).forEach(g=>{ g._saved = true; games++; });
+  });
+  KEEP.savedAt = new Date().toISOString(); KEEP.savedSessions = sessions; KEEP.savedGames = games;
+  persistData(); persistKeep(); updateKeepStatus();
+  const btn = document.getElementById('btnSaveAll');
+  if (btn){ const t = btn.textContent; btn.textContent = '✓ Saved'; setTimeout(()=>{ btn.textContent = t; }, 1800); }
+}
+// Undo of the above: saved items go back to following the sheet. Sessions
+// you typed in yourself stay (they were never "saved", they're always kept).
+function releaseSavedData(){
+  if (!confirm('Go back to following the sheet only? Saved test results and matches that are no longer in the sheet will be removed on the next sync (you can still restore them from "Removed from the sheet"). Tests you typed in with Add Session are not affected.')) return;
+  Object.values(athleteMap).forEach(a=>{
+    (a.sessions||[]).forEach(x=>{ delete x._saved; });
+    (a.gameGps||[]).forEach(g=>{ delete g._saved; });
+  });
+  KEEP.savedAt = null; KEEP.savedSessions = 0; KEEP.savedGames = 0;
+  persistData(); persistKeep(); updateKeepStatus();
+}
+function restoreRemovedData(){
+  let ts=0, tg=0;
+  const find = r => athleteMap[r.id] || Object.values(athleteMap).find(a=>normalizeName(a.name)===normalizeName(r.name));
+  KEEP.removed.sessions.forEach(r=>{
+    const a = find(r); if (!a) return;
+    if (!a.sessions) a.sessions = [];
+    if (a.sessions.some(x=>x.test_date===r.item.test_date)) return;   // the sheet has that date again -- the sheet wins
+    a.sessions.push(Object.assign({}, r.item, { _saved:true })); ts++;
+    a.sessions.sort((x,y)=> new Date(y.test_date) - new Date(x.test_date));
+  });
+  KEEP.removed.games.forEach(r=>{
+    const a = find(r); if (!a) return;
+    if (!a.gameGps) a.gameGps = [];
+    if (a.gameGps.some(x=>x.date===r.item.date)) return;
+    a.gameGps.push(Object.assign({}, r.item, { _saved:true })); tg++;
+  });
+  KEEP.removed = { sessions:[], games:[] };
+  persistData(); persistKeep(); updateKeepStatus(); renderSidebar(); renderMain();
+  alert(`Restored ${ts} test session${ts===1?'':'s'} and ${tg} match${tg===1?'':'es'}. They're now saved, so they'll stay even though they're not in the sheet.`);
+}
+function clearRemovedArchive(){
+  if (!confirm('Permanently forget the items that were removed from the sheet?')) return;
+  KEEP.removed = { sessions:[], games:[] };
+  persistKeep(); updateKeepStatus();
+}
 // Photos live in their own key, not bundled into roar-data or roar-config --
 // roar-data is already the biggest blob (full GPS/test history) and
 // adding image data to it risks pushing a single key over its size limit
@@ -2316,7 +2457,13 @@ async function loadPersisted(){
     const raw = await storageGet('roar-warmup');
     if (raw) WARMUP_ROUTINES = Object.assign(WARMUP_ROUTINES, JSON.parse(raw));
   }catch(e){ /* nothing saved yet */ }
+  try{
+    const raw = await storageGet('roar-keep');
+    if (raw) KEEP = Object.assign(KEEP, JSON.parse(raw));
+    if (!KEEP.removed) KEEP.removed = { sessions:[], games:[] };
+  }catch(e){ /* nothing saved yet */ }
   purgeNamelessAthletes();
+  updateKeepStatus();
 }
 
 // ============================================================
@@ -2384,20 +2531,26 @@ async function importFromSheet(silent){
     const [aText,rText] = await Promise.all([fetchSheet(CONFIG.athletesUrl), fetchSheet(CONFIG.resultsUrl)]);
     const athletes=parseCSV(aText), results=parseCSV(rText);
     const {added,updated} = mergeAthletesFromSheet(athletes);
-    const {matched,unmatched} = mergeResultsFromSheet(results);
+    const resultsOut = mergeResultsFromSheet(results);
+    const {matched,unmatched} = resultsOut;
+    let removedCount = resultsOut.removed || 0;
     // GPS sheets are optional — only fetch/merge if a URL has been set.
     if (CONFIG.trainingGpsUrl){
       try{ mergeTrainingGpsFromSheet(parseCSV(await fetchSheet(CONFIG.trainingGpsUrl))); }
       catch(e){ console.warn('Training GPS sync failed:', e.message); }
     }
     if (CONFIG.gameGpsUrl){
-      try{ mergeGameGpsFromSheet(parseCSV(await fetchSheet(CONFIG.gameGpsUrl))); }
+      try{ const g = mergeGameGpsFromSheet(parseCSV(await fetchSheet(CONFIG.gameGpsUrl))); removedCount += (g.removed||0); }
       catch(e){ console.warn('Game GPS sync failed:', e.message); }
     }
     purgeNamelessAthletes();
-    persistData(); persist();
+    persistData(); persist(); persistKeep();
     const stamp = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
-    if (statusEl) statusEl.textContent = `${Object.keys(athleteMap).length} players · synced ${stamp}`;
+    if (statusEl){
+      statusEl.textContent = `${Object.keys(athleteMap).length} players · synced ${stamp}` + (removedCount ? ` · ${removedCount} removed` : '');
+      statusEl.title = removedCount ? `${removedCount} test result(s)/match(es) were removed because they're no longer in the sheet. Settings → Backup & saved data → "Removed from the sheet" to restore them.` : '';
+    }
+    updateKeepStatus();
     if (!selectedId){ const ids=Object.keys(athleteMap); if(ids.length) selectedId=ids[0]; }
     renderSidebar(); renderMain();
     refreshReportModalIfOpen();
@@ -5381,6 +5534,9 @@ function handleRestoreFile(evt){
       rows.forEach(a=>{
         const id = upsertPlayer(a, nameIndex[normalizeName(a.name)]);
         (a.sessions||[]).forEach(s=> upsertSession(id, s.test_date, s));
+        // restoring a backup is a deliberate "keep this": mark it saved so the next sheet sync doesn't clear it
+        (athleteMap[id].sessions||[]).forEach(x=>{ x._saved = true; });
+        (athleteMap[id].gameGps||[]).forEach(g=>{ g._saved = true; });
       });
       persistData();
       if (!selectedId){ const ids=Object.keys(athleteMap); if(ids.length) selectedId=ids[0]; }
@@ -5394,7 +5550,19 @@ function handleRestoreFile(evt){
 function buildPaneBackup(){
   const n = Object.keys(athleteMap).length;
   const sessions = Object.values(athleteMap).reduce((sum,a)=>sum+a.sessions.length,0);
+  const rm = KEEP.removed, rmTotal = rm.sessions.length + rm.games.length;
+  const rmNames = [...new Set([...rm.sessions, ...rm.games].map(r=>r.name))].slice(0,6).join(', ');
   document.getElementById('paneBackup').innerHTML = `
+    <div class="subhead" style="margin-top:0;">Saved data</div>
+    <p class="hint" style="margin-top:0;">By default the dashboard <b>follows your Google Sheets exactly</b>: delete a test result or match from the sheet and it disappears from the dashboard on the next sync; change or clear a cell (or remove a "Weekly Screening" tag) and that carries over too. <b>Save all data</b> keeps everything that's in the dashboard right now, even if it's later removed from the sheet. Tests you type in with Add Session, and backups you restore, are always kept. Training GPS isn't affected either way.</p>
+    <button class="btn-sm" onclick="saveAllData()">💾 Save all data</button>
+    <button class="btn-sm" onclick="releaseSavedData()" ${KEEP.savedAt?'':'disabled'}>Go back to following the sheet only</button>
+    <p class="hint">${keepSummaryText()}</p>
+    <div class="subhead">Removed from the sheet</div>
+    ${rmTotal ? `<p class="hint" style="margin-top:0;">${rm.sessions.length} test session${rm.sessions.length===1?'':'s'} and ${rm.games.length} match${rm.games.length===1?'':'es'} were removed because they're no longer in the sheet${rmNames?` (${rmNames}${[...new Set([...rm.sessions, ...rm.games].map(r=>r.name))].length>6?', …':''})`:''}. If that wasn't intended, restore them — they'll then be saved and stay.</p>
+      <button class="btn-sm" onclick="restoreRemovedData()">↩ Restore them</button>
+      <button class="btn-sm" style="color:#c8483d;" onclick="clearRemovedArchive()">Forget them</button>`
+      : `<p class="hint" style="margin-top:0;">Nothing has been removed by a sync.</p>`}
     <p class="hint" style="margin-top:0;">${n} player${n===1?'':'s'}, ${sessions} session${sessions===1?'':'s'} currently stored in this dashboard. This data lives in your account's storage — it isn't in your Google Sheet unless you've imported from it, and dashboard entries don't write back to the Sheet automatically. Export a copy whenever you want a safety net.</p>
     <div class="subhead" style="margin-top:0;">Full backup (recommended)</div>
     <button class="btn-sm" onclick="exportJSONBackup()">⬇ Download full backup (.json)</button>
@@ -5506,7 +5674,8 @@ function saveAddSession(){
   });
   const notes = document.getElementById('sNotes').value.trim();
   if (notes) fields.notes = notes;
-  upsertSession(playerId, date, fields);
+  const savedSession = upsertSession(playerId, date, fields);
+  if (savedSession) savedSession._manual = true;     // typed in by hand: never removed by a sheet sync
   persistData();
   document.getElementById('overlaySession').classList.remove('show');
   selectedId = playerId;
