@@ -429,7 +429,7 @@
       <span id="saveAllStatus" style="flex:1;text-align:right;white-space:nowrap;">Following the sheet</span>
     </div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-06 03:03</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-08 16:10</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -3212,7 +3212,15 @@ function drawGpsMatch(){
     fatigueHtml = `<div class="cat-card" style="border-left:3px solid ${declining?'#c8483d':'#2f8f5b'}"><div class="cat-name">2nd Half vs 1st Half (per min)</div><div class="cat-status" style="color:${declining?'#c8483d':'#2f8f5b'}">${pctChange>=0?'+':''}${fmt(pctChange)}%</div>${declining?'<div class="pq-sub">Notable decline — possible fatigue signal</div>':''}</div>`;
   }
 
-  let html = `<div class="tp-sw-grid" style="grid-template-columns:repeat(4,1fr);">
+  let html = `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
+    <span class="hint" style="margin:0;">Athlete match report:</span>
+    <select id="pmrSel" class="btn-sm" style="padding:6px 8px;">
+      <option value="all">All matches</option><option value="last5">Last 5 matches</option>
+      ${[...games].reverse().map(g=>`<option value="${g.date}">${g.date}${g.opponent?' · vs '+g.opponent:''}</option>`).join('')}
+    </select>
+    <button class="btn-sm" onclick="openPlayerMatchReport('${a.id}', document.getElementById('pmrSel').value)">🖨 Print Athlete Match Report</button>
+  </div>
+  <div class="tp-sw-grid" style="grid-template-columns:repeat(4,1fr);">
     <div class="cat-card"><div class="cat-name">Latest Match Distance</div><div class="cat-status">${fmt(latest.total_distance_m)} m</div></div>
     <div class="cat-card"><div class="cat-name">Latest Match HSR</div><div class="cat-status">${fmt(latest.hsr_distance_m)} m</div></div>
     <div class="cat-card"><div class="cat-name">Max Velocity</div><div class="cat-status">${pctBest!=null?fmt(pctBest)+'%':'—'}</div>${pctBest!=null?'<div class="pq-sub">of personal best</div>':''}</div>
@@ -4201,7 +4209,7 @@ function printReport(){
   // Reports that must stay on exactly one page: the weekly training report (portrait, 12mm margins)
   // and the Match Day Report (landscape, 10mm margins -- already sized per player count, so this
   // only ever kicks in as a last resort for a very large squad).
-  const fitMm = (reportKind==='training' && reportMode==='week') ? (297-24) : (reportKind==='matchday' ? (210-20) : 0);
+  const fitMm = (reportKind==='training' && reportMode==='week') ? (297-24) : ((reportKind==='matchday'||reportKind==='playermatch') ? (210-20) : 0);
   if (fitMm){
     const naturalHeight = inner.scrollHeight;
     const pageHeightPx = fitMm * 96/25.4 * 0.97; // page minus margins, 96dpi CSS reference, small safety margin
@@ -6793,6 +6801,65 @@ function buildMatchDayReportHtml(dateStr){
     <thead><tr><th>Athlete</th>${cols.map(c=>`<th>${c.label}</th>`).join('')}</tr></thead><tbody>
     ${rows.map(r=>`<tr><td class="lbl">${r.name}</td>${cols.map(c=>barCell(c, r[c.key])).join('')}</tr>`).join('')}
     <tr class="mdr-avg-row"><td class="lbl">Averages</td>${cols.map(c=>`<td class="mdr-c"><div class="mdr-bar"><span class="mdr-v">${c.fmt(avg(c.key))}</span></div></td>`).join('')}</tr>
+    </tbody></table>`;
+}
+
+// ============================================================
+// ATHLETE MATCH REPORT — athlete-facing, one player's matches as bar-in-cell
+// rows (same look as the Match Day Report) with her own average and the
+// Team Average (all same-gender players who played those same matches) at the bottom.
+// ============================================================
+function pmrRowFor(g){
+  const work_rate = (g.total_distance_m!=null && g.minutes_played) ? g.total_distance_m/g.minutes_played : null;
+  return { total_distance_m:g.total_distance_m, hsr_distance_m:g.hsr_distance_m, work_rate,
+    max_velocity_kmh:g.max_velocity_kmh, sprint_distance_m:g.sprint_distance_m,
+    accel_count:g.accel_count!=null?g.accel_count:null, decel_count:g.decel_count!=null?g.decel_count:null,
+    minutes_played:g.minutes_played };
+}
+function openPlayerMatchReport(athleteId, sel){
+  const a = athleteMap[athleteId]; if (!a) return;
+  reportKind = 'playermatch';
+  mpSetLandscape(true);
+  document.getElementById('rptTrainingControls').style.display = 'none';
+  document.getElementById('reportContent').innerHTML = buildPlayerMatchReportHtml(a, sel||'all');
+  document.getElementById('overlayReport').classList.add('show');
+}
+function buildPlayerMatchReportHtml(a, sel){
+  let games = [...(a.gameGps||[])].sort((x,y)=>new Date(x.date)-new Date(y.date));
+  if (sel==='last5') games = games.slice(-5);
+  else if (sel && sel!=='all') games = games.filter(g=>g.date===sel);
+  if (games.length > 14) games = games.slice(-14);
+  if (!games.length){
+    return `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">${a.name} — Match Report</div><div class="rpt-sub">Brisbane Roar</div></div>${ROAR_LOGO_SVG}</div><p style="padding:20px 4px;color:var(--text-muted);">No match GPS data yet.</p>`;
+  }
+  const dates = new Set(games.map(g=>g.date));
+  const mates = Object.values(athleteMap).filter(p=>p.gender===a.gender);
+  const teamRows = [];
+  mates.forEach(p=>(p.gameGps||[]).forEach(g=>{ if (dates.has(g.date)) teamRows.push(pmrRowFor(g)); }));
+  const mine = games.map(g=>({ ...pmrRowFor(g), date:g.date, opponent:g.opponent, round:g.round }));
+  const avgOf = (rows,k)=>{ const vs = rows.map(r=>r[k]).filter(v=>v!=null); return vs.length ? vs.reduce((s,v)=>s+v,0)/vs.length : null; };
+  const myAvg = {}, teamAvg = {};
+  const cols = MDR_COLS.filter(c=>mine.some(r=>r[c.key]!=null));
+  cols.forEach(c=>{ myAvg[c.key]=avgOf(mine,c.key); teamAvg[c.key]=avgOf(teamRows,c.key); });
+  const colMax = {}; cols.forEach(c=>{ colMax[c.key] = Math.max(1, ...mine.map(r=>r[c.key]||0), teamAvg[c.key]||0); });
+  const showMyAvg = mine.length > 1;
+  const sz = mdrSizing(mine.length + 1 + (showMyAvg?1:0));
+  const bar = (c,val)=>{
+    if (val==null) return `<td class="mdr-c">—</td>`;
+    const pct = val>0 ? Math.max(3, Math.min(100,(val/colMax[c.key])*100)) : 0;
+    return `<td class="mdr-c"><div class="mdr-bar" style="background:${c.color}1f;"><div class="mdr-fill" style="width:${pct}%;background:${c.color}7a;"></div><span class="mdr-v">${c.fmt(val)}</span></div></td>`;
+  };
+  const plain = (c,val)=>`<td class="mdr-c"><div class="mdr-bar"><span class="mdr-v">${val!=null?c.fmt(val):'—'}</span></div></td>`;
+  const colW = (68/cols.length).toFixed(2);
+  const sub = games.length===1 ? `${games[0].opponent?'vs '+games[0].opponent+' · ':''}${games[0].date}` : `${games.length} matches · ${games[0].date} to ${games[games.length-1].date}`;
+  const label = r => `${r.date}${r.opponent?' · '+r.opponent:''}`;
+  return `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">${a.name} — Match Report</div><div class="rpt-sub">Brisbane Roar · ${sub}</div></div>${ROAR_LOGO_SVG}</div>
+    <table class="rpt-table mdr-table" style="--mdr-pad:${sz.pad}px;--mdr-bar-h:${sz.barH}px;--mdr-font:${sz.font}px;">
+    <colgroup><col style="width:20%"><col style="width:8%">${cols.map(()=>`<col style="width:${colW}%">`).join('')}</colgroup>
+    <thead><tr><th>Match</th><th>Mins</th>${cols.map(c=>`<th>${c.label}</th>`).join('')}</tr></thead><tbody>
+    ${mine.map(r=>`<tr><td class="lbl">${label(r)}</td><td class="mdr-c">${r.minutes_played!=null?fmt(r.minutes_played):'—'}</td>${cols.map(c=>bar(c,r[c.key])).join('')}</tr>`).join('')}
+    ${showMyAvg?`<tr class="mdr-avg-row"><td class="lbl">${a.name.split(' ')[0]} Average</td><td class="mdr-c">${fmt(avgOf(mine,'minutes_played'))}</td>${cols.map(c=>plain(c,myAvg[c.key])).join('')}</tr>`:''}
+    <tr class="mdr-avg-row"><td class="lbl">Team Average</td><td class="mdr-c">${fmt(avgOf(teamRows,'minutes_played'))}</td>${cols.map(c=>plain(c,teamAvg[c.key])).join('')}</tr>
     </tbody></table>`;
 }
 function openWarmupReport(rId){
