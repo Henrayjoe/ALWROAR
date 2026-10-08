@@ -429,7 +429,7 @@
       <span id="saveAllStatus" style="flex:1;text-align:right;white-space:nowrap;">Following the sheet</span>
     </div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-08 19:40</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-09 10:10</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -2458,6 +2458,10 @@ async function loadPersisted(){
     if (raw) WARMUP_ROUTINES = Object.assign(WARMUP_ROUTINES, JSON.parse(raw));
   }catch(e){ /* nothing saved yet */ }
   try{
+    const raw = await storageGet('roar-topups');
+    if (raw) TOPUPS = Object.assign(TOPUPS, JSON.parse(raw));
+  }catch(e){ /* nothing saved yet */ }
+  try{
     const raw = await storageGet('roar-keep');
     if (raw) KEEP = Object.assign(KEEP, JSON.parse(raw));
     if (!KEEP.removed) KEEP.removed = { sessions:[], games:[] };
@@ -2627,6 +2631,7 @@ function switchTeamTab(t){
   if (t==='weekcompare') setTimeout(renderWeekCompare,60);
   if (t==='gpscoverage') setTimeout(renderGpsCoverage,60);
   if (t==='warmup') setTimeout(renderWarmup,60);
+  if (t==='topups') setTimeout(renderTopups,60);
 }
 
 // ============================================================
@@ -3349,6 +3354,7 @@ function renderTeam(){
         <div class="team-tab tab" data-t="weekcompare" onclick="switchTeamTab('weekcompare')">Week Comparison</div>
         <div class="team-tab tab" data-t="gpscoverage" onclick="switchTeamTab('gpscoverage')">GPS Coverage</div>
         <div class="team-tab tab" data-t="warmup" onclick="switchTeamTab('warmup')">Warm Up Routine</div>
+        <div class="team-tab tab" data-t="topups" onclick="switchTeamTab('topups')">Top-Ups</div>
       </div>
       <div class="team-tc tc active" data-t="squad"><div class="quad-body" style="padding-bottom:0;">
         <div class="quad-ctrl-row">${refToggleHtml('heatmap', refFrame.heatmap)}<span class="ref-note">Cell color = status against the selected reference. Toggle changes color only, not the raw values shown.</span></div>
@@ -3450,6 +3456,7 @@ function renderTeam(){
       <div class="team-tc tc" data-t="weekcompare"><div class="quad-body" id="weekCompareRoot" style="padding:16px 20px;"></div></div>
       <div class="team-tc tc" data-t="gpscoverage"><div class="quad-body" id="gpsCoverageRoot" style="padding:16px 20px;"></div></div>
       <div class="team-tc tc" data-t="warmup"><div class="quad-body" id="warmupRoot" style="padding:16px 20px;"></div></div>
+      <div class="team-tc tc" data-t="topups"><div class="quad-body" id="topupsRoot" style="padding:16px 20px;"></div></div>
     </div>`;
   buildSquadTable();
   buildTeamTrendMetricOptions();
@@ -4210,7 +4217,7 @@ function printReport(){
   // Reports that must stay on exactly one page: the weekly training report (portrait, 12mm margins)
   // and the Match Day Report (landscape, 10mm margins -- already sized per player count, so this
   // only ever kicks in as a last resort for a very large squad).
-  const fitMm = (reportKind==='training' && reportMode==='week') ? (297-24) : ((reportKind==='matchday'||reportKind==='playermatch') ? (210-20) : 0);
+  const fitMm = (reportKind==='training' && reportMode==='week') ? (297-24) : ((reportKind==='matchday'||reportKind==='playermatch'||reportKind==='topups') ? (210-20) : 0);
   if (fitMm){
     const naturalHeight = inner.scrollHeight;
     const pageHeightPx = fitMm * 96/25.4 * 0.97; // page minus margins, 96dpi CSS reference, small safety margin
@@ -6861,6 +6868,153 @@ function buildPlayerMatchReportHtml(a, sel){
     ${mine.map(r=>`<tr><td class="lbl">${label(r)}</td><td class="mdr-c">${r.minutes_played!=null?fmt(r.minutes_played):'—'}</td>${cols.map(c=>bar(c,r[c.key])).join('')}</tr>`).join('')}
     ${showMyAvg?`<tr class="mdr-avg-row"><td class="lbl">${a.name.split(' ')[0]} Average</td><td class="mdr-c">${fmt(avgOf(mine,'minutes_played'))}</td>${cols.map(c=>plain(c,myAvg[c.key])).join('')}</tr>`:''}
     <tr class="mdr-avg-row"><td class="lbl">Team Average</td><td class="mdr-c">${fmt(avgOf(teamRows,'minutes_played'))}</td>${cols.map(c=>plain(c,teamAvg[c.key])).join('')}</tr>
+    </tbody></table>`;
+}
+
+// ============================================================
+// TEAM TOP-UPS — general positional match demands (not tied to a player's
+// own past games). For a chosen match, each player's TD / HSR / Sprint is
+// compared with her position's target; whatever is short of the target is
+// the top-up to deliver (post-match for those who played less, or as a
+// make-up exposure for those who didn't play).
+// ============================================================
+const TOPUP_DEFAULT_TARGETS = {
+  'CB':    { td:[9300,10000],  hsr:[250,400], hsrT:325, spr:[30,80],   sprT:55  },
+  'FB':    { td:[10000,10800], hsr:[550,750], hsrT:650, spr:[100,200], sprT:150 },
+  'DM/CM': { td:[10500,11000], hsr:[450,600], hsrT:525, spr:[50,100],  sprT:75  },
+  'AM':    { td:[10000,10800], hsr:[500,650], hsrT:575, spr:[80,150],  sprT:115 },
+  'W':     { td:[10000,10800], hsr:[600,800], hsrT:700, spr:[150,250], sprT:200 },
+  'ST/CF': { td:[9500,10300],  hsr:[500,700], hsrT:600, spr:[150,250], sprT:200 },
+};
+const TOPUP_DEFAULT_PLAYERS = {
+  'CB':['Josie Studder','Isabella Hoyos','Ruby Cuthbert','Hali Long'],
+  'FB':['Annabel Martin','Izzy Hodgson','Amali Kinsella','Nat Tathem'],
+  'DM/CM':['Rosie Curtis','Zara Kruger','Katrina Guillou','Emily Roach'],
+  'AM':['Kijah Stephenson'],
+  'W':['Sharn Frier','Lily Punch','Abby Smothers','Murphy Angnew'],
+  'ST/CF':['Grace Kuliamu','Daisy Brown','Maja Maroksvki'],
+};
+let TOPUPS = { targets: JSON.parse(JSON.stringify(TOPUP_DEFAULT_TARGETS)), assign:{}, seeded:{}, mode:'target', matchDate:'' };
+let tuSaveTimer = null;
+function tuPersist(){
+  const ind = document.getElementById('tuSaved'); if (ind) ind.textContent = 'Saving…';
+  clearTimeout(tuSaveTimer);
+  tuSaveTimer = setTimeout(async ()=>{
+    await storageSet('roar-topups', JSON.stringify(TOPUPS));
+    const el = document.getElementById('tuSaved');
+    if (el){ el.textContent = 'Saved ✓'; setTimeout(()=>{ if (el.textContent==='Saved ✓') el.textContent=''; }, 2000); }
+  }, 400);
+}
+function tuSeedAssignments(){
+  const missing = [];
+  Object.keys(TOPUP_DEFAULT_PLAYERS).forEach(pos=>TOPUP_DEFAULT_PLAYERS[pos].forEach(nm=>{
+    const id = resolvePlayerId(nm);
+    if (!id){ missing.push(nm); return; }
+    if (!TOPUPS.seeded[id] && TOPUPS.assign[id]===undefined){ TOPUPS.assign[id] = pos; }
+    TOPUPS.seeded[id] = true;
+  }));
+  return missing;
+}
+function tuMatchDates(){
+  const set = new Set();
+  Object.values(athleteMap).forEach(a=>(a.gameGps||[]).forEach(g=>set.add(g.date)));
+  return [...set].sort().reverse();
+}
+function tuCompute(dateStr){
+  const players = Object.values(athleteMap).filter(a=>genderFilterVal==='all'||a.gender===genderFilterVal);
+  const order = Object.keys(TOPUPS.targets);
+  const rows = [];
+  players.forEach(a=>{
+    const pos = TOPUPS.assign[a.id];
+    if (!pos || !TOPUPS.targets[pos]) return;
+    const t = TOPUPS.targets[pos];
+    const g = (a.gameGps||[]).find(x=>x.date===dateStr);
+    const useLow = TOPUPS.mode==='low';
+    const tgt = {
+      td: useLow ? t.td[0] : (t.td[0]+t.td[1])/2,
+      hsr: useLow ? t.hsr[0] : t.hsrT,
+      spr: useLow ? t.spr[0] : t.sprT,
+    };
+    const act = g ? { td:g.total_distance_m, hsr:g.hsr_distance_m, spr:g.sprint_distance_m } : { td:null, hsr:null, spr:null };
+    const gap = k => act[k]==null ? tgt[k] : Math.max(0, tgt[k]-act[k]);
+    rows.push({ id:a.id, name:a.name, pos, played:!!g, mins:g?g.minutes_played:null, t, tgt, act,
+      gapTd:gap('td'), gapHsr:gap('hsr'), gapSpr:gap('spr') });
+  });
+  rows.sort((x,y)=>order.indexOf(x.pos)-order.indexOf(y.pos) || x.name.localeCompare(y.name));
+  return rows;
+}
+function tuStatus(v, range){   // v actual vs [lo,hi]
+  if (v==null) return {c:'#8a919c', t:'no data'};
+  if (v < range[0]) return {c:'#c8483d', t:'below'};
+  if (v > range[1]) return {c:'#3d6fb0', t:'above'};
+  return {c:'#2f8f5b', t:'in range'};
+}
+function tuSetTarget(pos, field, idx, val){
+  const v = parseFloat(val); if (isNaN(v)) return;
+  const t = TOPUPS.targets[pos];
+  if (idx==null) t[field] = v; else t[field][idx] = v;
+  tuPersist(); renderTopups();
+}
+function tuSetAssign(id, pos){ TOPUPS.assign[id] = pos; TOPUPS.seeded[id] = true; tuPersist(); renderTopups(); }
+function tuSetMode(m){ TOPUPS.mode = m; tuPersist(); renderTopups(); }
+function tuSetDate(d){ TOPUPS.matchDate = d; tuPersist(); renderTopups(); }
+function renderTopups(){
+  const root = document.getElementById('topupsRoot'); if (!root) return;
+  const missing = tuSeedAssignments();
+  const dates = tuMatchDates();
+  if (!TOPUPS.matchDate || !dates.includes(TOPUPS.matchDate)) TOPUPS.matchDate = dates[0] || '';
+  const rows = TOPUPS.matchDate ? tuCompute(TOPUPS.matchDate) : [];
+  const posKeys = Object.keys(TOPUPS.targets);
+  const numIn = (pos,f,i,v,w)=>`<input type="number" value="${v}" style="width:${w||64}px;padding:4px 5px;font-size:12px;" onchange="tuSetTarget('${pos}','${f}',${i},this.value)">`;
+  const targetTbl = `<div class="squad-table-scroll"><table><thead><tr><th>Position</th><th>TD min</th><th>TD max</th><th>HSR min</th><th>HSR target</th><th>HSR max</th><th>Sprint min</th><th>Sprint target</th><th>Sprint max</th></tr></thead><tbody>
+    ${posKeys.map(pos=>{ const t=TOPUPS.targets[pos]; return `<tr><td class="lbl"><b>${pos}</b></td><td>${numIn(pos,'td',0,t.td[0])}</td><td>${numIn(pos,'td',1,t.td[1])}</td><td>${numIn(pos,'hsr',0,t.hsr[0],56)}</td><td>${numIn(pos,'hsrT',null,t.hsrT,56)}</td><td>${numIn(pos,'hsr',1,t.hsr[1],56)}</td><td>${numIn(pos,'spr',0,t.spr[0],56)}</td><td>${numIn(pos,'sprT',null,t.sprT,56)}</td><td>${numIn(pos,'spr',1,t.spr[1],56)}</td></tr>`; }).join('')}
+    </tbody></table></div>`;
+  const need = (k)=>rows.filter(r=>r[k]>0).length;
+  const body = rows.length ? `<div class="squad-table-scroll"><table><thead><tr><th>Athlete</th><th>Position</th><th>Mins</th><th>TD</th><th>HSR</th><th>Sprint</th><th>Top-up HSR (m)</th><th>Top-up Sprint (m)</th></tr></thead><tbody>
+    ${rows.map(r=>{
+      const sTd=tuStatus(r.act.td,r.t.td), sH=tuStatus(r.act.hsr,r.t.hsr), sS=tuStatus(r.act.spr,r.t.spr);
+      const cell=(v,s)=>`<td style="color:${s.c};font-weight:600;">${v!=null?fmt(v):'—'}</td>`;
+      return `<tr><td class="lbl">${r.name}${r.played?'':' <span class="hint" style="margin:0;">(did not play)</span>'}</td>
+        <td><select style="font-size:12px;padding:3px;" onchange="tuSetAssign('${r.id}',this.value)">${posKeys.map(k=>`<option ${k===r.pos?'selected':''}>${k}</option>`).join('')}<option value="">Exclude</option></select></td>
+        <td>${r.mins!=null?fmt(r.mins):'—'}</td>${cell(r.act.td,sTd)}${cell(r.act.hsr,sH)}${cell(r.act.spr,sS)}
+        <td><b>${r.gapHsr>0?fmt(r.gapHsr):'✓'}</b></td><td><b>${r.gapSpr>0?fmt(r.gapSpr):'✓'}</b></td></tr>`;
+    }).join('')}
+    </tbody></table></div>
+    <p class="hint">Colour = actual vs the position range (green in range, red below, blue above). Top-up = target minus actual (never negative); a player who didn't play gets the full target. Players set to "Exclude" (injured/rehab) are left out.</p>`
+    : `<div class="hint" style="padding:10px 4px;">No match GPS data yet, or no players assigned to a position.</div>`;
+  root.innerHTML = `
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
+      <span class="pq-heading" style="margin:0;">Match</span>
+      <select class="btn-sm" style="padding:6px 8px;" onchange="tuSetDate(this.value)">${dates.map(d=>{ const g=Object.values(athleteMap).flatMap(a=>a.gameGps||[]).find(x=>x.date===d); return `<option value="${d}" ${d===TOPUPS.matchDate?'selected':''}>${d}${g&&g.opponent?' · vs '+g.opponent:''}</option>`; }).join('')}</select>
+      <span class="pq-heading" style="margin:0 0 0 10px;">Top up to</span>
+      <select class="btn-sm" style="padding:6px 8px;" onchange="tuSetMode(this.value)"><option value="target" ${TOPUPS.mode==='target'?'selected':''}>Position target</option><option value="low" ${TOPUPS.mode==='low'?'selected':''}>Bottom of range</option></select>
+      <button class="btn-sm" onclick="openTopupsReport()">🖨 Print Top-Ups</button>
+      <span id="tuSaved" style="font-size:11px;color:var(--text-muted);"></span>
+    </div>
+    ${rows.length?`<div class="hint" style="margin:0 0 10px;"><b>${need('gapHsr')}</b> players need an HSR top-up · <b>${need('gapSpr')}</b> need a sprint top-up</div>`:''}
+    ${body}
+    ${missing.length?`<p class="hint" style="color:#c8483d;">Not found in the roster (check spelling): ${missing.join(', ')}</p>`:''}
+    <div class="pq-heading" style="margin-top:22px;">Positional match targets (editable)</div>
+    <p class="hint">General positional demands for a full match, not individual history. TD is a range (the midpoint is used as the target).</p>
+    ${targetTbl}`;
+}
+function openTopupsReport(){
+  if (!TOPUPS.matchDate){ alert('No match selected.'); return; }
+  reportKind = 'topups';
+  mpSetLandscape(true);
+  document.getElementById('rptTrainingControls').style.display = 'none';
+  document.getElementById('reportContent').innerHTML = buildTopupsReportHtml();
+  document.getElementById('overlayReport').classList.add('show');
+}
+function buildTopupsReportHtml(){
+  const rows = tuCompute(TOPUPS.matchDate);
+  const g = Object.values(athleteMap).flatMap(a=>a.gameGps||[]).find(x=>x.date===TOPUPS.matchDate);
+  const sub = `Brisbane Roar${g&&g.opponent?' vs '+g.opponent:''} · ${TOPUPS.matchDate} · Top up to ${TOPUPS.mode==='low'?'bottom of position range':'position target'}`;
+  const f = v=>v!=null?fmt(v):'—';
+  const sz = rows.length>20 ? 11 : 12.5;
+  return `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">Team Top-Ups</div><div class="rpt-sub">${sub}</div></div>${ROAR_LOGO_SVG}</div>
+    <table class="rpt-table" style="font-size:${sz}px;"><thead><tr><th>Athlete</th><th>Pos</th><th>Mins</th><th>TD (m)</th><th>HSR (m)</th><th>HSR target</th><th>HSR top-up</th><th>Sprint (m)</th><th>Sprint target</th><th>Sprint top-up</th></tr></thead><tbody>
+    ${rows.map(r=>`<tr><td class="lbl">${r.name}${r.played?'':' (DNP)'}</td><td>${r.pos}</td><td>${f(r.mins)}</td><td>${f(r.act.td)}</td><td>${f(r.act.hsr)}</td><td>${f(r.tgt.hsr)}</td><td><b>${r.gapHsr>0?fmt(r.gapHsr)+' m':'✓'}</b></td><td>${f(r.act.spr)}</td><td>${f(r.tgt.spr)}</td><td><b>${r.gapSpr>0?fmt(r.gapSpr)+' m':'✓'}</b></td></tr>`).join('')}
     </tbody></table>`;
 }
 function openWarmupReport(rId){
