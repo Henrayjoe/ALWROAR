@@ -429,7 +429,7 @@
       <span id="saveAllStatus" style="flex:1;text-align:right;white-space:nowrap;">Following the sheet</span>
     </div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-08 16:10</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-08 19:40</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -3861,8 +3861,9 @@ function buildDailyReportHtml(dateStr, customTitle){
   // "No GPS" means the number on that row isn't trustworthy (no unit /
   // failed recording), so it's excluded from the squad averages the same
   // way a Did Not Train player naturally is (no row for them at all).
-  // Full, Partial and Rehab all still count -- only these two don't.
-  const avgEligible = playerTotals.filter(t=>statusById[t.id]!=='No GPS');
+  // Rehab is also left out of the squad averages (rehab athletes aren't doing the squad session).
+  // Full and Partial still count.
+  const avgEligible = playerTotals.filter(t=>statusById[t.id]!=='No GPS' && statusById[t.id]!=='Rehab');
   const teamTotals = avgEligible.reduce((acc,t)=>({ duration:acc.duration+t.duration, distance:acc.distance+t.distance, hsr:acc.hsr+t.hsr, sprint:acc.sprint+t.sprint, vhsd:acc.vhsd+(t.vhsd||0), accelDecel:acc.accelDecel+t.accelDecel, accel:acc.accel+(t.accel||0), decel:acc.decel+(t.decel||0) }), {duration:0,distance:0,hsr:0,sprint:0,vhsd:0,accelDecel:0,accel:0,decel:0});
   const avgN = avgEligible.length || 1;
   const redZoneVals = avgEligible.filter(t=>t.redZone!=null);
