@@ -429,7 +429,7 @@
       <span id="saveAllStatus" style="flex:1;text-align:right;white-space:nowrap;">Following the sheet</span>
     </div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-09 23:58</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-10 00:40</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -3736,12 +3736,26 @@ function normalizeStatus(raw, hasData){
   const match = STATUS_OPTIONS.find(o=>o.toLowerCase()===r);
   return match || 'Full';
 }
+function isMostlyRehabDay(a, dateStr){
+  const rows = (a.trainingGps||[]).filter(e=>e.date===dateStr && e.drill_name);
+  if (!rows.length) return false;
+  let rehab = 0, total = 0;
+  rows.forEach(e=>{
+    const d = e.duration_min||0; total += d;
+    if (e.participation==='Rehab' || /^rehab/i.test((e.drill_title||e.drill_name||'').trim())) rehab += d;
+  });
+  return total>0 && rehab/total > 0.5;
+}
 function participationStatus(players, dateStr, playerTotals){
   const byId = {}; playerTotals.forEach(t=>byId[t.id]=t);
   return players.map(a=>{
     const t = byId[a.id];
     const hasData = !!(t && t.duration);
-    const auto = normalizeStatus(t ? t.participation : '', hasData);
+    let auto = normalizeStatus(t ? t.participation : '', hasData);
+    // A day made up mostly of "Rehab…" drills is a rehab day even when the first row's
+    // Participation says Full (the export often flags only the drill rows), so it must not
+    // count towards squad averages/totals.
+    if (auto==='Full' && isMostlyRehabDay(a, dateStr)) auto = 'Rehab';
     const override = STATUS_OVERRIDES[`${dateStr}|${a.id}`];
     return { id:a.id, name:a.name, label: override || auto, duration:t?t.duration:0 };
   });
@@ -4086,6 +4100,8 @@ function buildWeeklyReportHtml(mondayStr, customTitle){
     </tbody></table></div>`;
 
   let rows = players.filter(a=>a.trainingGps&&a.trainingGps.length).map(a=>({ id:a.id, name:a.name, ...weeklyLoadCalendar(a, mondayStr) }));
+  // Players with nothing recorded this week (all zero / no GPS sessions) are left off the report.
+  rows = rows.filter(r=>(r.distance||0)>0 || (r.hsr||0)>0 || (r.sprint||0)>0 || (r.accelDecel||0)>0);
   rows = flagOutliersMulti(rows, ['distance','hsr','sprint','accelDecel']);
   html += `<div class="rpt-section-title">Player Weekly Accumulated Load</div>
     <table class="rpt-table"><thead><tr><th>Player</th><th>Sessions</th><th>Distance (m)</th><th>HSR (m)</th><th>Sprint Dist (m)</th><th>Accel/Decel</th><th>Max Speed (kph)</th></tr></thead><tbody>
