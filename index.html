@@ -429,7 +429,7 @@
       <span id="saveAllStatus" style="flex:1;text-align:right;white-space:nowrap;">Following the sheet</span>
     </div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-09 10:10</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-09 10:30</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -6894,7 +6894,8 @@ const TOPUP_DEFAULT_PLAYERS = {
   'W':['Sharn Frier','Lily Punch','Abby Smothers','Murphy Angnew'],
   'ST/CF':['Grace Kuliamu','Daisy Brown','Maja Maroksvki'],
 };
-let TOPUPS = { targets: JSON.parse(JSON.stringify(TOPUP_DEFAULT_TARGETS)), assign:{}, seeded:{}, mode:'target', matchDate:'' };
+let TOPUPS = { targets: JSON.parse(JSON.stringify(TOPUP_DEFAULT_TARGETS)), assign:{}, seeded:{}, mode:'target', matchDate:'', mins:{} };
+let TOPUP_FUZZY_NOTES = [];
 let tuSaveTimer = null;
 function tuPersist(){
   const ind = document.getElementById('tuSaved'); if (ind) ind.textContent = 'Saving…';
@@ -6905,10 +6906,42 @@ function tuPersist(){
     if (el){ el.textContent = 'Saved ✓'; setTimeout(()=>{ if (el.textContent==='Saved ✓') el.textContent=''; }, 2000); }
   }, 400);
 }
+function tuLev(a,b){
+  const m=a.length,n=b.length; if(!m) return n; if(!n) return m;
+  let prev=Array.from({length:n+1},(_,j)=>j);
+  for(let i=1;i<=m;i++){ const cur=[i];
+    for(let j=1;j<=n;j++) cur[j]=Math.min(prev[j]+1,cur[j-1]+1,prev[j-1]+(a[i-1]===b[j-1]?0:1));
+    prev=cur; }
+  return prev[n];
+}
+// Closest roster name for a name that didn't match exactly (typos like
+// Matin/Martin). Compares full names, and surname-only when the first name
+// matches, and only accepts a clear, unique winner so it can't guess wrong.
+function tuClosestPlayerId(name){
+  const target = normalizeName(name), tp = target.split(' ');
+  const scored = Object.values(athleteMap).map(a=>{
+    const n = normalizeName(a.name), np = n.split(' ');
+    const full = tuLev(target,n) / Math.max(target.length,n.length);
+    let part = 9;
+    if (tp.length>1 && np.length>1){
+      const f = tuLev(tp[0],np[0]) / Math.max(tp[0].length,np[0].length);
+      const l = tuLev(tp[tp.length-1],np[np.length-1]) / Math.max(tp[tp.length-1].length,np[np.length-1].length);
+      part = (f+l)/2;
+    }
+    return { id:a.id, name:a.name, score:Math.min(full,part) };
+  }).sort((x,y)=>x.score-y.score);
+  if (!scored.length || scored[0].score > 0.3) return null;
+  if (scored[1] && scored[1].score - scored[0].score < 0.08) return null;   // too close to call
+  return scored[0];
+}
 function tuSeedAssignments(){
-  const missing = [];
+  const missing = []; TOPUP_FUZZY_NOTES = [];
   Object.keys(TOPUP_DEFAULT_PLAYERS).forEach(pos=>TOPUP_DEFAULT_PLAYERS[pos].forEach(nm=>{
-    const id = resolvePlayerId(nm);
+    let id = resolvePlayerId(nm);
+    if (!id){
+      const c = tuClosestPlayerId(nm);
+      if (c){ id = c.id; TOPUP_FUZZY_NOTES.push(`"${nm}" → ${c.name}`); }
+    }
     if (!id){ missing.push(nm); return; }
     if (!TOPUPS.seeded[id] && TOPUPS.assign[id]===undefined){ TOPUPS.assign[id] = pos; }
     TOPUPS.seeded[id] = true;
@@ -6935,9 +6968,17 @@ function tuCompute(dateStr){
       hsr: useLow ? t.hsr[0] : t.hsrT,
       spr: useLow ? t.spr[0] : t.sprT,
     };
-    const act = g ? { td:g.total_distance_m, hsr:g.hsr_distance_m, spr:g.sprint_distance_m } : { td:null, hsr:null, spr:null };
+    const manual = (TOPUPS.mins[dateStr]||{})[a.id];
+    const hasManual = manual!=null && manual!=='' && !isNaN(+manual);
+    const hasActual = !!g && g.total_distance_m!=null;
+    let act, est=false, mins;
+    if (hasActual){ act = { td:g.total_distance_m, hsr:g.hsr_distance_m, spr:g.sprint_distance_m }; mins = hasManual ? +manual : g.minutes_played; }
+    else if (hasManual){            // no GPS (or planning ahead): expected load = target scaled by minutes
+      const f = Math.max(0, Math.min(1, +manual/90)); est = true; mins = +manual;
+      act = { td:tgt.td*f, hsr:tgt.hsr*f, spr:tgt.spr*f };
+    } else { act = { td:null, hsr:null, spr:null }; mins = null; }
     const gap = k => act[k]==null ? tgt[k] : Math.max(0, tgt[k]-act[k]);
-    rows.push({ id:a.id, name:a.name, pos, played:!!g, mins:g?g.minutes_played:null, t, tgt, act,
+    rows.push({ id:a.id, name:a.name, pos, played:hasActual, est, hasManual, mins, t, tgt, act,
       gapTd:gap('td'), gapHsr:gap('hsr'), gapSpr:gap('spr') });
   });
   rows.sort((x,y)=>order.indexOf(x.pos)-order.indexOf(y.pos) || x.name.localeCompare(y.name));
@@ -6957,35 +6998,40 @@ function tuSetTarget(pos, field, idx, val){
 }
 function tuSetAssign(id, pos){ TOPUPS.assign[id] = pos; TOPUPS.seeded[id] = true; tuPersist(); renderTopups(); }
 function tuSetMode(m){ TOPUPS.mode = m; tuPersist(); renderTopups(); }
+function tuSetMins(id, v){
+  const k = TOPUPS.matchDate; if (!TOPUPS.mins[k]) TOPUPS.mins[k] = {};
+  if (v==='' || isNaN(+v)) delete TOPUPS.mins[k][id]; else TOPUPS.mins[k][id] = Math.max(0, Math.min(120, +v));
+  tuPersist(); renderTopups();
+}
 function tuSetDate(d){ TOPUPS.matchDate = d; tuPersist(); renderTopups(); }
 function renderTopups(){
   const root = document.getElementById('topupsRoot'); if (!root) return;
   const missing = tuSeedAssignments();
   const dates = tuMatchDates();
-  if (!TOPUPS.matchDate || !dates.includes(TOPUPS.matchDate)) TOPUPS.matchDate = dates[0] || '';
-  const rows = TOPUPS.matchDate ? tuCompute(TOPUPS.matchDate) : [];
+  if (!TOPUPS.matchDate || (TOPUPS.matchDate!=='plan' && !dates.includes(TOPUPS.matchDate))) TOPUPS.matchDate = dates[0] || 'plan';
+  const rows = tuCompute(TOPUPS.matchDate);
   const posKeys = Object.keys(TOPUPS.targets);
   const numIn = (pos,f,i,v,w)=>`<input type="number" value="${v}" style="width:${w||64}px;padding:4px 5px;font-size:12px;" onchange="tuSetTarget('${pos}','${f}',${i},this.value)">`;
   const targetTbl = `<div class="squad-table-scroll"><table><thead><tr><th>Position</th><th>TD min</th><th>TD max</th><th>HSR min</th><th>HSR target</th><th>HSR max</th><th>Sprint min</th><th>Sprint target</th><th>Sprint max</th></tr></thead><tbody>
     ${posKeys.map(pos=>{ const t=TOPUPS.targets[pos]; return `<tr><td class="lbl"><b>${pos}</b></td><td>${numIn(pos,'td',0,t.td[0])}</td><td>${numIn(pos,'td',1,t.td[1])}</td><td>${numIn(pos,'hsr',0,t.hsr[0],56)}</td><td>${numIn(pos,'hsrT',null,t.hsrT,56)}</td><td>${numIn(pos,'hsr',1,t.hsr[1],56)}</td><td>${numIn(pos,'spr',0,t.spr[0],56)}</td><td>${numIn(pos,'sprT',null,t.sprT,56)}</td><td>${numIn(pos,'spr',1,t.spr[1],56)}</td></tr>`; }).join('')}
     </tbody></table></div>`;
   const need = (k)=>rows.filter(r=>r[k]>0).length;
-  const body = rows.length ? `<div class="squad-table-scroll"><table><thead><tr><th>Athlete</th><th>Position</th><th>Mins</th><th>TD</th><th>HSR</th><th>Sprint</th><th>Top-up HSR (m)</th><th>Top-up Sprint (m)</th></tr></thead><tbody>
+  const body = rows.length ? `<div class="squad-table-scroll"><table><thead><tr><th>Athlete</th><th>Position</th><th>Mins (played / planned)</th><th>TD</th><th>HSR</th><th>Sprint</th><th>Top-up HSR (m)</th><th>Top-up Sprint (m)</th></tr></thead><tbody>
     ${rows.map(r=>{
       const sTd=tuStatus(r.act.td,r.t.td), sH=tuStatus(r.act.hsr,r.t.hsr), sS=tuStatus(r.act.spr,r.t.spr);
       const cell=(v,s)=>`<td style="color:${s.c};font-weight:600;">${v!=null?fmt(v):'—'}</td>`;
-      return `<tr><td class="lbl">${r.name}${r.played?'':' <span class="hint" style="margin:0;">(did not play)</span>'}</td>
+      return `<tr><td class="lbl">${r.name}${r.played?'':(r.est?' <span class="hint" style="margin:0;">(estimated from minutes)</span>':' <span class="hint" style="margin:0;">(no minutes set)</span>')}</td>
         <td><select style="font-size:12px;padding:3px;" onchange="tuSetAssign('${r.id}',this.value)">${posKeys.map(k=>`<option ${k===r.pos?'selected':''}>${k}</option>`).join('')}<option value="">Exclude</option></select></td>
-        <td>${r.mins!=null?fmt(r.mins):'—'}</td>${cell(r.act.td,sTd)}${cell(r.act.hsr,sH)}${cell(r.act.spr,sS)}
+        <td><input type="number" min="0" max="120" placeholder="${r.mins!=null&&!r.hasManual?fmt(r.mins):'mins'}" value="${r.hasManual?r.mins:''}" style="width:62px;padding:4px 5px;font-size:12px;" onchange="tuSetMins('${r.id}',this.value)"></td>${cell(r.act.td,sTd)}${cell(r.act.hsr,sH)}${cell(r.act.spr,sS)}
         <td><b>${r.gapHsr>0?fmt(r.gapHsr):'✓'}</b></td><td><b>${r.gapSpr>0?fmt(r.gapSpr):'✓'}</b></td></tr>`;
     }).join('')}
     </tbody></table></div>
-    <p class="hint">Colour = actual vs the position range (green in range, red below, blue above). Top-up = target minus actual (never negative); a player who didn't play gets the full target. Players set to "Exclude" (injured/rehab) are left out.</p>`
+    <p class="hint">Colour = actual vs the position range (green in range, red below, blue above). Top-up = target minus actual (never negative). Type minutes for anyone: if she has no GPS for the match (or you're planning an upcoming game), her load is estimated as the target × minutes ÷ 90 and the rest becomes the top-up. With no minutes at all she gets the full target. Players set to "Exclude" (injured/rehab) are left out.</p>`
     : `<div class="hint" style="padding:10px 4px;">No match GPS data yet, or no players assigned to a position.</div>`;
   root.innerHTML = `
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
       <span class="pq-heading" style="margin:0;">Match</span>
-      <select class="btn-sm" style="padding:6px 8px;" onchange="tuSetDate(this.value)">${dates.map(d=>{ const g=Object.values(athleteMap).flatMap(a=>a.gameGps||[]).find(x=>x.date===d); return `<option value="${d}" ${d===TOPUPS.matchDate?'selected':''}>${d}${g&&g.opponent?' · vs '+g.opponent:''}</option>`; }).join('')}</select>
+      <select class="btn-sm" style="padding:6px 8px;" onchange="tuSetDate(this.value)"><option value="plan" ${TOPUPS.matchDate==='plan'?'selected':''}>📅 Upcoming match (plan by minutes)</option>${dates.map(d=>{ const g=Object.values(athleteMap).flatMap(a=>a.gameGps||[]).find(x=>x.date===d); return `<option value="${d}" ${d===TOPUPS.matchDate?'selected':''}>${d}${g&&g.opponent?' · vs '+g.opponent:''}</option>`; }).join('')}</select>
       <span class="pq-heading" style="margin:0 0 0 10px;">Top up to</span>
       <select class="btn-sm" style="padding:6px 8px;" onchange="tuSetMode(this.value)"><option value="target" ${TOPUPS.mode==='target'?'selected':''}>Position target</option><option value="low" ${TOPUPS.mode==='low'?'selected':''}>Bottom of range</option></select>
       <button class="btn-sm" onclick="openTopupsReport()">🖨 Print Top-Ups</button>
@@ -6993,6 +7039,7 @@ function renderTopups(){
     </div>
     ${rows.length?`<div class="hint" style="margin:0 0 10px;"><b>${need('gapHsr')}</b> players need an HSR top-up · <b>${need('gapSpr')}</b> need a sprint top-up</div>`:''}
     ${body}
+    ${TOPUP_FUZZY_NOTES.length?`<p class="hint">Closest-name matches used: ${TOPUP_FUZZY_NOTES.join('; ')}</p>`:''}
     ${missing.length?`<p class="hint" style="color:#c8483d;">Not found in the roster (check spelling): ${missing.join(', ')}</p>`:''}
     <div class="pq-heading" style="margin-top:22px;">Positional match targets (editable)</div>
     <p class="hint">General positional demands for a full match, not individual history. TD is a range (the midpoint is used as the target).</p>
@@ -7009,13 +7056,14 @@ function openTopupsReport(){
 function buildTopupsReportHtml(){
   const rows = tuCompute(TOPUPS.matchDate);
   const g = Object.values(athleteMap).flatMap(a=>a.gameGps||[]).find(x=>x.date===TOPUPS.matchDate);
-  const sub = `Brisbane Roar${g&&g.opponent?' vs '+g.opponent:''} · ${TOPUPS.matchDate} · Top up to ${TOPUPS.mode==='low'?'bottom of position range':'position target'}`;
+  const isPlan = TOPUPS.matchDate==='plan';
+  const sub = `Brisbane Roar${g&&g.opponent?' vs '+g.opponent:''} · ${isPlan?'Upcoming match plan':TOPUPS.matchDate} · Top up to ${TOPUPS.mode==='low'?'bottom of position range':'position target'}`;
   const f = v=>v!=null?fmt(v):'—';
   const sz = rows.length>20 ? 11 : 12.5;
   return `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">Team Top-Ups</div><div class="rpt-sub">${sub}</div></div>${ROAR_LOGO_SVG}</div>
     <table class="rpt-table" style="font-size:${sz}px;"><thead><tr><th>Athlete</th><th>Pos</th><th>Mins</th><th>TD (m)</th><th>HSR (m)</th><th>HSR target</th><th>HSR top-up</th><th>Sprint (m)</th><th>Sprint target</th><th>Sprint top-up</th></tr></thead><tbody>
-    ${rows.map(r=>`<tr><td class="lbl">${r.name}${r.played?'':' (DNP)'}</td><td>${r.pos}</td><td>${f(r.mins)}</td><td>${f(r.act.td)}</td><td>${f(r.act.hsr)}</td><td>${f(r.tgt.hsr)}</td><td><b>${r.gapHsr>0?fmt(r.gapHsr)+' m':'✓'}</b></td><td>${f(r.act.spr)}</td><td>${f(r.tgt.spr)}</td><td><b>${r.gapSpr>0?fmt(r.gapSpr)+' m':'✓'}</b></td></tr>`).join('')}
-    </tbody></table>`;
+    ${rows.map(r=>`<tr><td class="lbl">${r.name}${r.est?' *':(r.played||r.hasManual?'':' (no mins)')}</td><td>${r.pos}</td><td>${f(r.mins)}</td><td>${f(r.act.td)}</td><td>${f(r.act.hsr)}</td><td>${f(r.tgt.hsr)}</td><td><b>${r.gapHsr>0?fmt(r.gapHsr)+' m':'✓'}</b></td><td>${f(r.act.spr)}</td><td>${f(r.tgt.spr)}</td><td><b>${r.gapSpr>0?fmt(r.gapSpr)+' m':'✓'}</b></td></tr>`).join('')}
+    </tbody></table>${rows.some(r=>r.est)?'<p style="font-size:11px;color:#6b7280;margin-top:6px;">* Load estimated from minutes (target × minutes ÷ 90), not GPS.</p>':''}`;
 }
 function openWarmupReport(rId){
   const r = wuGet(rId); if (!r) return;
