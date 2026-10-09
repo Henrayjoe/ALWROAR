@@ -429,7 +429,7 @@
       <span id="saveAllStatus" style="flex:1;text-align:right;white-space:nowrap;">Following the sheet</span>
     </div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-09 11:45</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-09 12:05</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -7123,7 +7123,7 @@ function tuRenderSession(){
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
       ${TOPUPS.sessions.length?`<select class="btn-sm" style="padding:6px 8px;" onchange="tuPickSession(this.value)">${TOPUPS.sessions.map(x=>`<option value="${x.id}" ${c&&x.id===c.id?'selected':''}>${tuEsc(x.name)}</option>`).join('')}</select>`:''}
       <button class="btn-sm" onclick="tuNewSession()">+ New top-up sheet</button>
-      ${c?`<button class="btn-sm" onclick="openTopupSessionReport()">🖨 Print sheet</button><button class="btn-sm" style="color:#c8483d;" onclick="tuDelSession()">Delete</button>`:''}
+      ${c?`<label style="font-size:12.5px;display:flex;gap:5px;align-items:center;"><input type="checkbox" ${c.printAthletes?'checked':''} onchange="tuSessField('printAthletes',this.checked)">Include athletes on printout</label><button class="btn-sm" onclick="openTopupSessionReport()">🖨 Print sheet</button><button class="btn-sm" style="color:#c8483d;" onclick="tuDelSession()">Delete</button>`:''}
     </div>`;
   if (!c){ root.innerHTML = head + `<div class="hint">Create a sheet to pick who is in the post-game top-up, write the exercises, and set the predicted load.</div>`; return; }
   const T = tuSessTotals(c);
@@ -7186,8 +7186,7 @@ function buildTopupSessionReportHtml(c){
     ${c.steps.length?c.steps.map((x,i)=>`<tr><td class="lbl">${i+1}</td><td class="lbl">${tuEsc(x.name)||'—'}</td><td>${tuEsc(x.notes)}</td><td>${x.secs?wuMMSS(x.secs):'—'}</td><td>${x.dist!==''?fmt(x.dist):'—'}</td><td>${x.hsr!==''?fmt(x.hsr):'—'}</td><td>${x.acc!==''?fmt(x.acc):'—'}</td><td>${x.dec!==''?fmt(x.dec):'—'}</td></tr>`).join(''):'<tr><td colspan="8">No exercises.</td></tr>'}
     <tr style="border-top:2px solid var(--border);font-weight:700;"><td></td><td class="lbl">Total${(T.secsManual||T.distManual||T.hsrManual||T.accManual||T.decManual)?' (incl. manual)':''}</td><td></td><td>${wuMMSS(T.secs)}</td><td>${fmt(T.dist)}</td><td>${fmt(T.hsr)}</td><td>${fmt(T.acc)}</td><td>${fmt(T.dec)}</td></tr>
     </tbody></table></div>
-    <div class="chart-block"><div class="rpt-section-title">Athletes (${part.length})</div>
-    ${part.length?`<table class="rpt-table"><thead><tr><th>Athlete</th><th>Pos</th><th>HSR top-up needed</th><th>Sprint top-up needed</th></tr></thead><tbody>${part.map(({a,g})=>`<tr><td class="lbl">${tuEsc(a.name)}</td><td>${g?g.pos:'—'}</td><td>${g?(g.gapHsr>0?fmt(g.gapHsr)+' m':'✓'):'—'}</td><td>${g?(g.gapSpr>0?fmt(g.gapSpr)+' m':'✓'):'—'}</td></tr>`).join('')}</tbody></table>`:'<p style="color:var(--text-muted);">No athletes selected.</p>'}</div>`;
+    ${c.printAthletes?`<div class="chart-block"><div class="rpt-section-title">Athletes (${part.length})</div>${part.length?`<div style="display:flex;flex-wrap:wrap;gap:6px 22px;font-size:14px;line-height:1.5;">${part.map(({a})=>`<span>${tuEsc(a.name)}</span>`).join('')}</div>`:'<p style="color:var(--text-muted);">No athletes selected.</p>'}</div>`:''}`;
 }
 function openWarmupReport(rId){
   const r = wuGet(rId); if (!r) return;
