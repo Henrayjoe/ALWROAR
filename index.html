@@ -429,7 +429,7 @@
       <span id="saveAllStatus" style="flex:1;text-align:right;white-space:nowrap;">Following the sheet</span>
     </div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-09 10:30</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-09 11:45</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -6894,7 +6894,7 @@ const TOPUP_DEFAULT_PLAYERS = {
   'W':['Sharn Frier','Lily Punch','Abby Smothers','Murphy Angnew'],
   'ST/CF':['Grace Kuliamu','Daisy Brown','Maja Maroksvki'],
 };
-let TOPUPS = { targets: JSON.parse(JSON.stringify(TOPUP_DEFAULT_TARGETS)), assign:{}, seeded:{}, mode:'target', matchDate:'', mins:{} };
+let TOPUPS = { targets: JSON.parse(JSON.stringify(TOPUP_DEFAULT_TARGETS)), assign:{}, seeded:{}, mode:'target', matchDate:'', mins:{}, sessions:[], curSession:'' };
 let TOPUP_FUZZY_NOTES = [];
 let tuSaveTimer = null;
 function tuPersist(){
@@ -7041,9 +7041,11 @@ function renderTopups(){
     ${body}
     ${TOPUP_FUZZY_NOTES.length?`<p class="hint">Closest-name matches used: ${TOPUP_FUZZY_NOTES.join('; ')}</p>`:''}
     ${missing.length?`<p class="hint" style="color:#c8483d;">Not found in the roster (check spelling): ${missing.join(', ')}</p>`:''}
+    <div id="tuSessionRoot"></div>
     <div class="pq-heading" style="margin-top:22px;">Positional match targets (editable)</div>
     <p class="hint">General positional demands for a full match, not individual history. TD is a range (the midpoint is used as the target).</p>
     ${targetTbl}`;
+  tuRenderSession();
 }
 function openTopupsReport(){
   if (!TOPUPS.matchDate){ alert('No match selected.'); return; }
@@ -7064,6 +7066,128 @@ function buildTopupsReportHtml(){
     <table class="rpt-table" style="font-size:${sz}px;"><thead><tr><th>Athlete</th><th>Pos</th><th>Mins</th><th>TD (m)</th><th>HSR (m)</th><th>HSR target</th><th>HSR top-up</th><th>Sprint (m)</th><th>Sprint target</th><th>Sprint top-up</th></tr></thead><tbody>
     ${rows.map(r=>`<tr><td class="lbl">${r.name}${r.est?' *':(r.played||r.hasManual?'':' (no mins)')}</td><td>${r.pos}</td><td>${f(r.mins)}</td><td>${f(r.act.td)}</td><td>${f(r.act.hsr)}</td><td>${f(r.tgt.hsr)}</td><td><b>${r.gapHsr>0?fmt(r.gapHsr)+' m':'✓'}</b></td><td>${f(r.act.spr)}</td><td>${f(r.tgt.spr)}</td><td><b>${r.gapSpr>0?fmt(r.gapSpr)+' m':'✓'}</b></td></tr>`).join('')}
     </tbody></table>${rows.some(r=>r.est)?'<p style="font-size:11px;color:#6b7280;margin-top:6px;">* Load estimated from minutes (target × minutes ÷ 90), not GPS.</p>':''}`;
+}
+
+// ============================================================
+// POST-GAME TOP-UP SESSION SHEET — who is in the top-up, the exercises, and
+// predicted total distance / HSR / accels / decels / duration (summed from the
+// exercises, or typed over by hand). Participants show their remaining gap
+// from the match selected above so you can see whether the plan covers them.
+// ============================================================
+const tuEsc = v => String(v==null?'':v).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+function tuCur(){ return TOPUPS.sessions.find(x=>x.id===TOPUPS.curSession) || null; }
+function tuNewSession(){
+  const id = 'ts'+Date.now()+Math.floor(Math.random()*1000);
+  TOPUPS.sessions.push({ id, name:`Post-Game Top-Up ${TOPUPS.sessions.length+1}`, date:toLocalDateStr(new Date()), players:[], steps:[], ovr:{} });
+  TOPUPS.curSession = id; tuPersist(); tuRenderSession();
+}
+function tuDelSession(){
+  const c = tuCur(); if (!c || !confirm(`Delete "${c.name}"?`)) return;
+  TOPUPS.sessions = TOPUPS.sessions.filter(x=>x.id!==c.id);
+  TOPUPS.curSession = TOPUPS.sessions.length ? TOPUPS.sessions[0].id : '';
+  tuPersist(); tuRenderSession();
+}
+function tuPickSession(id){ TOPUPS.curSession = id; tuPersist(); tuRenderSession(); }
+function tuSessField(f, v){ const c=tuCur(); if (!c) return; c[f]=v; tuPersist(); }
+function tuToggleP(id, on){ const c=tuCur(); if (!c) return; c.players = c.players.filter(x=>x!==id); if (on) c.players.push(id); tuPersist(); tuRenderSession(); }
+function tuAddNeeding(){
+  const c=tuCur(); if (!c || !TOPUPS.matchDate) return;
+  tuCompute(TOPUPS.matchDate).filter(r=>r.gapHsr>0||r.gapSpr>0).forEach(r=>{ if (!c.players.includes(r.id)) c.players.push(r.id); });
+  tuPersist(); tuRenderSession();
+}
+function tuClearP(){ const c=tuCur(); if (!c) return; c.players=[]; tuPersist(); tuRenderSession(); }
+function tuAddStep(){ const c=tuCur(); if (!c) return; c.steps.push({ name:'', notes:'', dist:'', hsr:'', acc:'', dec:'', secs:'' }); tuPersist(); tuRenderSession(); }
+function tuDelStep(i){ const c=tuCur(); if (!c) return; c.steps.splice(i,1); tuPersist(); tuRenderSession(); }
+function tuMoveStep(i,d){ const c=tuCur(); if (!c) return; const j=i+d; if (j<0||j>=c.steps.length) return; [c.steps[i],c.steps[j]]=[c.steps[j],c.steps[i]]; tuPersist(); tuRenderSession(); }
+function tuStepField(i,f,v){
+  const c=tuCur(); if (!c) return;
+  c.steps[i][f] = (f==='name'||f==='notes') ? v : (v===''||isNaN(+v) ? '' : Math.max(0,+v));
+  tuPersist(); tuRenderSession();
+}
+function tuOvr(f, v){ const c=tuCur(); if (!c) return; if (v===''||isNaN(+v)) delete c.ovr[f]; else c.ovr[f]=Math.max(0,+v); tuPersist(); tuRenderSession(); }
+function tuSessTotals(c){
+  const sum = f => c.steps.reduce((t,x)=>t+(+x[f]||0),0);
+  const calc = { dist:sum('dist'), hsr:sum('hsr'), acc:sum('acc'), dec:sum('dec'), secs:sum('secs') };
+  const out = {}; Object.keys(calc).forEach(k=>{ out[k] = (c.ovr && c.ovr[k]!=null) ? c.ovr[k] : calc[k]; out[k+'Manual'] = c.ovr && c.ovr[k]!=null; });
+  return out;
+}
+function tuSessionPlayers(c){
+  const gapById = {};
+  if (TOPUPS.matchDate) tuCompute(TOPUPS.matchDate).forEach(r=>{ gapById[r.id]=r; });
+  return c.players.map(id=>athleteMap[id]).filter(Boolean).map(a=>({ a, g:gapById[a.id]||null })).sort((x,y)=>x.a.name.localeCompare(y.a.name));
+}
+function tuRenderSession(){
+  const root = document.getElementById('tuSessionRoot'); if (!root) return;
+  const c = tuCur();
+  const head = `<div class="pq-heading" style="margin-top:22px;">Post-game top-up sessions</div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
+      ${TOPUPS.sessions.length?`<select class="btn-sm" style="padding:6px 8px;" onchange="tuPickSession(this.value)">${TOPUPS.sessions.map(x=>`<option value="${x.id}" ${c&&x.id===c.id?'selected':''}>${tuEsc(x.name)}</option>`).join('')}</select>`:''}
+      <button class="btn-sm" onclick="tuNewSession()">+ New top-up sheet</button>
+      ${c?`<button class="btn-sm" onclick="openTopupSessionReport()">🖨 Print sheet</button><button class="btn-sm" style="color:#c8483d;" onclick="tuDelSession()">Delete</button>`:''}
+    </div>`;
+  if (!c){ root.innerHTML = head + `<div class="hint">Create a sheet to pick who is in the post-game top-up, write the exercises, and set the predicted load.</div>`; return; }
+  const T = tuSessTotals(c);
+  const num = (i,f,v,w)=>`<input type="number" min="0" value="${v===''?'':v}" style="width:${w||60}px;padding:4px 5px;font-size:12px;" onchange="tuStepField(${i},'${f}',this.value)">`;
+  const players = Object.values(athleteMap).filter(a=>genderFilterVal==='all'||a.gender===genderFilterVal).sort((x,y)=>x.name.localeCompare(y.name));
+  const inP = new Set(c.players);
+  const part = tuSessionPlayers(c);
+  const covers = (gap, pred)=> gap==null ? '' : (gap<=0 ? '✓' : (pred>=gap ? '✓ covered' : `short by ${fmt(gap-pred)}`));
+  root.innerHTML = head + `
+    <div style="display:grid;grid-template-columns:1fr 160px;gap:10px;max-width:520px;margin-bottom:12px;">
+      <input type="text" value="${tuEsc(c.name)}" placeholder="Sheet name" onchange="tuSessField('name',this.value);tuRenderSession();" style="padding:6px 8px;">
+      <input type="date" value="${tuEsc(c.date)}" onchange="tuSessField('date',this.value)" style="padding:6px 8px;">
+    </div>
+    <div class="pq-heading" style="margin:6px 0;">Who is in (${c.players.length})</div>
+    <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
+      <button class="btn-sm" onclick="tuAddNeeding()">Add everyone needing a top-up (from match above)</button>
+      <button class="btn-sm" onclick="tuClearP()">Clear</button>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:4px 14px;margin-bottom:14px;">
+      ${players.map(a=>`<label style="font-size:12.5px;display:flex;gap:5px;align-items:center;white-space:nowrap;"><input type="checkbox" ${inP.has(a.id)?'checked':''} onchange="tuToggleP('${a.id}',this.checked)">${tuEsc(a.name)}</label>`).join('')}
+    </div>
+    <div class="pq-heading" style="margin:6px 0;">Exercises</div>
+    <div class="squad-table-scroll"><table><thead><tr><th>#</th><th>Exercise</th><th>Notes / prescription</th><th>Time (s)</th><th>Dist (m)</th><th>HSR (m)</th><th>Accels</th><th>Decels</th><th></th></tr></thead><tbody>
+    ${c.steps.length ? c.steps.map((x,i)=>`<tr><td>${i+1}</td>
+      <td><input type="text" value="${tuEsc(x.name)}" style="width:170px;padding:4px 5px;font-size:12px;" onchange="tuStepField(${i},'name',this.value)"></td>
+      <td><input type="text" value="${tuEsc(x.notes)}" style="width:210px;padding:4px 5px;font-size:12px;" onchange="tuStepField(${i},'notes',this.value)"></td>
+      <td>${num(i,'secs',x.secs,56)}</td><td>${num(i,'dist',x.dist)}</td><td>${num(i,'hsr',x.hsr,56)}</td><td>${num(i,'acc',x.acc,52)}</td><td>${num(i,'dec',x.dec,52)}</td>
+      <td style="white-space:nowrap;"><button class="btn-sm" onclick="tuMoveStep(${i},-1)">↑</button> <button class="btn-sm" onclick="tuMoveStep(${i},1)">↓</button> <button class="btn-sm" style="color:#c8483d;" onclick="tuDelStep(${i})">✕</button></td></tr>`).join('')
+      : `<tr><td colspan="9" class="hint">No exercises yet.</td></tr>`}
+    </tbody></table></div>
+    <button class="btn-sm" style="margin-top:8px;" onclick="tuAddStep()">+ Add exercise</button>
+    <div class="pq-heading" style="margin:16px 0 6px;">Predicted session total</div>
+    <div class="hint" style="margin:0 0 6px;">Adds up from the exercises. Type a number to override any total by hand; clear the box to go back to the sum.</div>
+    <div class="tp-sw-grid" style="grid-template-columns:repeat(5,1fr);">
+      ${[['secs','Duration (s)',v=>`${wuMMSS(v)} min`],['dist','Total distance (m)',v=>fmt(v)+' m'],['hsr','HSR (m)',v=>fmt(v)+' m'],['acc','Accels',v=>fmt(v)],['dec','Decels',v=>fmt(v)]].map(([k,l,f])=>`
+        <div class="cat-card"><div class="cat-name">${l}</div><div class="cat-status">${f(T[k])}</div>
+        <input type="number" min="0" placeholder="override" value="${T[k+'Manual']?T[k]:''}" style="width:90px;margin-top:6px;padding:3px 5px;font-size:11.5px;" onchange="tuOvr('${k}',this.value)"></div>`).join('')}
+    </div>
+    ${part.length?`<div class="pq-heading" style="margin:16px 0 6px;">Does the plan cover the group?</div>
+    <div class="squad-table-scroll"><table><thead><tr><th>Athlete</th><th>Position</th><th>HSR top-up needed</th><th>vs predicted HSR</th><th>Sprint top-up needed</th></tr></thead><tbody>
+    ${part.map(({a,g})=>`<tr><td class="lbl">${tuEsc(a.name)}</td><td>${g?g.pos:'—'}</td><td>${g?(g.gapHsr>0?fmt(g.gapHsr)+' m':'✓'):'—'}</td><td>${g?covers(g.gapHsr,T.hsr):'—'}</td><td>${g?(g.gapSpr>0?fmt(g.gapSpr)+' m':'✓'):'—'}</td></tr>`).join('')}
+    </tbody></table></div><p class="hint">Needs come from the match/plan selected at the top of this tab. Predicted HSR is the same for everyone in the group.</p>`:''}`;
+}
+function openTopupSessionReport(){
+  const c = tuCur(); if (!c) return;
+  reportKind = 'topupsession';
+  mpSetLandscape(false);
+  document.getElementById('rptTrainingControls').style.display = 'none';
+  document.getElementById('reportContent').innerHTML = buildTopupSessionReportHtml(c);
+  document.getElementById('overlayReport').classList.add('show');
+}
+function buildTopupSessionReportHtml(c){
+  const T = tuSessTotals(c);
+  const part = tuSessionPlayers(c);
+  const kpi = (l,v)=>`<div class="kpi-card"><div class="kpi-card-label">${l}</div><div class="kpi-card-value">${v}</div></div>`;
+  return `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">${tuEsc(c.name)}</div><div class="rpt-sub">Brisbane Roar · ${tuEsc(c.date||'')}</div></div>${ROAR_LOGO_SVG}</div>
+    <div class="kpi-cards">${kpi('Duration',wuMMSS(T.secs)+' min')}${kpi('Predicted Distance (m)',fmt(T.dist))}${kpi('Predicted HSR (m)',fmt(T.hsr))}${kpi('Accels / Decels',fmt(T.acc)+' / '+fmt(T.dec))}</div>
+    <div class="chart-block"><div class="rpt-section-title">Exercises</div>
+    <table class="rpt-table"><thead><tr><th>#</th><th>Exercise</th><th>Notes</th><th>Time</th><th>Dist (m)</th><th>HSR (m)</th><th>Acc</th><th>Dec</th></tr></thead><tbody>
+    ${c.steps.length?c.steps.map((x,i)=>`<tr><td class="lbl">${i+1}</td><td class="lbl">${tuEsc(x.name)||'—'}</td><td>${tuEsc(x.notes)}</td><td>${x.secs?wuMMSS(x.secs):'—'}</td><td>${x.dist!==''?fmt(x.dist):'—'}</td><td>${x.hsr!==''?fmt(x.hsr):'—'}</td><td>${x.acc!==''?fmt(x.acc):'—'}</td><td>${x.dec!==''?fmt(x.dec):'—'}</td></tr>`).join(''):'<tr><td colspan="8">No exercises.</td></tr>'}
+    <tr style="border-top:2px solid var(--border);font-weight:700;"><td></td><td class="lbl">Total${(T.secsManual||T.distManual||T.hsrManual||T.accManual||T.decManual)?' (incl. manual)':''}</td><td></td><td>${wuMMSS(T.secs)}</td><td>${fmt(T.dist)}</td><td>${fmt(T.hsr)}</td><td>${fmt(T.acc)}</td><td>${fmt(T.dec)}</td></tr>
+    </tbody></table></div>
+    <div class="chart-block"><div class="rpt-section-title">Athletes (${part.length})</div>
+    ${part.length?`<table class="rpt-table"><thead><tr><th>Athlete</th><th>Pos</th><th>HSR top-up needed</th><th>Sprint top-up needed</th></tr></thead><tbody>${part.map(({a,g})=>`<tr><td class="lbl">${tuEsc(a.name)}</td><td>${g?g.pos:'—'}</td><td>${g?(g.gapHsr>0?fmt(g.gapHsr)+' m':'✓'):'—'}</td><td>${g?(g.gapSpr>0?fmt(g.gapSpr)+' m':'✓'):'—'}</td></tr>`).join('')}</tbody></table>`:'<p style="color:var(--text-muted);">No athletes selected.</p>'}</div>`;
 }
 function openWarmupReport(rId){
   const r = wuGet(rId); if (!r) return;
