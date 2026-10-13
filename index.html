@@ -429,7 +429,7 @@
       <span id="saveAllStatus" style="flex:1;text-align:right;white-space:nowrap;">Following the sheet</span>
     </div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-13 10:30</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-13 13:40</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -1260,12 +1260,22 @@ function maxVelPctOfBest(a, maxVel){
 // avg daily load, trailing 7 days; Chronic = trailing 28 days. Standard
 // risk zones: <0.8 undertrained, 0.8-1.3 sweet spot, 1.3-1.5 caution, >1.5
 // high injury risk (Gabbett et al.).
+// Match-day GPS can live in BOTH sheets: the training sheet carries the whole day
+// (warm-up + 1st half + 2nd half) and the match sheet carries only the halves. To stop
+// that stacking, load is counted per player per DATE from one source: the training sheet
+// when she has rows there, and the match sheet only as a fallback for a player who has
+// no training-sheet rows that day.
+function loadEntriesFor(a, metricKey){
+  const key = metricKey || 'total_distance_m';
+  const trainRows = gpsLoadRows(a.trainingGps||[]).filter(e=>e[key]!=null);
+  const trainedOn = new Set(trainRows.map(e=>e.date));
+  const out = trainRows.map(e=>({ date:e.date, v:e[key], src:'training' }));
+  (a.gameGps||[]).forEach(g=>{ if (g[key]!=null && !trainedOn.has(g.date)) out.push({ date:g.date, v:g[key], src:'match' }); });
+  return out;
+}
 function gpsDailyLoads(a){
   const byDate = {};
-  [...gpsLoadRows(a.trainingGps), ...(a.gameGps||[])].forEach(e=>{
-    if (e.total_distance_m==null) return;
-    byDate[e.date] = (byDate[e.date]||0) + e.total_distance_m;
-  });
+  loadEntriesFor(a).forEach(x=>{ byDate[x.date] = (byDate[x.date]||0) + x.v; });
   return byDate;
 }
 // How many calendar days back from asOfDate you'd have to go to reach the
@@ -1322,14 +1332,7 @@ function teamDailyLoads(players, metricKey){
   metricKey = metricKey || 'total_distance_m';
   const byDate = {};
   players.forEach(a=>{
-    gpsLoadRows(a.trainingGps).forEach(e=>{
-      if (e[metricKey]==null) return;
-      byDate[e.date] = (byDate[e.date]||0) + e[metricKey];
-    });
-    (a.gameGps||[]).forEach(g=>{
-      if (g[metricKey]==null) return;
-      byDate[g.date] = (byDate[g.date]||0) + g[metricKey];
-    });
+    loadEntriesFor(a, metricKey).forEach(x=>{ byDate[x.date] = (byDate[x.date]||0) + x.v; });
   });
   return byDate;
 }
@@ -1377,22 +1380,34 @@ function teamWeeklyLoads(players, metricKey){
   const field = WEEKLY_FIELD[metricKey] || 'distance';
   const train = {}, match = {}, days = {};     // weekMonday -> { playerId: sum }
   const dates = trainingSessionDates(players);
+  // A match day = any date with match GPS. On those dates the training sheet's rows
+  // (warm-up + halves) ARE the match-day load, so they're counted as Match, and the
+  // match sheet is used only for players with no training-sheet rows that day.
+  const matchDates = new Set();
+  players.forEach(a=>(a.gameGps||[]).forEach(g=>{ if (g.date) matchDates.add(g.date); }));
+  const trainedOn = {};                         // date -> Set(playerId) with training-sheet load
   dates.forEach(dt=>{
     const { playerTotals } = daySquadBreakdown(players, dt);
     const st = {}; participationStatus(players, dt, playerTotals).forEach(x=>{ st[x.id]=x.label; });
     const wk = mondayOf(dt);
+    const isMatchDay = matchDates.has(dt);
     let any = false;
     playerTotals.forEach(t=>{
-      if (st[t.id]==='Rehab' || st[t.id]==='No GPS') return;
       const v = t[field]||0; if (!v) return;
-      if (!train[wk]) train[wk] = {}; train[wk][t.id] = (train[wk][t.id]||0)+v; any = true;
+      if (st[t.id]==='No GPS') return;           // that row isn't trustworthy, so the match sheet may fill in
+      if (!trainedOn[dt]) trainedOn[dt] = new Set(); trainedOn[dt].add(t.id);
+      if (st[t.id]==='Rehab') return;
+      const bucket = isMatchDay ? match : train;
+      if (!bucket[wk]) bucket[wk] = {}; bucket[wk][t.id] = (bucket[wk][t.id]||0)+v;
+      if (!isMatchDay) any = true;
     });
     if (any){ if (!days[wk]) days[wk] = new Set(); days[wk].add(dt); }
   });
-  const gameDates = [];
+  const gameDates = [...matchDates];
   players.forEach(a=>(a.gameGps||[]).forEach(g=>{
     const v = g[metricKey]; if (v==null || !g.date) return;
-    const wk = mondayOf(g.date); gameDates.push(g.date);
+    if (trainedOn[g.date] && trainedOn[g.date].has(a.id)) return;     // already counted from the training sheet
+    const wk = mondayOf(g.date);
     if (!match[wk]) match[wk] = {}; match[wk][a.id] = (match[wk][a.id]||0)+v;
   }));
   const allKeys = [...Object.keys(train), ...Object.keys(match)].sort();
@@ -4486,7 +4501,7 @@ function drawTeamGpsTraining(){
       <td style="color:${w.prevPct==null?'inherit':(w.prevPct>=0?'#c8483d':'#3d6fb0')}">${w.prevPct==null?'—':(w.prevPct>=0?'+':'')+fmt(w.prevPct)+'%'}</td><td>${w.chronic!=null?fmt(w.chronic):'—'}</td>
       <td style="font-weight:700;color:${w.zone?ACWR_ZONE_COLOR[w.zone]:'inherit'}">${w.acwr!=null?w.acwr.toFixed(2)+' · '+ACWR_ZONE_LABEL[w.zone]:'—'}</td></tr>`).join('')}
     </tbody></table></div>
-    <div class="chart-note"><span>▪ Weeks run Monday–Sunday. Each player's week = all her training (excluding Rehab / No GPS days) plus match load; the bar is the average across players who had any load that week. Weekly ACWR = this week ÷ the average of the last 4 weeks, so it needs 4 weeks of data. A week marked in progress isn't finished, so its total is understated.</span></div>`;
+    <div class="chart-note"><span>▪ Weeks run Monday–Sunday. Each player's week = all her training (excluding Rehab / No GPS days) plus match load; the bar is the average across players who had any load that week. Weekly ACWR = this week ÷ the average of the last 4 weeks, so it needs 4 weeks of data. Match-day load comes from the training sheet (warm-up + halves) when the player is in it, so the two sheets never stack; the match sheet only fills in players missing from the training sheet. A week marked in progress isn't finished, so its total is understated.</span></div>`;
   } else html += `<div class="hint" style="padding:8px 4px;">No weekly load yet.</div>`;
 
   const pAcwr = playerAcwrRows(players, today);
