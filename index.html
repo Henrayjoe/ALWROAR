@@ -429,7 +429,7 @@
       <span id="saveAllStatus" style="flex:1;text-align:right;white-space:nowrap;">Following the sheet</span>
     </div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-13 13:40</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-13 14:05</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -1417,11 +1417,19 @@ function teamWeeklyLoads(players, metricKey){
   for (let cur=new Date(allKeys[0]+'T00:00:00'); toLocalDateStr(cur)<=allKeys[allKeys.length-1]; cur.setDate(cur.getDate()+7)){
     const wk = toLocalDateStr(cur);
     const sun = new Date(cur); sun.setDate(sun.getDate()+6);
-    const mean = o => { const v = Object.values(o||{}); return v.length ? v.reduce((x,y)=>x+y,0)/v.length : 0; };
+    // ONE denominator for the whole week: every player with any load in it. That way
+    // Training + Match = Total exactly (before, training was averaged over the players who
+    // trained and match over the players who played, so the parts didn't add up to the total
+    // and the stacked bar disagreed with the table).
     const ids = new Set([...Object.keys(train[wk]||{}), ...Object.keys(match[wk]||{})]);
-    const totalPer = ids.size ? [...ids].reduce((sum,id)=>sum+((train[wk]||{})[id]||0)+((match[wk]||{})[id]||0),0)/ids.size : 0;
-    out.push({ monday:wk, sunday:toLocalDateStr(sun), train:mean(train[wk]), match:mean(match[wk]), total:totalPer,
-      nPlayers:ids.size, sessions:(days[wk]?days[wk].size:0), partial: lastData < toLocalDateStr(sun) && wk===mondayOf(lastData) });
+    const N = ids.size;
+    const sumOf = o => Object.values(o||{}).reduce((x,y)=>x+y,0);
+    const trainAvg = N ? sumOf(train[wk])/N : 0, matchAvg = N ? sumOf(match[wk])/N : 0;
+    const rows = [...ids].map(id=>{ const t=(train[wk]||{})[id]||0, m=(match[wk]||{})[id]||0; return { id, name:(athleteMap[id]||{}).name||id, train:t, match:m, total:t+m }; })
+      .sort((x,y)=>y.total-x.total);
+    out.push({ monday:wk, sunday:toLocalDateStr(sun), train:trainAvg, match:matchAvg, total:trainAvg+matchAvg,
+      nPlayers:N, nTrained:Object.keys(train[wk]||{}).length, nPlayed:Object.keys(match[wk]||{}).length, rows,
+      sessions:(days[wk]?days[wk].size:0), partial: lastData < toLocalDateStr(sun) && wk===mondayOf(lastData) });
   }
   out.forEach((w,i)=>{
     w.prevPct = (i>0 && out[i-1].total>0 && !w.partial) ? ((w.total-out[i-1].total)/out[i-1].total)*100 : null;
@@ -4378,6 +4386,18 @@ let teamAcwrMetric = 'total_distance_m';
 function setTeamAcwrMetric(m){ teamAcwrMetric = m; drawTeamGpsTraining(); }
 let teamSessionLoadChartInstance = null;
 let teamWeeklyChartInstance = null;
+let _weeklyCache = [];
+function showWeekDetail(monday){
+  const box = document.getElementById('weekDetailBox'); if (!box) return;
+  const sel = box.previousElementSibling; if (sel && sel.tagName==='SELECT') sel.value = monday;
+  const w = _weeklyCache.find(x=>x.monday===monday); if (!w){ box.innerHTML=''; return; }
+  const sum = f => w.rows.reduce((t,r)=>t+r[f],0);
+  box.innerHTML = `<div class="squad-table-scroll"><table><thead><tr><th>Player</th><th>Training</th><th>Match</th><th>Total</th></tr></thead><tbody>
+    ${w.rows.map(r=>`<tr><td class="lbl">${r.name}</td><td>${r.train?fmt(r.train):'—'}</td><td>${r.match?fmt(r.match):'—'}</td><td><b>${fmt(r.total)}</b></td></tr>`).join('')}
+    <tr style="border-top:2px solid var(--border);font-weight:700;"><td class="lbl">Sum of ${w.nPlayers} players</td><td>${fmt(sum('train'))}</td><td>${fmt(sum('match'))}</td><td>${fmt(sum('total'))}</td></tr>
+    <tr style="font-weight:700;"><td class="lbl">÷ ${w.nPlayers} = average per player</td><td>${fmt(w.train)}</td><td>${fmt(w.match)}</td><td>${fmt(w.total)}</td></tr>
+    </tbody></table></div>`;
+}
 let masIntervalDuration = 30; // seconds -- adjustable in the UI
 let masGroupCount = 3;
 function setMasDuration(v){ masIntervalDuration = Math.max(1, +v||30); drawTeamMasView(); }
@@ -4496,12 +4516,15 @@ function drawTeamGpsTraining(){
   html += `<div class="pq-heading" style="margin-top:18px;">Week-by-Week Load (avg per player · ${ACWR_METRIC_INFO[teamAcwrMetric].label})</div>`;
   if (weekly.length){
     html += `<canvas id="teamWeeklyChart" height="80"></canvas>
-    <div class="squad-table-scroll" style="margin-top:10px;"><table><thead><tr><th>Week (Mon–Sun)</th><th>Sessions</th><th>Training</th><th>Match</th><th>Total</th><th>vs prev week</th><th>4-wk avg</th><th>Weekly ACWR</th></tr></thead><tbody>
-    ${[...weekly].reverse().map(w=>`<tr><td class="lbl">${w.monday} → ${w.sunday}${w.partial?' <span class="hint" style="margin:0;">(in progress)</span>':''}</td><td>${w.sessions}</td><td>${fmt(w.train)}</td><td>${w.match?fmt(w.match):'—'}</td><td><b>${fmt(w.total)}</b></td>
+    <div class="squad-table-scroll" style="margin-top:10px;"><table><thead><tr><th>Week (Mon–Sun)</th><th>Training days</th><th>Players</th><th>Training</th><th>Match</th><th>Total</th><th>vs prev week</th><th>4-wk avg</th><th>Weekly ACWR</th></tr></thead><tbody>
+    ${[...weekly].reverse().map(w=>`<tr><td class="lbl">${w.monday} → ${w.sunday}${w.partial?' <span class="hint" style="margin:0;">(in progress)</span>':''}</td><td>${w.sessions}</td><td>${w.nPlayers}</td><td>${fmt(w.train)}</td><td>${w.match?fmt(w.match):'—'}</td><td><b>${fmt(w.total)}</b></td>
       <td style="color:${w.prevPct==null?'inherit':(w.prevPct>=0?'#c8483d':'#3d6fb0')}">${w.prevPct==null?'—':(w.prevPct>=0?'+':'')+fmt(w.prevPct)+'%'}</td><td>${w.chronic!=null?fmt(w.chronic):'—'}</td>
       <td style="font-weight:700;color:${w.zone?ACWR_ZONE_COLOR[w.zone]:'inherit'}">${w.acwr!=null?w.acwr.toFixed(2)+' · '+ACWR_ZONE_LABEL[w.zone]:'—'}</td></tr>`).join('')}
     </tbody></table></div>
-    <div class="chart-note"><span>▪ Weeks run Monday–Sunday. Each player's week = all her training (excluding Rehab / No GPS days) plus match load; the bar is the average across players who had any load that week. Weekly ACWR = this week ÷ the average of the last 4 weeks, so it needs 4 weeks of data. Match-day load comes from the training sheet (warm-up + halves) when the player is in it, so the two sheets never stack; the match sheet only fills in players missing from the training sheet. A week marked in progress isn't finished, so its total is understated.</span></div>`;
+    <div class="pq-heading" style="margin:14px 0 6px;font-size:12px;">Check a week, player by player</div>
+    <select class="btn-sm" style="padding:6px 8px;" onchange="showWeekDetail(this.value)">${[...weekly].reverse().map(w=>`<option value="${w.monday}">${w.monday} → ${w.sunday}${w.partial?' (in progress)':''}</option>`).join('')}</select>
+    <div id="weekDetailBox" style="margin-top:8px;"></div>
+    <div class="chart-note"><span>▪ Weeks run Monday–Sunday. Each player's week = all her training (excluding Rehab / No GPS days) plus match load. Training, Match and Total are all averaged over the same players (everyone with any load that week), so Training + Match = Total; a player who didn't play counts as 0 match. Weekly ACWR = this week ÷ the average of the last 4 weeks, so it needs 4 weeks of data. Match-day load comes from the training sheet (warm-up + halves) when the player is in it, so the two sheets never stack; the match sheet only fills in players missing from the training sheet. A week marked in progress isn't finished, so its total is understated.</span></div>`;
   } else html += `<div class="hint" style="padding:8px 4px;">No weekly load yet.</div>`;
 
   const pAcwr = playerAcwrRows(players, today);
@@ -4586,6 +4609,7 @@ function drawTeamGpsTraining(){
           grid:{ color: gridCtx => { const v=gridCtx.tick.value; return (v>=0.8&&v<=1.3)?'rgba(47,143,91,0.15)':'rgba(0,0,0,0.06)'; } } }
     }} });
   }
+  _weeklyCache = weekly; if (weekly.length) showWeekDetail(weekly[weekly.length-1].monday);
   const wkCanvas = document.getElementById('teamWeeklyChart');
   if (weekly.length && wkCanvas){
     if (teamWeeklyChartInstance) teamWeeklyChartInstance.destroy();
@@ -7440,7 +7464,7 @@ function buildLoadReportHtml(){
     html += `<div class="chart-block"><div class="rpt-section-title">Week-by-week load (avg per player)</div>
       ${svgStackedBars(weekly.map(w=>w.monday), [{values:weekly.map(w=>w.train),color:'#f26522'},{values:weekly.map(w=>w.match),color:'#3d6fb0'}], {})}
       <div style="font-size:11px;margin:2px 0 8px;"><span style="color:#f26522;">■</span> Training &nbsp; <span style="color:#3d6fb0;">■</span> Match</div>
-      <table class="rpt-table"><thead><tr><th>Week (Mon–Sun)</th><th>Sessions</th><th>Training</th><th>Match</th><th>Total</th><th>vs prev</th><th>4-wk avg</th><th>Weekly ACWR</th></tr></thead><tbody>
+      <table class="rpt-table"><thead><tr><th>Week (Mon–Sun)</th><th>Training days</th><th>Training</th><th>Match</th><th>Total</th><th>vs prev</th><th>4-wk avg</th><th>Weekly ACWR</th></tr></thead><tbody>
       ${[...weekly].reverse().slice(0,10).map(w=>`<tr><td class="lbl">${w.monday} → ${w.sunday}${w.partial?' (in progress)':''}</td><td>${w.sessions}</td><td>${fmt(w.train)}</td><td>${w.match?fmt(w.match):'—'}</td><td><b>${fmt(w.total)}</b></td><td>${w.prevPct==null?'—':(w.prevPct>=0?'+':'')+fmt(w.prevPct)+'%'}</td><td>${w.chronic!=null?fmt(w.chronic):'—'}</td><td style="font-weight:700;color:${w.zone?ACWR_ZONE_COLOR[w.zone]:'inherit'}">${w.acwr!=null?w.acwr.toFixed(2)+' · '+ACWR_ZONE_LABEL[w.zone]:'—'}</td></tr>`).join('')}
       </tbody></table></div>`;
   }
