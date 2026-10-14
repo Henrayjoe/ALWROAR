@@ -7486,6 +7486,12 @@ function buildGpsSummaryReportHtml(nWeeks, endMonday){
   let endIdx = all.findIndex(w=>w.monday===endMonday); if (endIdx<0) endIdx = all.length-1;
   const weeks = all.slice(Math.max(0, endIdx-nWeeks+1), endIdx+1);
   const complete = weeks.filter(w=>!w.partial && w.sessions>0);
+  const matchDatesSet = new Set(); players.forEach(a=>(a.gameGps||[]).forEach(g=>{ if (g.date) matchDatesSet.add(g.date); }));
+  weeks.forEach(w=>{
+    const tr={distance:0,hsr:0,accelDecel:0}, gm={distance:0,hsr:0,accelDecel:0};
+    (w.days||[]).forEach(d=>{ const t = matchDatesSet.has(d.date)?gm:tr; t.distance+=d.distance; t.hsr+=d.hsr; t.accelDecel+=d.accel+d.decel; });
+    w.trD=tr.distance; w.gmD=gm.distance; w.trH=tr.hsr; w.gmH=gm.hsr; w.trA=tr.accelDecel; w.gmA=gm.accelDecel;
+  });
   const avgOf = f => complete.length ? complete.reduce((s,w)=>s+w[f],0)/complete.length : null;
   const kpi = (l,v,sub)=>`<div class="kpi-card"><div class="kpi-card-label">${l}</div><div class="kpi-card-value">${v}</div><div class="kpi-card-sub">${sub}</div></div>`;
   const sub = `Avg per complete week (${complete.length})`;
@@ -7498,15 +7504,22 @@ function buildGpsSummaryReportHtml(nWeeks, endMonday){
       ${kpi('Accel/Decel', avgOf('accelDecel')!=null?fmt0(avgOf('accelDecel')):'—', sub)}
     </div>
     <div class="chart-block"><div class="rpt-section-title">Squad weekly load (average per player, Monday–Sunday)</div>
+      <div style="font-size:11px;color:#374151;margin:2px 0 4px;"><span style="display:inline-block;width:10px;height:10px;background:#1f3a5f;margin-right:4px;"></span>Training &nbsp;&nbsp;<span style="display:inline-block;width:10px;height:10px;background:#f26522;margin-right:4px;"></span>Game (match day)</div>
       <div style="display:flex;gap:14px;">
-        <div style="flex:1;min-width:0;"><div style="font-size:11px;font-weight:700;color:#6b7280;margin:2px 0;">Total Distance (m)</div>${svgStackedBars(weeks.map(w=>w.monday), [{values:weeks.map(w=>w.distance),color:'#f26522'}], {h:190})}</div>
-        <div style="flex:1;min-width:0;"><div style="font-size:11px;font-weight:700;color:#6b7280;margin:2px 0;">HSR (m)</div>${svgStackedBars(weeks.map(w=>w.monday), [{values:weeks.map(w=>w.hsr),color:'#3d6fb0'}], {h:190})}</div>
+        <div style="flex:1;min-width:0;"><div style="font-size:11px;font-weight:700;color:#6b7280;margin:2px 0;">Total Distance (m) — training + game</div>${svgStackedBars(weeks.map(w=>w.monday), [{values:weeks.map(w=>w.trD),color:'#1f3a5f'},{values:weeks.map(w=>w.gmD),color:'#f26522'}], {h:190})}</div>
+        <div style="flex:1;min-width:0;"><div style="font-size:11px;font-weight:700;color:#6b7280;margin:2px 0;">HSR (m) — training + game</div>${svgStackedBars(weeks.map(w=>w.monday), [{values:weeks.map(w=>w.trH),color:'#1f3a5f'},{values:weeks.map(w=>w.gmH),color:'#f26522'}], {h:190})}</div>
       </div>
-      <table class="rpt-table"><thead><tr><th>Week</th><th>Dates (Mon–Sun)</th><th>Sessions</th><th>Total Distance (m)</th><th>HSR (m)</th><th>Sprint Dist (m)</th><th>Accel/Decel</th></tr></thead><tbody>
-      ${weeks.map(w=>`<tr><td class="lbl">Week ${w.n}${w.hasMatch?' ⚽':''}</td><td>${w.monday} → ${w.sunday}${w.partial?' (in progress)':''}</td><td>${w.sessions}</td><td>${fmt0(w.distance)}</td><td>${fmt0(w.hsr)}</td><td>${fmt0(w.sprint)}</td><td>${fmt0(w.accelDecel)}</td></tr>`).join('')}
-      <tr style="border-top:2px solid var(--border);font-weight:700;"><td class="lbl">Average / week</td><td>${complete.length} complete week${complete.length===1?'':'s'}</td><td>${complete.length?fmt0(avgOf('sessions')):'—'}</td><td>${avgOf('distance')!=null?fmt0(avgOf('distance')):'—'}</td><td>${avgOf('hsr')!=null?fmt0(avgOf('hsr')):'—'}</td><td>${avgOf('sprint')!=null?fmt0(avgOf('sprint')):'—'}</td><td>${avgOf('accelDecel')!=null?fmt0(avgOf('accelDecel')):'—'}</td></tr>
+      <table class="rpt-table"><thead>
+        <tr><th rowspan="2">Week</th><th rowspan="2">Dates (Mon–Sun)</th><th rowspan="2">Sess.</th><th colspan="3">Total Distance (m)</th><th colspan="3">HSR (m)</th><th rowspan="2">Sprint (m)</th><th colspan="3">Accel/Decel</th></tr>
+        <tr><th>Train</th><th>Game</th><th>Total</th><th>Train</th><th>Game</th><th>Total</th><th>Train</th><th>Game</th><th>Total</th></tr></thead><tbody>
+      ${weeks.map(w=>`<tr><td class="lbl">Week ${w.n}${w.hasMatch?' ⚽':''}</td><td>${w.monday} → ${w.sunday}${w.partial?' (in progress)':''}</td><td>${w.sessions}</td>
+        <td>${fmt0(w.trD)}</td><td>${w.gmD?fmt0(w.gmD):'—'}</td><td><b>${fmt0(w.distance)}</b></td>
+        <td>${fmt0(w.trH)}</td><td>${w.gmH?fmt0(w.gmH):'—'}</td><td><b>${fmt0(w.hsr)}</b></td><td>${fmt0(w.sprint)}</td>
+        <td>${fmt0(w.trA)}</td><td>${w.gmA?fmt0(w.gmA):'—'}</td><td><b>${fmt0(w.accelDecel)}</b></td></tr>`).join('')}
+      <tr style="border-top:2px solid var(--border);font-weight:700;"><td class="lbl">Average / week</td><td>${complete.length} complete week${complete.length===1?'':'s'}</td><td>${complete.length?fmt0(avgOf('sessions')):'—'}</td>
+        ${['trD','gmD','distance','trH','gmH','hsr','sprint','trA','gmA','accelDecel'].map(k=>`<td>${avgOf(k)!=null?fmt0(avgOf(k)):'—'}</td>`).join('')}</tr>
       </tbody></table>
-      <div class="chart-note"><span>▪ Each week's figures are the same as the weekly training report: per training day the squad average of players with Full status, added up across the week. ⚽ = week includes a match (match day is in the training sheet).</span></div></div>`;
+      <div class="chart-note"><span>▪ Each week's figures are the same as the weekly training report: per training day the squad average of players with Full status, added up across the week. ⚽ = week includes a match. Game = match-day GPS from the training sheet (includes warm-up); Training = all other sessions.</span></div></div>`;
 
   // Player accumulation over the period (same per-player basis as the weekly report's player table)
   const showWeekCols = weeks.length <= 8;
