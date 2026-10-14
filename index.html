@@ -429,7 +429,7 @@
       <span id="saveAllStatus" style="flex:1;text-align:right;white-space:nowrap;">Following the sheet</span>
     </div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-13 14:40</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-14 15:40</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -4454,7 +4454,13 @@ function drawTeamGpsTraining(){
   const latestAcwr = latestFull || latestProv;
   const weekly = teamWeeklyLoads(players, teamAcwrMetric);
 
-  let html = `<div class="quad-ctrl-row" style="margin-bottom:14px;"><button class="btn" onclick="openReportModal()">📄 Print Training Report</button> <button class="btn" onclick="openLoadReport()">📈 Print Load Monitoring (ACWR) Report</button></div>`;
+  let html = `<div class="quad-ctrl-row" style="margin-bottom:14px;"><button class="btn" onclick="openReportModal()">📄 Print Training Report</button> <button class="btn" onclick="openLoadReport()">📈 Print Load Monitoring (ACWR) Report</button></div>
+    <div class="quad-ctrl-row" style="margin-bottom:14px;gap:8px;align-items:center;flex-wrap:wrap;"><b style="font-size:13px;">Multi-week GPS summary</b>
+      <span class="hint" style="margin:0;">last</span>
+      <select id="gsWeeks" class="btn-sm" style="padding:6px 8px;">${[2,3,4,5,6,8,10,12].map(n=>`<option value="${n}" ${n===4?'selected':''}>${n} weeks</option>`).join('')}</select>
+      <span class="hint" style="margin:0;">ending</span>
+      <select id="gsEnd" class="btn-sm" style="padding:6px 8px;">${[...weekly].reverse().map(w=>`<option value="${w.monday}">Week ${w.n} (${w.monday})${w.partial?' · in progress':''}</option>`).join('')}</select>
+      <button class="btn" onclick="openGpsSummaryReport(+document.getElementById('gsWeeks').value, document.getElementById('gsEnd').value)">🖨 Print GPS Summary</button></div>`;
 
   html += `<div class="tp-sw-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:18px;">
     <div class="cat-card">
@@ -7456,6 +7462,70 @@ function buildLoadReportHtml(){
       <div class="chart-note"><span>▪ ACWR is a load-context flag, not an injury predictor. Read it with wellness, match schedule and the player's history. Bands (Gabbett et al.): below 0.8 undertrained, 0.8–1.3 sweet spot, 1.3–1.5 caution, above 1.5 high.</span></div></div>`;
   }
   return html;
+}
+
+// ============================================================
+// MULTI-WEEK GPS SUMMARY — a coach-facing summary over the last N Monday–Sunday weeks:
+// week-by-week squad numbers (same figures as the weekly training report), the period
+// average, and each player's accumulated load over the period.
+// ============================================================
+function fmt0(n){ if(n==null||isNaN(n)) return '—'; return Math.round(n).toLocaleString(); }
+function buildGpsSummaryReportHtml(nWeeks, endMonday){
+  const players = Object.values(athleteMap).filter(a=>genderFilterVal==='all'||a.gender===genderFilterVal);
+  const all = teamWeeklyLoads(players, 'total_distance_m');
+  if (!all.length) return `<div class="hint" style="padding:20px 4px;">No training GPS data yet.</div>`;
+  let endIdx = all.findIndex(w=>w.monday===endMonday); if (endIdx<0) endIdx = all.length-1;
+  const weeks = all.slice(Math.max(0, endIdx-nWeeks+1), endIdx+1);
+  const complete = weeks.filter(w=>!w.partial && w.sessions>0);
+  const avgOf = f => complete.length ? complete.reduce((s,w)=>s+w[f],0)/complete.length : null;
+  const kpi = (l,v,sub)=>`<div class="kpi-card"><div class="kpi-card-label">${l}</div><div class="kpi-card-value">${v}</div><div class="kpi-card-sub">${sub}</div></div>`;
+  const sub = `Avg per complete week (${complete.length})`;
+  const first = weeks[0], last = weeks[weeks.length-1];
+  let html = `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">GPS Summary — Weeks ${first.n}–${last.n}</div><div class="rpt-sub">Brisbane Roar · ${first.monday} to ${last.sunday} · ${weeks.length} week${weeks.length===1?'':'s'}</div></div>${ROAR_LOGO_SVG}</div>
+    <div class="kpi-cards">
+      ${kpi('Total Distance (m)', avgOf('distance')!=null?fmt0(avgOf('distance')):'—', sub)}
+      ${kpi('HSR (m)', avgOf('hsr')!=null?fmt0(avgOf('hsr')):'—', sub)}
+      ${kpi('Sprint Distance (m)', avgOf('sprint')!=null?fmt0(avgOf('sprint')):'—', sub)}
+      ${kpi('Accel/Decel', avgOf('accelDecel')!=null?fmt0(avgOf('accelDecel')):'—', sub)}
+    </div>
+    <div class="chart-block"><div class="rpt-section-title">Squad weekly load (average per player, Monday–Sunday)</div>
+      <div style="display:flex;gap:14px;">
+        <div style="flex:1;min-width:0;"><div style="font-size:11px;font-weight:700;color:#6b7280;margin:2px 0;">Total Distance (m)</div>${svgStackedBars(weeks.map(w=>w.monday), [{values:weeks.map(w=>w.distance),color:'#f26522'}], {h:190})}</div>
+        <div style="flex:1;min-width:0;"><div style="font-size:11px;font-weight:700;color:#6b7280;margin:2px 0;">HSR (m)</div>${svgStackedBars(weeks.map(w=>w.monday), [{values:weeks.map(w=>w.hsr),color:'#3d6fb0'}], {h:190})}</div>
+      </div>
+      <table class="rpt-table"><thead><tr><th>Week</th><th>Dates (Mon–Sun)</th><th>Sessions</th><th>Total Distance (m)</th><th>HSR (m)</th><th>Sprint Dist (m)</th><th>Accel/Decel</th></tr></thead><tbody>
+      ${weeks.map(w=>`<tr><td class="lbl">Week ${w.n}${w.hasMatch?' ⚽':''}</td><td>${w.monday} → ${w.sunday}${w.partial?' (in progress)':''}</td><td>${w.sessions}</td><td>${fmt0(w.distance)}</td><td>${fmt0(w.hsr)}</td><td>${fmt0(w.sprint)}</td><td>${fmt0(w.accelDecel)}</td></tr>`).join('')}
+      <tr style="border-top:2px solid var(--border);font-weight:700;"><td class="lbl">Average / week</td><td>${complete.length} complete week${complete.length===1?'':'s'}</td><td>${complete.length?fmt0(avgOf('sessions')):'—'}</td><td>${avgOf('distance')!=null?fmt0(avgOf('distance')):'—'}</td><td>${avgOf('hsr')!=null?fmt0(avgOf('hsr')):'—'}</td><td>${avgOf('sprint')!=null?fmt0(avgOf('sprint')):'—'}</td><td>${avgOf('accelDecel')!=null?fmt0(avgOf('accelDecel')):'—'}</td></tr>
+      </tbody></table>
+      <div class="chart-note"><span>▪ Each week's figures are the same as the weekly training report: per training day the squad average of players with Full status, added up across the week. ⚽ = week includes a match (match day is in the training sheet).</span></div></div>`;
+
+  // Player accumulation over the period (same per-player basis as the weekly report's player table)
+  const showWeekCols = weeks.length <= 8;
+  const rows = players.map(a=>{
+    const per = weeks.map(w=>weeklyLoadCalendar(a, w.monday));
+    const sum = f => per.reduce((s,x)=>s+(x[f]||0),0);
+    const dates = new Set(); weeks.forEach(w=>gpsLoadRows(a.trainingGps||[]).forEach(e=>{ if (e.date>=w.monday && e.date<=w.sunday) dates.add(e.date); }));
+    const rehabDays = [...dates].filter(d=>isMostlyRehabDay(a,d)).length;
+    const maxVels = per.map(x=>x.maxVel).filter(v=>v!=null);
+    return { name:a.name, perWeek:per.map(x=>x.distance), distance:sum('distance'), hsr:sum('hsr'), sprint:sum('sprint'), accelDecel:sum('accelDecel'),
+      sessions:dates.size, maxVel:maxVels.length?Math.max(...maxVels):null, rehabOnly: dates.size>0 && rehabDays===dates.size };
+  }).filter(r=>r.distance>0||r.hsr>0||r.sprint>0||r.accelDecel>0).sort((x,y)=>y.distance-x.distance);
+  const counted = rows.filter(r=>!r.rehabOnly);
+  const avgRow = f => counted.length ? counted.reduce((s,r)=>s+r[f],0)/counted.length : null;
+  html += `<div class="chart-block" style="break-before:page;page-break-before:always;"><div class="rpt-section-title">Player accumulated load — Weeks ${first.n}–${last.n}</div>
+    <table class="rpt-table"><thead><tr><th>Player</th><th>Sessions</th>${showWeekCols?weeks.map(w=>`<th>Wk ${w.n} TD</th>`).join(''):''}<th>Total Distance (m)</th><th>HSR (m)</th><th>Sprint Dist (m)</th><th>Accel/Decel</th><th>Max Speed (kph)</th></tr></thead><tbody>
+    ${rows.map(r=>`<tr><td class="lbl">${r.name}${r.rehabOnly?' (rehab)':''}</td><td>${r.sessions}</td>${showWeekCols?r.perWeek.map(v=>`<td>${v?fmt0(v):'—'}</td>`).join(''):''}<td><b>${fmt0(r.distance)}</b></td><td>${fmt0(r.hsr)}</td><td>${fmt0(r.sprint)}</td><td>${fmt0(r.accelDecel)}</td><td>${r.maxVel!=null?fmt0(r.maxVel):'—'}</td></tr>`).join('')}
+    ${counted.length?`<tr style="border-top:2px solid var(--border);font-weight:700;"><td class="lbl">Squad average (${counted.length})</td><td>${fmt0(counted.reduce((s,r)=>s+r.sessions,0)/counted.length)}</td>${showWeekCols?weeks.map((w,i)=>`<td>${fmt0(counted.reduce((s,r)=>s+r.perWeek[i],0)/counted.length)}</td>`).join(''):''}<td>${fmt0(avgRow('distance'))}</td><td>${fmt0(avgRow('hsr'))}</td><td>${fmt0(avgRow('sprint'))}</td><td>${fmt0(avgRow('accelDecel'))}</td><td></td></tr>`:''}
+    </tbody></table>
+    <div class="chart-note"><span>▪ Players with no GPS in the period are left off. Rehab-only players are listed but not included in the squad average.</span></div></div>`;
+  return html;
+}
+function openGpsSummaryReport(nWeeks, endMonday){
+  reportKind = 'gpssummary';
+  mpSetLandscape(true);
+  document.getElementById('rptTrainingControls').style.display = 'none';
+  document.getElementById('reportContent').innerHTML = buildGpsSummaryReportHtml(nWeeks||4, endMonday);
+  document.getElementById('overlayReport').classList.add('show');
 }
 function openWarmupReport(rId){
   const r = wuGet(rId); if (!r) return;
