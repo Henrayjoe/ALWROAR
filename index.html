@@ -4460,6 +4460,10 @@ function drawTeamGpsTraining(){
       <select id="gsWeeks" class="btn-sm" style="padding:6px 8px;">${[2,3,4,5,6,8,10,12].map(n=>`<option value="${n}" ${n===4?'selected':''}>${n} weeks</option>`).join('')}</select>
       <span class="hint" style="margin:0;">ending</span>
       <select id="gsEnd" class="btn-sm" style="padding:6px 8px;">${[...weekly].reverse().map(w=>`<option value="${w.monday}">Week ${w.n} (${w.monday})${w.partial?' · in progress':''}</option>`).join('')}</select>
+      <details id="gsExclBox" style="position:relative;"><summary class="btn-sm" style="padding:6px 10px;cursor:pointer;list-style:none;border:1px solid var(--border);border-radius:6px;">🚫 Exclude players${GS_EXCL.size?` (${GS_EXCL.size})`:''}</summary>
+        <div style="position:absolute;z-index:20;background:var(--card,#fff);border:1px solid var(--border);border-radius:8px;padding:8px 10px;max-height:300px;overflow:auto;min-width:200px;box-shadow:0 4px 14px rgba(0,0,0,.15);">
+          ${players.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(a=>`<label style="display:flex;gap:6px;align-items:center;font-size:12px;padding:2px 0;"><input type="checkbox" ${GS_EXCL.has(a.id)?'checked':''} onchange="gsToggleExcl('${a.id}',this.checked)"> ${a.name}</label>`).join('')}
+          <button class="btn-sm" style="margin-top:6px;" onclick="gsClearExcl()">Clear all</button></div></details>
       <button class="btn" onclick="openGpsSummaryReport(+document.getElementById('gsWeeks').value, document.getElementById('gsEnd').value)">🖨 Print GPS Summary</button></div>`;
 
   html += `<div class="tp-sw-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:18px;">
@@ -7469,9 +7473,14 @@ function buildLoadReportHtml(){
 // week-by-week squad numbers (same figures as the weekly training report), the period
 // average, and each player's accumulated load over the period.
 // ============================================================
+const GS_EXCL = new Set();
+(async()=>{ try{ const r=await storageGet('roar-gsexcl'); if(r){ JSON.parse(typeof r==='string'?r:(r.value||'[]')).forEach(x=>GS_EXCL.add(x)); } }catch(e){} })();
+function gsSaveExcl(){ try{ storageSet('roar-gsexcl', JSON.stringify([...GS_EXCL])); }catch(e){} }
+function gsToggleExcl(id,on){ if(on) GS_EXCL.add(id); else GS_EXCL.delete(id); gsSaveExcl(); const sm=document.querySelector('#gsExclBox summary'); if(sm) sm.textContent='🚫 Exclude players'+(GS_EXCL.size?` (${GS_EXCL.size})`:''); }
+function gsClearExcl(){ GS_EXCL.clear(); gsSaveExcl(); if(typeof drawTeamGpsTraining==='function') drawTeamGpsTraining(); }
 function fmt0(n){ if(n==null||isNaN(n)) return '—'; return Math.round(n).toLocaleString(); }
 function buildGpsSummaryReportHtml(nWeeks, endMonday){
-  const players = Object.values(athleteMap).filter(a=>genderFilterVal==='all'||a.gender===genderFilterVal);
+  const players = Object.values(athleteMap).filter(a=>(genderFilterVal==='all'||a.gender===genderFilterVal) && !GS_EXCL.has(a.id));
   const all = teamWeeklyLoads(players, 'total_distance_m');
   if (!all.length) return `<div class="hint" style="padding:20px 4px;">No training GPS data yet.</div>`;
   let endIdx = all.findIndex(w=>w.monday===endMonday); if (endIdx<0) endIdx = all.length-1;
@@ -7517,7 +7526,7 @@ function buildGpsSummaryReportHtml(nWeeks, endMonday){
     ${rows.map(r=>`<tr><td class="lbl">${r.name}${r.rehabOnly?' (rehab)':''}</td><td>${r.sessions}</td>${showWeekCols?r.perWeek.map(v=>`<td>${v?fmt0(v):'—'}</td>`).join(''):''}<td><b>${fmt0(r.distance)}</b></td><td>${fmt0(r.hsr)}</td><td>${fmt0(r.sprint)}</td><td>${fmt0(r.accelDecel)}</td><td>${r.maxVel!=null?fmt0(r.maxVel):'—'}</td></tr>`).join('')}
     ${counted.length?`<tr style="border-top:2px solid var(--border);font-weight:700;"><td class="lbl">Squad average (${counted.length})</td><td>${fmt0(counted.reduce((s,r)=>s+r.sessions,0)/counted.length)}</td>${showWeekCols?weeks.map((w,i)=>`<td>${fmt0(counted.reduce((s,r)=>s+r.perWeek[i],0)/counted.length)}</td>`).join(''):''}<td>${fmt0(avgRow('distance'))}</td><td>${fmt0(avgRow('hsr'))}</td><td>${fmt0(avgRow('sprint'))}</td><td>${fmt0(avgRow('accelDecel'))}</td><td></td></tr>`:''}
     </tbody></table>
-    <div class="chart-note"><span>▪ Players with no GPS in the period are left off. Rehab-only players are listed but not included in the squad average.</span></div></div>`;
+    <div class="chart-note"><span>▪ Players with no GPS in the period are left off${GS_EXCL.size?` and ${GS_EXCL.size} player${GS_EXCL.size===1?'':'s'} excluded from this print (squad figures exclude them too)`:''}. Rehab-only players are listed but not included in the squad average.</span></div></div>`;
   return html;
 }
 function openGpsSummaryReport(nWeeks, endMonday){
