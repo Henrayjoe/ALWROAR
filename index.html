@@ -914,6 +914,21 @@ function isWholeSessionTitle(title){
 // boundary so every downstream consumer (norm bands, personal-best
 // tracking, display) can trust the field is genuinely in km/h.
 function msToKmh(v){ const n = pf(v); return n==null ? null : n*3.6; }
+// Max-speed unit differs between Sonra export variants (m/s in some, km/h in
+// others), so don't trust the variant: look at the whole sheet. No squad
+// session has a top speed under ~14 km/h (3.9 m/s), but in m/s no value
+// ever tops ~11, so a sheet whose largest Max Speed is > 14 is km/h.
+let SPEED_SHEET_KMH = null;
+function detectSpeedUnit(rows){
+  let mx = null;
+  (rows||[]).forEach(r=>{ [r['Max Speed'], r.maxSpeed].forEach(v=>{ const n=pf(v); if (n!=null && (mx==null || n>mx)) mx=n; }); });
+  SPEED_SHEET_KMH = mx==null ? null : mx>14;
+}
+function sonraSpeedKmh(v, variantIsMs){
+  const n = pf(v); if (n==null) return null;
+  const isKmh = SPEED_SHEET_KMH==null ? !variantIsMs : SPEED_SHEET_KMH;
+  return isKmh ? n : n*3.6;
+}
 function mapSonraTrainingRow(row){
   if ('Total Distance' in row){
     // Simplified human-readable export
@@ -940,7 +955,7 @@ function mapSonraTrainingRow(row){
       accel_count: pf(row['Accelerations (Absolute)'])||0,
       decel_count: pf(row['Decelerations (Absolute)'])||0,
       accel_decel_count: (pf(row['Accelerations (Absolute)'])||0) + (pf(row['Decelerations (Absolute)'])||0),
-      max_velocity_kmh: msToKmh(row['Max Speed']),
+      max_velocity_kmh: sonraSpeedKmh(row['Max Speed'], true),
       avg_heart_rate: null, max_heart_rate: null, // not present in this export
       pct_time_red_zone: null, // not present in this export
       participation: 'Full', // no Participation column in this export -- everyone defaults to Full
@@ -981,7 +996,7 @@ function mapSonraTrainingRow(row){
       // field is already in km/h, not m/s -- confirmed against the club's
       // own reference report (e.g. 26.85 in this export = 26.9 km/h shown
       // there, not the ~96.7 km/h a m/s->km/h conversion would produce).
-      max_velocity_kmh: pf(row.maxSpeed),
+      max_velocity_kmh: sonraSpeedKmh(row.maxSpeed, false),
       avg_heart_rate: null, max_heart_rate: null,
       pct_time_red_zone: null,
       participation: isRehabRow ? 'Rehab' : 'Full',
@@ -1006,7 +1021,7 @@ function mapSonraTrainingRow(row){
     accel_count: pf(row.accelerationsRel)||0,
     decel_count: pf(row.decelerationsRel)||0,
     accel_decel_count: (pf(row.accelerationsRel)||0) + (pf(row.decelerationsRel)||0),
-    max_velocity_kmh: msToKmh(row.maxSpeed),
+    max_velocity_kmh: sonraSpeedKmh(row.maxSpeed, true),
     avg_heart_rate: row.avgHeartrate, max_heart_rate: row.maxHeartrate,
     pct_time_red_zone: row.percentTimeInRedZoneRel,
     participation: row.Participation || '',
@@ -1018,6 +1033,14 @@ function mapSonraTrainingRow(row){
 // and summing it together with its own constituent drills would silently
 // double (or more) count everything. Falls back to summing drills when no
 // such row exists (our original simple-schema behavior, unchanged).
+// Top speed isn't summable, so it never needs the whole-session/drill de-duplication
+// that load totals do: it's simply the highest Max Speed reported on ANY row
+// (whole-session or drill) in the window, straight from the sheet.
+function rawMaxVel(rows, pred){
+  let m = null;
+  (rows||[]).forEach(e=>{ if (e.max_velocity_kmh!=null && (!pred || pred(e))) m = Math.max(m==null?0:m, e.max_velocity_kmh); });
+  return m;
+}
 function gpsLoadRows(trainingGps){
   const byKey = {};
   (trainingGps||[]).forEach(e=>{
@@ -1055,7 +1078,7 @@ function gpsLoadRows(trainingGps){
 // there" state.
 function mergeTrainingGpsFromSheet(rows){
   let added=0, updated=0, skipped=0, removed=0, pruned=false;
-  if (rows.length && isSonraFormat(rows[0])) rows = rows.map(mapSonraTrainingRow);
+  if (rows.length && isSonraFormat(rows[0])){ detectSpeedUnit(rows); rows = rows.map(mapSonraTrainingRow); }
   const fresh = {};      // athleteId -> { rowKey: entry }
   rows.forEach(r=>{
     const id = r.player_name ? resolvePlayerId(r.player_name) : null;
@@ -1138,7 +1161,7 @@ function mapSonraGameRow(row){
     accel_count: pf(row.accelerationsAbs)||0,
     decel_count: pf(row.decelerationsAbs)||0,
     accel_decel_count: (pf(row.accelerationsAbs)||0) + (pf(row.decelerationsAbs)||0),
-    max_velocity_kmh: pf(row.maxSpeed),
+    max_velocity_kmh: sonraSpeedKmh(row.maxSpeed, false),
     half1_distance_m: null, half1_hsr_m: null, half2_distance_m: null, half2_hsr_m: null,
     _whole: isWholeSessionTitle(title),
   };
@@ -1163,6 +1186,7 @@ function mergeGameGpsFromSheet(rows){
   // more than one row per player per match (e.g. separate halves): sum
   // them into one entry unless a row is explicitly marked as the whole
   // match, same "whole session wins, otherwise sum" rule training uses.
+  detectSpeedUnit(rows);
   const normalized = rows.map(r=>{
     if ('playerDisplayName' in r) return mapSonraGameRow(r);
     return {
@@ -3240,8 +3264,8 @@ function aggregateTrainingSessions(a){
     s.duration_min += e.duration_min||0; s.total_distance_m += e.total_distance_m||0;
     s.hsr_distance_m += e.hsr_distance_m||0; s.sprint_distance_m += e.sprint_distance_m||0;
     s.accel_decel_count += e.accel_decel_count||0; s.drillCount++;
-    if (e.max_velocity_kmh!=null) s.max_velocity_kmh = Math.max(s.max_velocity_kmh||0, e.max_velocity_kmh);
   });
+  Object.values(byKey).forEach(s=>{ s.max_velocity_kmh = rawMaxVel(a.trainingGps, e=>e.date===s.date && (e.session_label||'')===(s.session_label||'')); });
   return Object.values(byKey).sort((x,y)=>new Date(x.date)-new Date(y.date));
 }
 let gpsTrainingChartInstance = null;
@@ -3672,6 +3696,7 @@ function weeklyLoad(a, asOfDate){
       if (e.max_velocity_kmh!=null) maxVel = Math.max(maxVel||0, e.max_velocity_kmh);
     }
   });
+  maxVel = rawMaxVel(a.trainingGps, e=>{ const d=Math.round((asOf-new Date(e.date))/86400000); return d>=0 && d<7; });
   return { distance, hsr, sprint, accelDecel, sessionCount: datesInWindow.size, maxVel };
 }
 // Monday-Sunday calendar week totals for the weekly report -- as opposed
@@ -3691,6 +3716,7 @@ function weeklyLoadCalendar(a, mondayStr){
       if (e.max_velocity_kmh!=null) maxVel = Math.max(maxVel||0, e.max_velocity_kmh);
     }
   });
+  maxVel = rawMaxVel(a.trainingGps, e=>{ const d=Math.round((new Date(e.date)-start)/86400000); return d>=0 && d<7; });
   return { distance, hsr, sprint, accelDecel, sessionCount: datesInWindow.size, maxVel };
 }
 function flagOutliers(rows, key){
@@ -3875,7 +3901,6 @@ function daySquadBreakdown(players, dateStr){
       t.duration += e.duration_min||0; t.distance += e.total_distance_m||0;
       t.hsr += e.hsr_distance_m||0; t.sprint += e.sprint_distance_m||0; t.vhsd += e.vhsd_distance_m||0; t.accelDecel += e.accel_decel_count||0;
       t.accel += e.accel_count||0; t.decel += e.decel_count||0;
-      if (e.max_velocity_kmh!=null) t.maxVel = Math.max(t.maxVel||0, e.max_velocity_kmh);
       if (!t.participation && e.participation) t.participation = e.participation;
       // Red Zone % and avg heart rate are both percentages/rates, not
       // summable across drills -- weight by each entry's duration so a
@@ -3884,6 +3909,7 @@ function daySquadBreakdown(players, dateStr){
       if (e.pct_time_red_zone!=null && e.duration_min){ t.redZoneWeighted += e.pct_time_red_zone*e.duration_min; t.redZoneDur += e.duration_min; }
       if (e.avg_heart_rate!=null && e.duration_min){ t.hrWeighted += e.avg_heart_rate*e.duration_min; t.hrDur += e.duration_min; }
     });
+    t.maxVel = rawMaxVel(rowsToday);
     t.redZone = t.redZoneDur ? t.redZoneWeighted/t.redZoneDur : null;
     t.avgHr = t.hrDur ? t.hrWeighted/t.hrDur : null;
     playerTotals.push(t);
