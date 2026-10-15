@@ -429,7 +429,7 @@
       <span id="saveAllStatus" style="flex:1;text-align:right;white-space:nowrap;">Following the sheet</span>
     </div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-15 20:55</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-15 21:35</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -1033,18 +1033,30 @@ function mapSonraTrainingRow(row){
 // and summing it together with its own constituent drills would silently
 // double (or more) count everything. Falls back to summing drills when no
 // such row exists (our original simple-schema behavior, unchanged).
-// Top speed isn't summable, so it never needs the whole-session/drill de-duplication
-// that load totals do: it's simply the highest Max Speed reported on ANY row
-// (whole-session or drill) in the window, straight from the sheet.
+// Top speed comes ONLY from the "Full Session" (whole-session) row, never from individual
+// drill rows. Per date: use the Full Session row's Max Speed; only if a player has no Full
+// Session row with a speed that day (e.g. a rehab player who only has drill rows) does it
+// fall back to the highest drill value. Over several days/sessions it's the highest of those daily values.
 function rawMaxVel(rows, pred){
+  const byDate = {};
+  (rows||[]).forEach(e=>{
+    if (e.max_velocity_kmh==null || (pred && !pred(e))) return;
+    const g = byDate[e.date] || (byDate[e.date] = { whole:null, any:null });
+    g.any = Math.max(g.any==null?0:g.any, e.max_velocity_kmh);
+    if (!e.drill_name) g.whole = Math.max(g.whole==null?0:g.whole, e.max_velocity_kmh);
+  });
   let m = null;
-  (rows||[]).forEach(e=>{ if (e.max_velocity_kmh!=null && (!pred || pred(e))) m = Math.max(m==null?0:m, e.max_velocity_kmh); });
+  Object.values(byDate).forEach(g=>{ const v = g.whole!=null ? g.whole : g.any; if (v!=null) m = Math.max(m==null?0:m, v); });
   return m;
 }
 function gpsLoadRows(trainingGps){
   const byKey = {};
   (trainingGps||[]).forEach(e=>{
-    const key = e.date+'|'+(e.session_label||'');
+    // A session title that is just a date ("October 16, 2026") says nothing about WHICH
+    // session it was -- a typo'd date title on one drill row would otherwise split it off
+    // from its own "Full Session" row and get it counted on top. Treat those as unlabelled.
+    const lbl = sessionTitleIsJustDate(e.session_label) ? '' : (e.session_label||'');
+    const key = e.date+'|'+lbl;
     if (!byKey[key]) byKey[key] = { whole:null, rehab:[], drills:[] };
     const g = byKey[key];
     if (!e.drill_name) g.whole = e;
