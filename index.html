@@ -429,7 +429,7 @@
       <span id="saveAllStatus" style="flex:1;text-align:right;white-space:nowrap;">Following the sheet</span>
     </div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-17 00:05</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-17 00:20</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -8069,11 +8069,11 @@ function tupBenchHtml(){
   </style><div class="tb">
     <div class="tb-head">${ROAR_LOGO_SVG}<div class="tb-title"><b>Post-match top-up</b><span>${m.date} · ${m.ha==='Away'?'Away':'Home'} ${m.opponent?'vs '+tupEsc(m.opponent):''} · max 15 min</span></div>${ROAR_LOGO_SVG}</div>
     ${none.length?`<div class="tb-nn">Minutes not entered for: ${none.map(r=>tupEsc(r.name)).join(', ')}</div>`:''}
-    <div class="tb-groups">${blk('Full','FULL',`${S.doneMin>0?'0–'+(S.halfMin-1)+' min (incl. unused)':''} · base ${S.fullStrides} strides`)}${blk('Half','HALF',`${S.halfMin}–${S.doneMin-1} min · base ${S.halfStrides} strides`)}${blk('Done','DONE',`${S.doneMin}+ min · cool-down only`)}${blk('GK','GK','Separate keeper top-up')}</div>
-    <div style="font-size:10.5px;color:#4b5563;margin:-3px 0 7px;">Number next to a name = box-to-box strides. Position modifiers: CB ${S.mods.CB>0?'+':''}${S.mods.CB}, W/FW +${S.mods.W}, FB/CM ${S.mods.FB}. Minimum 1 stride.</div>
+    <div class="tb-groups">${blk('Full','FULL',`Played ${'0–'+(S.halfMin-1)} min or didn't play`)}${blk('Half','HALF',`Played ${S.halfMin}–${S.doneMin-1} min`)}${blk('Done','DONE',`Played ${S.doneMin}+ min. Cool-down only, no top-up`)}${blk('GK','GK','Goalkeepers: separate top-up')}</div>
+    <div style="font-size:12px;color:#374151;margin:-2px 0 8px;font-weight:600;">The number next to each name = how many <u>strides</u> she runs in the last drill (box-to-box). Finish your strides, then you are done.</div>
     <table class="tb-tbl"><thead><tr><th>Clock</th><th>Drill</th><th>Layout</th><th>Target</th><th>Rest</th><th>Reps</th></tr></thead><tbody>${TUP_SESSION.map(s=>`<tr><td><b>${s.clock}</b></td><td><b>${s.drill}</b></td><td>${s.layout}</td><td>${s.target}</td><td>${s.rest}</td><td>${s.reps}</td></tr>`).join('')}</tbody></table>
     <div class="tb-pits">${pitch('returns','Pitch returns','1 pitch return · 48 s · rest 48 s')}${pitch('sprints','Box sprints','Across the box · max effort · walk back + 60 s')}${pitch('strides','Box-to-box strides','Walk – stride – walk · 12 s · rest 36 s')}<div class="tb-key"><b>How to read it</b><br>White dashed = jog / walk · Yellow = fast run<br><b>Everyone:</b> prep, 2 pitch returns, 3 box sprints.<br><b>Then strides:</b> each player does her own stride count and leaves when finished.<br><b>Clock:</b> 0–15 min, GPS off for the last minute.</div></div>
-    <div class="tb-foot">Players leave the session once they finish their stride count. Expected output per player: HSR ≈ ${S.hsrFixed} m + ${S.hsrStride} m × strides; total distance ≈ ${(S.tdFixed/1000).toFixed(2)} km + ${(S.tdStride/1000).toFixed(2)} km × strides.</div></div>`;
+    <div class="tb-foot">Everyone does the first 3 drills. Only the strides change from player to player.</div></div>`;
 }
 function openTupBench(){
   reportKind = 'tupbench'; mpSetLandscape(false);
