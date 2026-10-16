@@ -429,7 +429,7 @@
       <span id="saveAllStatus" style="flex:1;text-align:right;white-space:nowrap;">Following the sheet</span>
     </div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-15 21:35</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-16 17:40</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -2761,6 +2761,7 @@ function switchTeamTab(t){
   if (t==='gpscoverage') setTimeout(renderGpsCoverage,60);
   if (t==='warmup') setTimeout(renderWarmup,60);
   if (t==='topups') setTimeout(renderTopups,60);
+  if (t==='recovery') setTimeout(renderRecovery,60);
 }
 
 // ============================================================
@@ -3484,6 +3485,7 @@ function renderTeam(){
         <div class="team-tab tab" data-t="gpscoverage" onclick="switchTeamTab('gpscoverage')">GPS Coverage</div>
         <div class="team-tab tab" data-t="warmup" onclick="switchTeamTab('warmup')">Warm Up Routine</div>
         <div class="team-tab tab" data-t="topups" onclick="switchTeamTab('topups')">Top-Ups</div>
+        <div class="team-tab tab" data-t="recovery" onclick="switchTeamTab('recovery')">Recovery</div>
       </div>
       <div class="team-tc tc active" data-t="squad"><div class="quad-body" style="padding-bottom:0;">
         <div class="quad-ctrl-row">${refToggleHtml('heatmap', refFrame.heatmap)}<span class="ref-note">Cell color = status against the selected reference. Toggle changes color only, not the raw values shown.</span></div>
@@ -3586,6 +3588,7 @@ function renderTeam(){
       <div class="team-tc tc" data-t="gpscoverage"><div class="quad-body" id="gpsCoverageRoot" style="padding:16px 20px;"></div></div>
       <div class="team-tc tc" data-t="warmup"><div class="quad-body" id="warmupRoot" style="padding:16px 20px;"></div></div>
       <div class="team-tc tc" data-t="topups"><div class="quad-body" id="topupsRoot" style="padding:16px 20px;"></div></div>
+      <div class="team-tc tc" data-t="recovery"><div class="quad-body" id="recoveryRoot" style="padding:16px 20px;"></div></div>
     </div>`;
   buildSquadTable();
   buildTeamTrendMetricOptions();
@@ -7588,6 +7591,239 @@ function openGpsSummaryReport(nWeeks, endMonday){
   document.getElementById('reportContent').innerHTML = buildGpsSummaryReportHtml(nWeeks||4, endMonday);
   document.getElementById('overlayReport').classList.add('show');
 }
+// ============================================================
+// RECOVERY — player-facing 100-point recovery guide + weekly scorecard.
+// Everything on screen is editable (click any text); edits and coach comments
+// are saved ('roar-recovery') and flow into the printed guide / scorecard.
+// ============================================================
+const REC = { edits:{}, notes:{}, showCycle:true, loaded:false };
+const REC_COL = { sleep:'#3b5b9d', fuel:'#3f9b5a', mind:'#7a5cb5', body:'#f26522', tools:'#1d9bb0', navy:'#1f3a5f' };
+const REC_PILLARS = [
+  { id:'sleep', name:'Sleep', pts:30, tag:'The #1 recovery tool', items:[
+    ['Slept 8+ hours',10], ['Bed and wake-up within 1 hour of your normal time',8], ['Screens off 30–60 min before bed; room dark and cool',8], ['20–30 min nap before 3pm (after travel, early starts or a big day)',4] ],
+    tip:'Sleep is when your body does most of its repair. Consistent beats perfect: protect your bedtime on the nights after games and hard sessions.' },
+  { id:'fuel', name:'Fuel & Fluids', pts:30, tag:'Refuel the tank', items:[
+    ['Carbs + protein within 1 hour of training or the game',8], ['3 proper meals, each with carbs, protein and colour',8], ['Protein snack before bed (milk, yoghurt, cottage cheese)',4], ['Pale straw-coloured urine through the day',6], ['Replaced the fluid you lost in training (drink about 1.5× what you sweated out)',4] ],
+    tip:'Your muscle fuel can take up to 3 days to fully refill after a game, so eating well matters on the days after as well.' },
+  { id:'mind', name:'Mind', pts:15, tag:'Switch off to switch back on', items:[
+    ['10-minute switch-off: no football, no screens (read, music, walk, hobby)',5], ['5 minutes of slow breathing or relaxation',4], ['Time with people you like, or time outside',3], ['Mood check: rated 1–5, and told staff if you were flat or stressed',3] ],
+    tip:'Football is mentally draining too. Rest your head as deliberately as you rest your legs.' },
+  { id:'body', name:'Body', pts:15, tag:'Keep the legs moving', items:[
+    ['10–20 min easy walk, bike or pool',5], ['Cool-down plus 5–10 min of mobility',5], ['Foam roll or self-massage, 5–10 min',5] ],
+    tip:'Easy movement helps you feel looser and fresher. It should feel easy. If it hurts, stop and tell the physio.' },
+  { id:'tools', name:'Smart Tools', pts:10, tag:'Right tool, right time', items:[
+    ['Used cold, heat or compression at the right time (see the ice/heat guide)',6], ['Did your physio or medical plan for any niggles',4] ],
+    tip:'Tools are the extra 10%. They never replace sleep and food.' }
+];
+const REC_BANDS = [ ['85–100','Elite recovery','#3f9b5a'], ['70–84','Solid','#8bb83a'], ['50–69','Room to improve','#f0a020'], ['Under 50','Talk to S&C','#d9534f'] ];
+const REC_DEF = {
+  title:'Roar Recovery Score', subtitle:'Your 100-point daily recovery plan',
+  intro:'Training breaks your body down. Recovery is where you get stronger, faster and fresher. Score your day out of 100. The biggest points are for the habits that matter most: sleep and food.',
+  'ice.h':'Ice or heat?', 'ice.cold':'COLD', 'ice.heat':'HEAT', 'ice.stop':'SEE THE PHYSIO',
+  'ice.c1':'Short turnaround: next game in under 3 days', 'ice.c2':'Hot day, or heavy soreness and tired legs after a game', 'ice.c3':'10–15 min in 10–15°C water (use fresh, cold water)', 'ice.c4':'Skip it straight after gym sessions, because it can blunt strength and muscle gains',
+  'ice.h1':'Tight, stiff or achy muscles', 'ice.h2':'Morning stiffness, or before a session to loosen up', 'ice.h3':'Warm shower, bath or heat pack for 10–15 min', 'ice.h4':'Helps you feel looser. Research is limited, so use it if it feels good',
+  'ice.s1':'Sharp pain, swelling or a "pop"', 'ice.s2':'Pain that gets worse, or does not ease in 24–48 h', 'ice.s3':'Never use heat on a fresh injury. Tell the physio first.',
+  'tl.h':'After the game or hard session',
+  'tl.1t':'0–30 min', 'tl.1':'Easy walk and stretch. Drink. Eat a carb + protein snack.',
+  'tl.2t':'1–2 hours', 'tl.2':'Proper meal: carbs, protein and colour. Keep sipping fluids.',
+  'tl.3t':'Evening', 'tl.3':'Cold or heat if you need it. Legs up. Wind down, no screens.',
+  'tl.4t':'Bedtime', 'tl.4':'Protein snack. Lights out. Aim for 8–10 hours.',
+  'tl.5t':'Next day', 'tl.5':'Easy movement, good food, mood check. Tell staff how you feel.',
+  'plate.h':'Build your plate', 'plate.1':'Carbs: rice, pasta, potato, bread, fruit', 'plate.2':'Protein: chicken, fish, eggs, lean meat, tofu, yoghurt', 'plate.3':'Colour: veg and salad', 'plate.n':'Aim for about 20–25 g of protein at each meal.',
+  'hyd.h':'Hydration check', 'hyd.n':'Check your urine each morning. Aim for the first two colours. After training, drink about 1.5× the fluid you lost.',
+  'cycle.h':'Know your own pattern', 'cycle.t':'For some players, the menstrual cycle can change energy, sleep, soreness and appetite. Everyone is different, and the research is still developing. Track how you feel across your cycle and tell staff what works for you. Tell us early if you often feel flat or dizzy, feel unusually tired, or your periods change or stop.',
+  'ev.t':'How this was built: the score measures habits, not recovery itself. The evidence is strongest for sleep and food. Cold water and massage mainly improve how you feel, not measured physical recovery, and most research is on male players, so we adapt as we learn. If anything hurts or worries you, tell the physio.',
+  'card.title':'Weekly Recovery Scorecard', 'card.how':'Tick each habit you completed that day. Add up the points. Be honest: this is for you.', 'card.note':'Notes / what worked this week'
+};
+function recEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function recV(k){ return (k in REC.edits) ? REC.edits[k] : (REC_DEF[k]!=null?REC_DEF[k]:''); }
+function recT(k, ed, def){ // editable text piece
+  if (def!=null && !(k in REC_DEF)) REC_DEF[k]=def;
+  const v = recEsc(recV(k));
+  return ed ? `<span class="rec-ed" contenteditable="true" spellcheck="false" data-rk="${k}" onblur="recSave(this)" onpaste="recPaste(event)">${v}</span>` : v;
+}
+function recNote(k, ed, label){ // coach comment: shown on screen as an add-comment box, printed only if filled
+  const v = REC.notes[k]||'';
+  if (!ed) return v ? `<div class="rec-note"><b>${recEsc(label||'Coach note')}:</b> ${recEsc(v)}</div>` : '';
+  return `<div class="rec-note rec-note-ed"><b>${recEsc(label||'Coach note')}:</b> <span class="rec-ed" contenteditable="true" data-ph="Add a comment (prints if filled in)…" data-nk="${k}" onblur="recSaveNote(this)" onpaste="recPaste(event)">${recEsc(v)}</span></div>`;
+}
+function recPaste(e){ e.preventDefault(); const t=(e.clipboardData||window.clipboardData).getData('text/plain'); document.execCommand('insertText', false, t); }
+function recSave(el){ const k=el.dataset.rk, v=el.innerText.replace(/\s+/g,' ').trim(); if (!v || v===REC_DEF[k]) delete REC.edits[k]; else REC.edits[k]=v; recPersist(); }
+function recSaveNote(el){ const k=el.dataset.nk, v=el.innerText.trim(); if (v) REC.notes[k]=v; else delete REC.notes[k]; recPersist(); }
+async function recPersist(){ try{ await storageSet('roar-recovery', JSON.stringify({edits:REC.edits, notes:REC.notes, showCycle:REC.showCycle})); }catch(e){} }
+async function recLoad(){
+  if (REC.loaded) return; REC.loaded = true;
+  try{ const raw = await storageGet('roar-recovery'); if (raw){ const o = JSON.parse(typeof raw==='string'?raw:(raw.value||'{}')); REC.edits=o.edits||{}; REC.notes=o.notes||{}; if (o.showCycle===false) REC.showCycle=false; } }catch(e){}
+}
+function recReset(){ if (!confirm('Reset all recovery text and comments back to the defaults?')) return; REC.edits={}; REC.notes={}; REC.showCycle=true; recPersist(); renderRecovery(); }
+function recToggleCycle(on){ REC.showCycle=on; recPersist(); renderRecovery(); }
+
+// ---------- illustrations (inline SVG, so they print crisply) ----------
+function recIcon(id, size, col){
+  const c = col||REC_COL[id]||REC_COL.navy, s=size||44;
+  const wrap = inner => `<svg viewBox="0 0 48 48" width="${s}" height="${s}" fill="none" stroke="${c}" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
+  switch(id){
+    case 'sleep': return wrap(`<path d="M32 7a17 17 0 1 0 9 31A14 14 0 0 1 32 7z" fill="${c}" fill-opacity=".15"/><path d="M36 9v6M33 12h6M41 21v4M39 23h4" />`);
+    case 'fuel': return wrap(`<path d="M24 16c-5-4-14-1-13 9 1 8 6 17 11 15 1.2-.5 3.8-.5 4 0 5 2 10-7 11-15 1-10-8-13-13-9z" fill="${c}" fill-opacity=".15"/><path d="M24 16c0-4 2-7 6-8M24 16c-1-3-3-5-6-5"/>`);
+    case 'mind': return wrap(`<circle cx="24" cy="24" r="17" fill="${c}" fill-opacity=".15"/><path d="M15 21q3 3 6 0M27 21q3 3 6 0M16 29q8 8 16 0"/>`);
+    case 'body': return wrap(`<circle cx="28" cy="9" r="4" fill="${c}" fill-opacity=".2"/><path d="M26 15l-5 9 6 5-2 11M21 24l-8 3M26 15l7 7 6-1M27 29l8 4 3 7"/>`);
+    case 'tools': return wrap(`<path d="M13 9v22M5 20h16M7 12l12 16M19 12L7 28"/><path d="M35 41c-7 0-10-5-9-10 1-4 4-6 5-10 4 3 6 6 5 9 2-1 3-3 3-5 4 5 3 16-4 16z" fill="${c}" fill-opacity=".15"/>`);
+    case 'cold': return wrap(`<path d="M24 5v38M7 14l34 20M7 34L41 14"/><path d="M19 8l5 4 5-4M19 40l5-4 5 4M5 19l6 1-1 6M43 29l-6-1 1-6M5 29l6-1-1-6M43 19l-6 1 1 6" stroke-width="2"/>`);
+    case 'heat': return wrap(`<path d="M24 5c2 8 11 11 11 22a11 11 0 0 1-22 0c0-5 3-7 5-11 1 3 2 4 4 5 0-6-1-11 2-16z" fill="${c}" fill-opacity=".18"/><path d="M24 40a5 5 0 0 1-5-5c0-3 3-4 5-8 2 4 5 5 5 8a5 5 0 0 1-5 5z"/>`);
+    case 'stop': return wrap(`<path d="M16 5h16l11 11v16L32 43H16L5 32V16z" fill="${c}" fill-opacity=".15"/><path d="M24 14v13M24 33v1"/>`);
+    case 'drop': return wrap(`<path d="M24 5c8 10 13 15 13 22a13 13 0 0 1-26 0c0-7 5-12 13-22z" fill="${c}" fill-opacity=".18"/>`);
+    case 'cycle': return wrap(`<path d="M10 24a14 14 0 0 1 24-10l4-4v12H26l5-5a9 9 0 0 0-16 3M38 24a14 14 0 0 1-24 10l-4 4V26h12l-5 5a9 9 0 0 0 16-3" />`);
+  }
+  return '';
+}
+function recWheel(){
+  const cx=100, cy=100, R=84, r=52; let a0=-Math.PI/2, g='';
+  REC_PILLARS.forEach(p=>{
+    const a1 = a0 + (p.pts/100)*2*Math.PI - 0.025, p0=a0+0.025;
+    const pt=(rad,a)=>[cx+rad*Math.cos(a), cy+rad*Math.sin(a)];
+    const [x1,y1]=pt(R,p0),[x2,y2]=pt(R,a1),[x3,y3]=pt(r,a1),[x4,y4]=pt(r,p0), large=(a1-p0)>Math.PI?1:0;
+    g += `<path d="M${x1},${y1} A${R},${R} 0 ${large} 1 ${x2},${y2} L${x3},${y3} A${r},${r} 0 ${large} 0 ${x4},${y4}Z" fill="${REC_COL[p.id]}"/>`;
+    const am=(p0+a1)/2, [lx,ly]=pt((R+r)/2, am);
+    g += `<text x="${lx}" y="${ly+4}" text-anchor="middle" font-size="12" font-weight="800" fill="#fff">${p.pts}</text>`;
+    a0 += (p.pts/100)*2*Math.PI;
+  });
+  g += `<text x="${cx}" y="${cy+2}" text-anchor="middle" font-size="30" font-weight="800" fill="${REC_COL.navy}">100</text><text x="${cx}" y="${cy+18}" text-anchor="middle" font-size="9.5" font-weight="700" fill="#6b7280" letter-spacing="1">POINTS A DAY</text>`;
+  return `<svg viewBox="0 0 200 200" width="190" height="190">${g}</svg>`;
+}
+function recPlate(){
+  const cx=70, cy=70, r=60, pt=(a)=>[cx+r*Math.cos(a), cy+r*Math.sin(a)];
+  const sec=(a0,a1,col)=>{ const [x1,y1]=pt(a0),[x2,y2]=pt(a1); return `<path d="M${cx},${cy} L${x1},${y1} A${r},${r} 0 ${(a1-a0)>Math.PI?1:0} 1 ${x2},${y2}Z" fill="${col}"/>`; };
+  const T=Math.PI*2, s=-Math.PI/2;
+  return `<svg viewBox="0 0 140 140" width="132" height="132"><circle cx="70" cy="70" r="66" fill="#fff" stroke="#d1d5db" stroke-width="3"/>${sec(s,s+T*0.5,'#f2c14e')}${sec(s+T*0.5,s+T*0.75,'#e0705a')}${sec(s+T*0.75,s+T,'#5fae5a')}<circle cx="70" cy="70" r="60" fill="none" stroke="#fff" stroke-width="2"/><text x="102" y="64" font-size="11" font-weight="800" fill="#fff" text-anchor="middle">½</text><text x="38" y="112" font-size="11" font-weight="800" fill="#fff" text-anchor="middle">¼</text><text x="38" y="38" font-size="11" font-weight="800" fill="#fff" text-anchor="middle">¼</text></svg>`;
+}
+function recUrine(){
+  const sw=[['#fff6c4','Great'],['#fbe98a','Good'],['#f2cf4a','OK'],['#dba02a','Drink!'],['#b9741a','Drink now']];
+  return `<div class="rec-urine">${sw.map((s,i)=>`<div><div class="rec-sw" style="background:${s[0]};${i<2?'outline:2px solid #3f9b5a;':''}"></div><div class="rec-swl">${s[1]}</div></div>`).join('')}</div>`;
+}
+
+// ---------- page builders ----------
+function recHeader(title, sub, ed){
+  return `<div class="rec-head">${ROAR_LOGO_SVG}<div class="rec-head-main"><div class="rec-title">${recT(title,ed)}</div><div class="rec-sub">${recT(sub,ed)}</div></div>${ROAR_LOGO_SVG}</div>`;
+}
+function recBuildGuide(ed){
+  const pillarCard = (p,i)=>`<div class="rec-card" style="border-color:${REC_COL[p.id]};">
+      <div class="rec-card-h" style="background:${REC_COL[p.id]};"><span class="rec-ic">${recIcon(p.id,34,'#fff')}</span><div><div class="rec-card-name">${p.name}</div><div class="rec-card-tag">${recT('p.'+p.id+'.tag',ed,p.tag)}</div></div><div class="rec-card-pts">${p.pts}</div></div>
+      <ul class="rec-list">${p.items.map((it,j)=>`<li><span class="rec-box"></span><span class="rec-li">${recT('p.'+p.id+'.i'+j,ed,it[0])}</span><span class="rec-pt" style="color:${REC_COL[p.id]};">${it[1]}</span></li>`).join('')}</ul>
+      <div class="rec-tip">${recT('p.'+p.id+'.tip',ed,p.tip)}</div>${recNote('p.'+p.id,ed,'Comment')}</div>`;
+  const page1 = `<div class="rec-page rec-p1">${recHeader('title','subtitle',ed)}
+    <div class="rec-intro-row"><div class="rec-wheel">${recWheel()}</div><div class="rec-intro"><p>${recT('intro',ed)}</p>
+      <div class="rec-legend">${REC_PILLARS.map(p=>`<span><i style="background:${REC_COL[p.id]}"></i>${p.name} ${p.pts}</span>`).join('')}</div>
+      <div class="rec-bands">${REC_BANDS.map(b=>`<div style="border-color:${b[2]};"><b style="color:${b[2]};">${b[0]}</b><span>${recT('band.'+b[0],ed,b[1])}</span></div>`).join('')}</div></div></div>
+    <div class="rec-grid">${REC_PILLARS.map(pillarCard).join('')}
+      <div class="rec-card rec-card-ev" style="border-color:#9ca3af;"><div class="rec-ev">${recT('ev.t',ed)}</div>${recNote('page1',ed,'Coach note')}</div></div></div>`;
+  const page2 = `<div class="rec-page">${recHeader('title','subtitle',ed)}
+    <div class="rec-h2">${recT('ice.h',ed)}</div>
+    <div class="rec-ice">
+      <div class="rec-ice-col" style="border-color:${REC_COL.tools};"><div class="rec-ice-h" style="background:${REC_COL.tools};">${recIcon('cold',34,'#fff')}<span>${recT('ice.cold',ed)}</span></div><ul>${[1,2,3,4].map(n=>`<li>${recT('ice.c'+n,ed)}</li>`).join('')}</ul></div>
+      <div class="rec-ice-col" style="border-color:#e8742a;"><div class="rec-ice-h" style="background:#e8742a;">${recIcon('heat',34,'#fff')}<span>${recT('ice.heat',ed)}</span></div><ul>${[1,2,3,4].map(n=>`<li>${recT('ice.h'+n,ed)}</li>`).join('')}</ul></div>
+      <div class="rec-ice-col" style="border-color:#d9534f;"><div class="rec-ice-h" style="background:#d9534f;">${recIcon('stop',34,'#fff')}<span>${recT('ice.stop',ed)}</span></div><ul>${[1,2,3].map(n=>`<li>${recT('ice.s'+n,ed)}</li>`).join('')}</ul></div>
+    </div>
+    <div class="rec-h2">${recT('tl.h',ed)}</div>
+    <div class="rec-tl">${[1,2,3,4,5].map(n=>`<div class="rec-tl-step"><div class="rec-tl-dot" style="background:${REC_COL.navy};">${n}</div><div class="rec-tl-t">${recT('tl.'+n+'t',ed)}</div><div class="rec-tl-d">${recT('tl.'+n,ed)}</div></div>`).join('')}</div>
+    <div class="rec-two">
+      <div class="rec-box2"><div class="rec-h3">${recT('plate.h',ed)}</div><div class="rec-plate-row">${recPlate()}<ul class="rec-plate-key"><li><i style="background:#f2c14e"></i>${recT('plate.1',ed)}</li><li><i style="background:#e0705a"></i>${recT('plate.2',ed)}</li><li><i style="background:#5fae5a"></i>${recT('plate.3',ed)}</li></ul></div><div class="rec-small">${recT('plate.n',ed)}</div></div>
+      <div class="rec-box2"><div class="rec-h3"><span style="vertical-align:middle;">${recIcon('drop',22,'#1d9bb0')}</span> ${recT('hyd.h',ed)}</div>${recUrine()}<div class="rec-small">${recT('hyd.n',ed)}</div></div>
+    </div>
+    ${REC.showCycle||ed ? `<div class="rec-box2 rec-cycle ${REC.showCycle?'':'rec-off'}"><div class="rec-h3"><span style="vertical-align:middle;">${recIcon('cycle',22,'#7a5cb5')}</span> ${recT('cycle.h',ed)}</div><div class="rec-small" style="font-size:11px;">${recT('cycle.t',ed)}</div></div>` : ''}
+    ${recNote('page2',ed,'Coach note')}</div>`;
+  return page1 + page2;
+}
+function recBuildCard(ed){
+  const days=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  let rows='';
+  REC_PILLARS.forEach(p=>{
+    rows += `<tr class="rec-sc-ph"><td colspan="9" style="background:${REC_COL[p.id]};">${p.name} <span>${p.pts} pts</span></td></tr>`;
+    p.items.forEach((it,j)=>{ rows += `<tr><td class="rec-sc-l">${recT('p.'+p.id+'.i'+j,false,it[0])}</td><td class="rec-sc-p" style="color:${REC_COL[p.id]};">${it[1]}</td>${days.map(()=>'<td class="rec-sc-c"><span class="rec-circ"></span></td>').join('')}</tr>`; });
+  });
+  const blanks = n=>Array(n).fill('<td class="rec-sc-c"></td>').join('');
+  return `<div class="rec-page rec-card-page">${recHeader('card.title','subtitle',ed)}
+    <div class="rec-fields"><div>Name: <span class="rec-line" style="width:210px;"></span></div><div>Week starting: <span class="rec-line" style="width:120px;"></span></div></div>
+    <div class="rec-small" style="margin:2px 0 6px;">${recT('card.how',ed)}</div>
+    <table class="rec-sc"><thead><tr><th class="rec-sc-l">Habit</th><th>Pts</th>${days.map(d=>`<th>${d}</th>`).join('')}</tr></thead><tbody>
+      <tr class="rec-sc-day"><td class="rec-sc-l">Day type (M = match, T = training, R = rest)</td><td></td>${blanks(7)}</tr>
+      ${rows}
+      <tr class="rec-sc-tot"><td class="rec-sc-l">DAILY TOTAL</td><td>100</td>${blanks(7)}</tr></tbody></table>
+    <div class="rec-sc-foot"><div class="rec-sc-avg"><div>Weekly average</div><div class="rec-avg-box">&nbsp;</div><div class="rec-small">/ 100</div></div>
+      <div class="rec-bands rec-bands-sm">${REC_BANDS.map(b=>`<div style="border-color:${b[2]};"><b style="color:${b[2]};">${b[0]}</b><span>${recT('band.'+b[0],false,b[1])}</span></div>`).join('')}</div></div>
+    <div class="rec-notebox"><div class="rec-small"><b>${recT('card.note',ed)}</b></div></div>${recNote('card',ed,'Coach note')}</div>`;
+}
+
+// ---------- tab + print ----------
+const REC_CSS = `
+.rec-page{background:#fff;color:#1f2937;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-size:12px;line-height:1.35;width:100%;box-sizing:border-box;padding:6px 2px 0;}
+.rec-head{display:flex;align-items:center;justify-content:space-between;border-bottom:3px solid #f26522;padding-bottom:8px;margin-bottom:10px;}
+.rec-head .rpt-logo{height:52px;width:auto;}
+.rec-head-main{text-align:center;flex:1;}
+.rec-title{font-size:24px;font-weight:800;color:#f26522;letter-spacing:.03em;text-transform:uppercase;}
+.rec-sub{font-size:12.5px;color:#6b7280;margin-top:2px;}
+.rec-intro-row{display:flex;gap:14px;align-items:center;margin-bottom:10px;}
+.rec-wheel{flex:0 0 190px;} .rec-intro{flex:1;} .rec-intro p{margin:0 0 8px;font-size:12.5px;}
+.rec-legend{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:11px;font-weight:600;margin-bottom:8px;} .rec-legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px;}
+.rec-bands{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;} .rec-bands>div{border:2px solid;border-radius:8px;padding:5px 6px;text-align:center;display:flex;flex-direction:column;} .rec-bands b{font-size:13px;} .rec-bands span{font-size:10.5px;font-weight:600;}
+.rec-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px;}
+.rec-card{border:2px solid;border-radius:10px;overflow:hidden;break-inside:avoid;page-break-inside:avoid;display:flex;flex-direction:column;}
+.rec-card-h{display:flex;align-items:center;gap:8px;color:#fff;padding:6px 10px;}
+.rec-card-name{font-size:15px;font-weight:800;} .rec-card-tag{font-size:10.5px;opacity:.92;} .rec-card-pts{margin-left:auto;font-size:24px;font-weight:800;}
+.rec-list{list-style:none;margin:0;padding:6px 8px 2px;} .rec-list li{display:flex;gap:6px;align-items:flex-start;padding:2.5px 0;font-size:11px;}
+.rec-box{flex:0 0 12px;height:12px;border:1.8px solid #6b7280;border-radius:3px;margin-top:1px;} .rec-li{flex:1;} .rec-pt{font-weight:800;font-size:12px;}
+.rec-tip{margin:4px 8px 8px;font-size:10.5px;color:#4b5563;background:#f3f4f6;border-radius:6px;padding:5px 7px;}
+.rec-card-ev{justify-content:center;padding:8px 10px;background:#fafafa;} .rec-ev{font-size:10.3px;color:#4b5563;}
+.rec-h2{font-size:17px;font-weight:800;color:#1f3a5f;margin:6px 0 6px;} .rec-h3{font-size:13.5px;font-weight:800;color:#1f3a5f;margin-bottom:6px;}
+.rec-ice{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-bottom:10px;}
+.rec-ice-col{border:2px solid;border-radius:10px;overflow:hidden;} .rec-ice-h{display:flex;align-items:center;gap:8px;color:#fff;font-weight:800;font-size:15px;padding:6px 10px;}
+.rec-ice-col ul{margin:0;padding:8px 10px 8px 24px;font-size:11px;} .rec-ice-col li{margin-bottom:4px;}
+.rec-tl{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-bottom:10px;position:relative;} 
+.rec-tl-step{background:#f3f4f6;border-radius:9px;padding:7px 7px 8px;text-align:center;position:relative;}
+.rec-tl-dot{width:22px;height:22px;border-radius:50%;color:#fff;font-weight:800;font-size:12px;display:flex;align-items:center;justify-content:center;margin:0 auto 4px;}
+.rec-tl-t{font-weight:800;font-size:12px;color:#1f3a5f;margin-bottom:2px;} .rec-tl-d{font-size:10.5px;}
+.rec-two{display:grid;grid-template-columns:1.15fr 1fr;gap:9px;margin-bottom:9px;}
+.rec-box2{border:2px solid #e5e7eb;border-radius:10px;padding:8px 10px;} .rec-small{font-size:10.5px;color:#4b5563;}
+.rec-plate-row{display:flex;gap:10px;align-items:center;margin-bottom:4px;} .rec-plate-key{list-style:none;margin:0;padding:0;font-size:10.8px;} .rec-plate-key li{margin-bottom:5px;display:flex;gap:5px;align-items:flex-start;} .rec-plate-key i{flex:0 0 11px;height:11px;border-radius:50%;margin-top:2px;}
+.rec-urine{display:flex;gap:6px;margin:4px 0 8px;} .rec-urine>div{flex:1;text-align:center;} .rec-sw{height:28px;border-radius:7px;border:1px solid #d1d5db;} .rec-swl{font-size:9.5px;font-weight:700;margin-top:2px;}
+.rec-cycle{border-color:#d9cdee;background:#faf7fe;} .rec-off{opacity:.45;}
+.rec-note{margin-top:7px;padding:6px 9px;border-left:4px solid #f26522;background:#fff7f0;font-size:11px;} .rec-note-ed{border-left-style:dashed;}
+.rec-card .rec-note{margin:0 8px 8px;}
+.rec-fields{display:flex;gap:22px;font-weight:700;font-size:13px;margin:4px 0 6px;} .rec-line{display:inline-block;border-bottom:1.5px solid #374151;height:14px;vertical-align:bottom;}
+.rec-sc{width:100%;border-collapse:collapse;font-size:11px;} .rec-sc th{background:#1f3a5f;color:#fff;padding:5px 3px;font-size:11px;} .rec-sc td{border:1px solid #d1d5db;padding:3px 3px;}
+.rec-sc-l{text-align:left;padding-left:6px !important;} .rec-sc-p{text-align:center;font-weight:800;width:28px;} .rec-sc-c{text-align:center;width:38px;height:22px;}
+.rec-circ{display:inline-block;width:15px;height:15px;border:1.8px solid #6b7280;border-radius:50%;vertical-align:middle;}
+.rec-sc-ph td{color:#fff;font-weight:800;font-size:11.5px;padding:3px 6px !important;} .rec-sc-ph span{float:right;font-weight:600;opacity:.9;}
+.rec-sc-tot td{background:#fff3ea;font-weight:800;border-top:2px solid #f26522;height:30px;} .rec-sc-day td{background:#f3f4f6;font-weight:600;}
+.rec-sc-foot{display:flex;gap:12px;align-items:center;margin:9px 0;} .rec-sc-avg{text-align:center;font-weight:800;font-size:12px;flex:0 0 130px;} .rec-avg-box{border:2.5px solid #f26522;border-radius:10px;height:40px;margin:3px 0;} .rec-bands-sm{flex:1;}
+.rec-notebox{border:1.8px solid #d1d5db;border-radius:8px;height:92px;padding:6px 9px;}
+.rec-ed{outline:none;border-radius:3px;} 
+.rec-screen .rec-ed:hover{background:#fff6b8;cursor:text;} .rec-screen .rec-ed:focus{background:#fff6b8;box-shadow:0 0 0 2px #f2c14e;}
+.rec-ed[data-ph]:empty:before{content:attr(data-ph);color:#9ca3af;font-style:italic;}
+.rec-screen .rec-page{border:1px solid var(--border,#d1d5db);border-radius:10px;padding:18px 20px;margin:0 auto 18px;max-width:780px;box-shadow:0 2px 10px rgba(0,0,0,.08);}
+.rec-bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px;}
+.rec-print .rec-p1{break-after:page;page-break-after:always;}
+@media print{ .rec-page{padding:0;} .rec-card,.rec-ice-col,.rec-box2{break-inside:avoid;} .rec-card-page{break-before:auto;} }`;
+async function renderRecovery(){
+  const root = document.getElementById('recoveryRoot'); if (!root) return;
+  await recLoad();
+  if (!document.getElementById('recCss')){ const st=document.createElement('style'); st.id='recCss'; st.textContent=REC_CSS; document.head.appendChild(st); }
+  root.innerHTML = `<div class="rec-screen">
+    <div class="rec-bar"><b style="font-size:14px;">Recovery</b>
+      <button class="btn" onclick="openRecoveryReport('guide')">🖨 Print Player Guide (2 pages)</button>
+      <button class="btn" onclick="openRecoveryReport('card')">🖨 Print Weekly Scorecard</button>
+      <label style="font-size:12px;display:flex;gap:5px;align-items:center;"><input type="checkbox" ${REC.showCycle?'checked':''} onchange="recToggleCycle(this.checked)"> Include menstrual-cycle box</label>
+      <button class="btn-sm" onclick="recReset()">Reset to defaults</button>
+      <span class="hint" style="margin:0;">Click any text to edit it. Use the "Comment" boxes to add notes. Changes save automatically and print.</span></div>
+    ${recBuildGuide(true)}${recBuildCard(true)}</div>`;
+}
+function openRecoveryReport(which){
+  reportKind = 'recovery';
+  mpSetLandscape(false);
+  document.getElementById('rptTrainingControls').style.display = 'none';
+  document.getElementById('reportContent').innerHTML = `<div class="rec-print">${which==='card' ? recBuildCard(false) : recBuildGuide(false)}</div>`;
+  document.getElementById('overlayReport').classList.add('show');
+}
+
 function openWarmupReport(rId){
   const r = wuGet(rId); if (!r) return;
   reportKind = 'warmup';
