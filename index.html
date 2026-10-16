@@ -429,7 +429,7 @@
       <span id="saveAllStatus" style="flex:1;text-align:right;white-space:nowrap;">Following the sheet</span>
     </div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-16 17:40</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-17 00:05</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -2762,6 +2762,7 @@ function switchTeamTab(t){
   if (t==='warmup') setTimeout(renderWarmup,60);
   if (t==='topups') setTimeout(renderTopups,60);
   if (t==='recovery') setTimeout(renderRecovery,60);
+  if (t==='tupplan') setTimeout(renderTupPlan,60);
 }
 
 // ============================================================
@@ -3485,6 +3486,7 @@ function renderTeam(){
         <div class="team-tab tab" data-t="gpscoverage" onclick="switchTeamTab('gpscoverage')">GPS Coverage</div>
         <div class="team-tab tab" data-t="warmup" onclick="switchTeamTab('warmup')">Warm Up Routine</div>
         <div class="team-tab tab" data-t="topups" onclick="switchTeamTab('topups')">Top-Ups</div>
+        <div class="team-tab tab" data-t="tupplan" onclick="switchTeamTab('tupplan')">Top-Up Plan</div>
         <div class="team-tab tab" data-t="recovery" onclick="switchTeamTab('recovery')">Recovery</div>
       </div>
       <div class="team-tc tc active" data-t="squad"><div class="quad-body" style="padding-bottom:0;">
@@ -3588,6 +3590,7 @@ function renderTeam(){
       <div class="team-tc tc" data-t="gpscoverage"><div class="quad-body" id="gpsCoverageRoot" style="padding:16px 20px;"></div></div>
       <div class="team-tc tc" data-t="warmup"><div class="quad-body" id="warmupRoot" style="padding:16px 20px;"></div></div>
       <div class="team-tc tc" data-t="topups"><div class="quad-body" id="topupsRoot" style="padding:16px 20px;"></div></div>
+      <div class="team-tc tc" data-t="tupplan"><div class="quad-body" id="tupRoot" style="padding:16px 20px;"></div></div>
       <div class="team-tc tc" data-t="recovery"><div class="quad-body" id="recoveryRoot" style="padding:16px 20px;"></div></div>
     </div>`;
   buildSquadTable();
@@ -7822,6 +7825,313 @@ function openRecoveryReport(which){
   document.getElementById('rptTrainingControls').style.display = 'none';
   document.getElementById('reportContent').innerHTML = `<div class="rec-print">${which==='card' ? recBuildCard(false) : recBuildGuide(false)}</div>`;
   document.getElementById('overlayReport').classList.add('show');
+}
+
+// ============================================================
+// POST-MATCH TOP-UP PLAN — enter match minutes + position, get groups, stride counts,
+// expected HSR/TD, a printable bench card with pitch diagrams, a session timer, and
+// post-session logging that calibrates the per-stride estimates.
+// ============================================================
+const TUP_DEFAULTS = { hsrFixed:80, hsrStride:50, tdFixed:1060, tdStride:140, halfStrides:3, fullStrides:6, doneMin:60, halfMin:30, mods:{CB:-2,FB:0,CM:0,W:1,FW:1}, boxCycle:60 };
+const TUP = { matches:[], cur:'', set:JSON.parse(JSON.stringify(TUP_DEFAULTS)), loaded:false };
+const TUP_POS = ['CB','FB','CM','W','FW','GK'];
+const TUP_SESSION = [
+  { clock:'0–2', drill:'Prep', layout:'Jog, dynamic mobility, 2 build-ups', target:'–', rest:'–', reps:'All' },
+  { clock:'2–5', drill:'Pitch returns', layout:'Goal line to goal line and back (~210 m)', target:'48 s', rest:'48 s walk', reps:'2 (all)' },
+  { clock:'5–8', drill:'Box sprints', layout:'Across the width of the penalty box (~40 m)', target:'Max effort', rest:'Walk back + 60 s', reps:'3 (all)' },
+  { clock:'8–14', drill:'Box-to-box strides', layout:'Walk in box, stride box edge to box edge (~70 m), walk in far box', target:'12 s', rest:'36 s walk', reps:'Per player stride count' },
+  { clock:'14–15', drill:'Buffer', layout:'GPS off', target:'–', rest:'–', reps:'–' }
+];
+function tupEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+async function tupLoad(){
+  if (TUP.loaded) return; TUP.loaded = true;
+  try{ const raw = await storageGet('roar-tupplan'); if (raw){ const o = JSON.parse(typeof raw==='string'?raw:(raw.value||'{}'));
+    TUP.matches = o.matches||[]; TUP.cur = o.cur||''; TUP.set = Object.assign(JSON.parse(JSON.stringify(TUP_DEFAULTS)), o.set||{}); TUP.set.mods = Object.assign({}, TUP_DEFAULTS.mods, (o.set||{}).mods||{}); } }catch(e){}
+  if (!TUP.matches.length) tupNewMatch(true);
+  if (!tupMatch()) TUP.cur = TUP.matches[0].id;
+}
+function tupSave(){ try{ storageSet('roar-tupplan', JSON.stringify({ matches:TUP.matches, cur:TUP.cur, set:TUP.set })); }catch(e){} }
+function tupMatch(){ return TUP.matches.find(m=>m.id===TUP.cur)||null; }
+function tupNewMatch(silent){
+  const id = 'm'+Date.now().toString(36);
+  const date = toLocalDateStr(new Date());
+  const g = Object.values(athleteMap).flatMap(a=>a.gameGps||[]).find(x=>x.date===date);
+  TUP.matches.unshift({ id, date, opponent:(g&&g.opponent)||'', ha:'Home', players:{}, actual:{} });
+  TUP.cur = id; tupSave(); if (!silent) renderTupPlan();
+}
+function tupDeleteMatch(){
+  const m = tupMatch(); if (!m) return; if (!confirm(`Delete the ${m.date} ${m.opponent||''} top-up plan, including any logged GPS?`)) return;
+  TUP.matches = TUP.matches.filter(x=>x.id!==m.id); if (!TUP.matches.length) tupNewMatch(true); TUP.cur = TUP.matches[0].id; tupSave(); renderTupPlan();
+}
+// ---- logic ----
+function tupPosCode(raw){
+  const s = String(raw||'').toUpperCase().replace(/[^A-Z]/g,' ').trim();
+  if (!s) return 'CM';
+  if (/\b(GK|GOALKEEPER|KEEPER)\b/.test(s)) return 'GK';
+  if (/\b(CB|CENTRE BACK|CENTER BACK|CENTRAL DEFENDER)\b/.test(s)) return 'CB';
+  if (/\b(FB|LB|RB|WB|LWB|RWB|FULLBACK|FULL BACK|WING BACK|WINGBACK|RIGHT BACK|LEFT BACK)\b/.test(s)) return 'FB';
+  if (/\b(DEFENDER|CENTRE HALF|CENTER HALF)\b/.test(s)) return 'CB';
+  if (/\b(W|LW|RW|WINGER|WIDE|LM|RM|WM)\b/.test(s)) return 'W';
+  if (/\b(ST|CF|FW|STRIKER|FORWARD|SS)\b/.test(s)) return 'FW';
+  return 'CM';
+}
+function tupGroup(pos, min){
+  if (pos==='GK') return 'GK';
+  if (min==null || min==='' || isNaN(min)) return '';
+  if (min >= TUP.set.doneMin) return 'Done';
+  if (min >= TUP.set.halfMin) return 'Half';
+  return 'Full';
+}
+function tupStrides(pos, group){
+  if (group!=='Half' && group!=='Full') return 0;
+  const base = group==='Half' ? TUP.set.halfStrides : TUP.set.fullStrides;
+  return Math.max(1, base + (+TUP.set.mods[pos]||0));
+}
+function tupEst(strides){
+  if (!strides) return { hsr:null, td:null };
+  return { hsr: TUP.set.hsrFixed + TUP.set.hsrStride*strides, td: TUP.set.tdFixed + TUP.set.tdStride*strides };
+}
+function tupRoster(m){
+  return Object.values(athleteMap).filter(a=>a.name).sort((x,y)=>x.name.localeCompare(y.name)).map(a=>{
+    const p = m.players[a.id] || {};
+    const pos = p.pos || tupPosCode(a.position);
+    const min = (p.min===undefined||p.min===null||p.min==='') ? null : +p.min;
+    const group = tupGroup(pos, min), strides = tupStrides(pos, group);
+    return { id:a.id, name:a.name, pos, min, group, strides, est:tupEst(strides), actual:m.actual[a.id]||{} };
+  });
+}
+// ---- entry view ----
+async function renderTupPlan(){
+  const root = document.getElementById('tupRoot'); if (!root) return;
+  await tupLoad();
+  const m = tupMatch(); const rows = tupRoster(m);
+  const cnt = g => rows.filter(r=>r.group===g).length;
+  const S = TUP.set;
+  const num = (k,l,w)=>`<label class="tp-set">${l}<input type="number" step="any" value="${S[k]}" style="width:${w||70}px" onchange="tupSetVal('${k}',this.value)"></label>`;
+  root.innerHTML = `<style>
+    .tp-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px;} .tp-set{display:inline-flex;flex-direction:column;font-size:11px;color:var(--text-secondary);gap:2px;margin-right:10px;} .tp-set input,.tp-in{border:1px solid var(--border);border-radius:6px;padding:5px 7px;font-size:12.5px;background:var(--surface);color:var(--text);}
+    .tp-tbl{border-collapse:collapse;width:100%;font-size:12.5px;} .tp-tbl th{background:var(--surface-2,#f3f4f6);padding:7px 8px;text-align:left;font-size:11px;position:sticky;top:0;} .tp-tbl td{padding:4px 8px;border-bottom:1px solid var(--border);}
+    .tp-badge{display:inline-block;padding:2px 9px;border-radius:10px;font-weight:700;font-size:11.5px;color:#fff;} .tp-Full{background:#d9534f}.tp-Half{background:#f0a020}.tp-Done{background:#3f9b5a}.tp-GK{background:#1f3a5f}.tp-none{background:#9ca3af}
+    .tp-sum{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 12px;} .tp-sum div{border:1px solid var(--border);border-radius:8px;padding:6px 12px;font-size:12px;} .tp-sum b{font-size:16px;margin-left:4px;}
+    .tp-card{border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin:14px 0;} .tp-card h4{margin:0 0 8px;font-size:13.5px;}
+  </style>
+  <div class="tp-bar"><b style="font-size:14px;">Post-match top-up plan</b>
+    <select class="axis-select" onchange="TUP.cur=this.value;tupSave();renderTupPlan()">${TUP.matches.map(x=>`<option value="${x.id}" ${x.id===TUP.cur?'selected':''}>${x.date} ${tupEsc(x.opponent||'(no opponent)')}</option>`).join('')}</select>
+    <button class="btn-sm" onclick="tupNewMatch()">+ New match</button><button class="btn-sm" onclick="tupDeleteMatch()">Delete</button></div>
+  <div class="tp-bar">
+    <label class="tp-set">Date<input type="date" value="${m.date}" onchange="tupMeta('date',this.value)"></label>
+    <label class="tp-set">Opponent<input type="text" value="${tupEsc(m.opponent)}" style="width:170px" onchange="tupMeta('opponent',this.value)"></label>
+    <label class="tp-set">Home / Away<select class="tp-in" onchange="tupMeta('ha',this.value)"><option ${m.ha==='Home'?'selected':''}>Home</option><option ${m.ha==='Away'?'selected':''}>Away</option></select></label>
+    <button class="btn-sm" onclick="tupFillFromGps()" title="Fills minutes from the match GPS on this date">⬇ Fill minutes from match GPS</button>
+    <button class="btn-sm" onclick="tupBlankToZero()" title="Marks every player with blank minutes as unused (0 min, so they do the Full top-up)">Blank = unused (0)</button></div>
+  <div class="tp-sum" id="tupSummary"></div>
+  <div class="tp-bar"><button class="btn" style="margin-top:0" onclick="openTupBench()">🖨 Bench card (print / phone)</button><button class="btn" style="margin-top:0" onclick="openTupTimer()">⏱ Session timer</button></div>
+  <div style="overflow:auto;max-height:560px;"><table class="tp-tbl"><thead><tr><th>Player</th><th>Position</th><th>Minutes</th><th>Group</th><th>Strides</th><th>Est. HSR (m)</th><th>Est. TD (m)</th><th>Actual HSR (m)</th><th>Actual TD (m)</th><th>HSR/stride</th></tr></thead><tbody id="tupBody">
+    ${rows.map(r=>tupRowHtml(r)).join('')}</tbody></table></div>
+  <div class="tp-card"><h4>Post-session GPS (STATSports Sonra)</h4><div class="hint" style="margin:0 0 8px;">Type the actual top-up HSR and total distance per player in the table above, or import a Sonra CSV (columns: player name, HSR, total distance).</div>
+    <input type="file" accept=".csv" onchange="tupImportCsv(event)"> <div id="tupCalib"></div></div>
+  <details class="tp-card"><summary style="cursor:pointer;font-weight:700;font-size:13.5px;">Settings (all editable)</summary><div style="margin-top:10px;">
+    ${num('hsrFixed','Fixed blocks HSR (m)')}${num('hsrStride','HSR per stride (m)')}${num('tdFixed','Fixed blocks TD (m)')}${num('tdStride','TD per stride (m)')}<br><br>
+    ${num('halfStrides','Half strides')}${num('fullStrides','Full strides')}${num('doneMin','Done at (min ≥)')}${num('halfMin','Half at (min ≥)')}<br><br>
+    <span style="font-size:11px;color:var(--text-secondary);">Stride modifiers:</span> ${TUP_POS.filter(p=>p!=='GK').map(p=>`<label class="tp-set">${p}<input type="number" value="${S.mods[p]}" style="width:55px" onchange="tupSetMod('${p}',this.value)"></label>`).join('')}
+    <br><button class="btn-sm" onclick="tupResetSettings()">Reset to defaults</button> <span class="hint" style="margin:0;">Defaults reproduce Half CM ≈ 230 m HSR / 1.5 km and Full CM ≈ 380 m / 1.9 km.</span></div></details>`;
+  tupRefreshSummary(); tupRenderCalib();
+}
+function tupRowHtml(r){
+  const a = r.actual;
+  return `<tr data-id="${r.id}"><td><b>${tupEsc(r.name)}</b></td>
+    <td><select class="tp-in" onchange="tupSetPlayer('${r.id}','pos',this.value)">${TUP_POS.map(p=>`<option ${p===r.pos?'selected':''}>${p}</option>`).join('')}</select></td>
+    <td><input class="tp-in" type="number" min="0" max="130" style="width:70px" value="${r.min==null?'':r.min}" onchange="tupSetPlayer('${r.id}','min',this.value)"></td>
+    <td data-c="g"></td><td data-c="s"></td><td data-c="eh"></td><td data-c="et"></td>
+    <td><input class="tp-in" type="number" min="0" style="width:78px" value="${a.hsr==null?'':a.hsr}" onchange="tupSetActual('${r.id}','hsr',this.value)"></td>
+    <td><input class="tp-in" type="number" min="0" style="width:84px" value="${a.td==null?'':a.td}" onchange="tupSetActual('${r.id}','td',this.value)"></td><td data-c="hs"></td></tr>`;
+}
+function tupFillRow(id){
+  const m = tupMatch(); const r = tupRoster(m).find(x=>x.id===id); const tr = document.querySelector(`#tupBody tr[data-id="${id}"]`); if (!r||!tr) return;
+  const set=(c,h)=>{ const el=tr.querySelector(`[data-c="${c}"]`); if (el) el.innerHTML=h; };
+  set('g', `<span class="tp-badge tp-${r.group||'none'}">${r.group||'—'}</span>`);
+  set('s', r.strides?`<b>${r.strides}</b>`:'—'); set('eh', r.est.hsr!=null?Math.round(r.est.hsr):'—'); set('et', r.est.td!=null?Math.round(r.est.td):'—');
+  const hs = (r.actual.hsr!=null && r.strides) ? Math.round((r.actual.hsr - TUP.set.hsrFixed)/r.strides) : null; set('hs', hs!=null?hs:'—');
+}
+function tupRefreshSummary(){
+  const m = tupMatch(); const rows = tupRoster(m); rows.forEach(r=>tupFillRow(r.id));
+  const c = g=>rows.filter(r=>r.group===g).length, none = rows.filter(r=>!r.group).length;
+  const el = document.getElementById('tupSummary'); if (el) el.innerHTML = ['Full','Half','Done','GK'].map(g=>`<div><span class="tp-badge tp-${g}">${g}</span><b>${c(g)}</b></div>`).join('') + `<div>Not entered<b>${none}</b></div>`;
+}
+function tupMeta(k,v){ const m=tupMatch(); m[k]=v; tupSave(); if (k==='date'||k==='opponent'||k==='ha') { /* keep header select label fresh */ const sel=document.querySelector('#tupRoot select.axis-select'); if (sel) sel.innerHTML = TUP.matches.map(x=>`<option value="${x.id}" ${x.id===TUP.cur?'selected':''}>${x.date} ${tupEsc(x.opponent||'(no opponent)')}</option>`).join(''); } }
+function tupSetPlayer(id,k,v){ const m=tupMatch(); const p = m.players[id] || (m.players[id]={}); if (k==='min') p.min = (v===''?null:+v); else p[k]=v; tupSave(); tupRefreshSummary(); tupRenderCalib(); }
+function tupSetActual(id,k,v){ const m=tupMatch(); const a = m.actual[id] || (m.actual[id]={}); a[k] = (v===''?null:+v); tupSave(); tupFillRow(id); tupRenderCalib(); }
+function tupSetVal(k,v){ TUP.set[k] = +v; tupSave(); tupRefreshSummary(); tupRenderCalib(); }
+function tupSetMod(p,v){ TUP.set.mods[p] = +v; tupSave(); tupRefreshSummary(); }
+function tupResetSettings(){ if (!confirm('Reset all top-up settings to the defaults?')) return; TUP.set = JSON.parse(JSON.stringify(TUP_DEFAULTS)); tupSave(); renderTupPlan(); }
+function tupFillFromGps(){
+  const m = tupMatch(); let n = 0;
+  Object.values(athleteMap).forEach(a=>{ const g=(a.gameGps||[]).find(x=>x.date===m.date); if (g && g.minutes_played!=null){ (m.players[a.id]||(m.players[a.id]={})).min = Math.round(g.minutes_played); n++; if (!m.opponent && g.opponent) m.opponent=g.opponent; } });
+  tupSave(); renderTupPlan(); if (!n) alert('No match GPS found on '+m.date+'.');
+}
+function tupBlankToZero(){ const m=tupMatch(); tupRoster(m).forEach(r=>{ if (r.min==null && r.pos!=='GK'){ (m.players[r.id]||(m.players[r.id]={})).min = 0; } }); tupSave(); renderTupPlan(); }
+// ---- calibration ----
+function tupPoints(matches){
+  const pts = [];
+  matches.forEach(m=>{ const keep=TUP.cur; TUP.cur=m.id; tupRoster(m).forEach(r=>{ if (r.strides && r.actual.hsr!=null) pts.push({ s:r.strides, hsr:r.actual.hsr, td:r.actual.td }); }); TUP.cur=keep; });
+  return pts;
+}
+function tupStats(a){ if (!a.length) return null; const mean=a.reduce((x,y)=>x+y,0)/a.length, sd=Math.sqrt(a.reduce((x,y)=>x+(y-mean)*(y-mean),0)/Math.max(1,a.length-1)), sorted=[...a].sort((x,y)=>x-y), med=sorted.length%2?sorted[(sorted.length-1)/2]:(sorted[sorted.length/2-1]+sorted[sorted.length/2])/2; return {mean,sd,med,n:a.length}; }
+function tupFit(pts, key){ const P=pts.filter(p=>p[key]!=null); if (P.length<5 || new Set(P.map(p=>p.s)).size<2) return null; const n=P.length, sx=P.reduce((a,p)=>a+p.s,0), sy=P.reduce((a,p)=>a+p[key],0), sxx=P.reduce((a,p)=>a+p.s*p.s,0), sxy=P.reduce((a,p)=>a+p.s*p[key],0); const d=n*sxx-sx*sx; if (!d) return null; const b=(n*sxy-sx*sy)/d; return { slope:b, intercept:(sy-b*sx)/n }; }
+function tupRenderCalib(){
+  const el = document.getElementById('tupCalib'); if (!el) return;
+  const m = tupMatch(), S=TUP.set;
+  const one = tupPoints([m]), all = tupPoints(TUP.matches.filter(x=>Object.values(x.actual).some(a=>a.hsr!=null)));
+  const block = (label, pts, tag)=>{
+    if (!pts.length) return `<div class="hint">${label}: no actual HSR logged yet.</div>`;
+    const h = tupStats(pts.map(p=>(p.hsr-S.hsrFixed)/p.s)), t = tupStats(pts.filter(p=>p.td!=null).map(p=>(p.td-S.tdFixed)/p.s)), fh = tupFit(pts,'hsr'), ft = tupFit(pts,'td');
+    return `<div style="margin:10px 0;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:12.5px;"><b>${label}</b> (${pts.length} players)
+      <div>HSR per stride: <b>${Math.round(h.mean)} m</b> mean (median ${Math.round(h.med)}, SD ${Math.round(h.sd)}) · setting ${S.hsrStride} m
+        ${t?`<br>TD per stride: <b>${Math.round(t.mean)} m</b> mean (median ${Math.round(t.med)}, SD ${Math.round(t.sd)}) · setting ${S.tdStride} m`:''}
+        ${fh?`<br><span class="hint" style="margin:0;">Regression: HSR ≈ ${Math.round(fh.intercept)} + ${Math.round(fh.slope)}/stride${ft?` · TD ≈ ${Math.round(ft.intercept)} + ${Math.round(ft.slope)}/stride`:''}</span>`:''}</div>
+      <div style="margin-top:6px;"><button class="btn-sm" onclick="tupApplyCalib('${tag}','mean')">Apply per-stride means</button> ${fh?`<button class="btn-sm" onclick="tupApplyCalib('${tag}','fit')">Apply regression (fixed + per stride)</button>`:''}</div></div>`;
+  };
+  el.innerHTML = block('This match', one, 'one') + (TUP.matches.length>1 ? block('All logged matches', all, 'all') : '') +
+    `<div class="hint">Per-stride = (actual − fixed blocks) ÷ strides. Fixed blocks assumed: ${S.hsrFixed} m HSR / ${S.tdFixed} m TD (pitch returns + box sprints).</div>`;
+}
+function tupApplyCalib(tag, mode){
+  const pts = tag==='one' ? tupPoints([tupMatch()]) : tupPoints(TUP.matches.filter(x=>Object.values(x.actual).some(a=>a.hsr!=null))), S=TUP.set;
+  if (mode==='fit'){ const fh=tupFit(pts,'hsr'), ft=tupFit(pts,'td'); if (fh){ S.hsrFixed=Math.round(fh.intercept); S.hsrStride=Math.round(fh.slope); } if (ft){ S.tdFixed=Math.round(ft.intercept); S.tdStride=Math.round(ft.slope); } }
+  else { const h=tupStats(pts.map(p=>(p.hsr-S.hsrFixed)/p.s)), t=tupStats(pts.filter(p=>p.td!=null).map(p=>(p.td-S.tdFixed)/p.s)); if (h) S.hsrStride=Math.round(h.mean); if (t) S.tdStride=Math.round(t.mean); }
+  tupSave(); renderTupPlan();
+}
+function tupImportCsv(ev){
+  const f = ev.target.files[0]; if (!f) return; const rd = new FileReader();
+  rd.onload = ()=>{ try{
+    const rows = parseCSV(rd.result), m = tupMatch(); const by = {};
+    rows.forEach(r=>{ const nm = r.playerDisplayName||r.player_name||r['Player Display Name']||r.playerName||r.name; if (!nm) return;
+      const id = resolvePlayerId(nm); if (!id || !athleteMap[id]) return;
+      const hsr = pf(r.highSpeedRunningAbs!=null?r.highSpeedRunningAbs:(r.hsr_distance_m!=null?r.hsr_distance_m:r['High Speed Running (Absolute)'])), td = pf(r.distanceTotal!=null?r.distanceTotal:(r.total_distance_m!=null?r.total_distance_m:r['Total Distance']));
+      const title = r.drillTitle||r['Drill Title']||'', whole = !title || isWholeSessionTitle(title);
+      const e = by[id] || (by[id]={hsr:0,td:0,wh:null}); if (whole){ e.wh={hsr,td}; } else { e.hsr+=hsr||0; e.td+=td||0; } });
+    let n=0; Object.keys(by).forEach(id=>{ const e=by[id], v=e.wh||e; (m.actual[id]||(m.actual[id]={})).hsr=v.hsr; m.actual[id].td=v.td; n++; });
+    tupSave(); renderTupPlan(); alert(`Imported GPS for ${n} player${n===1?'':'s'}.`);
+  }catch(e){ alert('Could not read that CSV.'); } };
+  rd.readAsText(f);
+}
+// ---- pitch diagrams (own SVG: green pitch, white lines, dashed run arrows) ----
+let TUP_SVG_N = 0;
+function tupPitchBase(id){
+  // 105 x 68 m pitch at 4 px/m, 10 px margin
+  const s=4, ox=10, oy=10, W=105*s, H=68*s, X=m=>ox+m*s, Y=m=>oy+m*s;
+  let g = `<defs><marker id="ah${id}" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8z" fill="#fff"/></marker><marker id="ao${id}" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8z" fill="#ffe066"/></marker></defs>
+    <rect x="0" y="0" width="${W+2*ox}" height="${H+2*oy}" rx="8" fill="#2f8f4e"/>`;
+  for (let i=0;i<7;i++) g += `<rect x="${X(i*15)}" y="${oy}" width="${s*7.5}" height="${H}" fill="#fff" opacity=".05"/>`;
+  const ln = 'fill="none" stroke="#fff" stroke-width="1.8"';
+  g += `<rect x="${ox}" y="${oy}" width="${W}" height="${H}" ${ln}/><line x1="${X(52.5)}" y1="${oy}" x2="${X(52.5)}" y2="${oy+H}" stroke="#fff" stroke-width="1.8"/><circle cx="${X(52.5)}" cy="${Y(34)}" r="${9.15*s}" ${ln}/>
+    <rect x="${ox}" y="${Y(34-20.16)}" width="${16.5*s}" height="${40.32*s}" ${ln}/><rect x="${X(105-16.5)}" y="${Y(34-20.16)}" width="${16.5*s}" height="${40.32*s}" ${ln}/>
+    <rect x="${ox}" y="${Y(34-9.16)}" width="${5.5*s}" height="${18.32*s}" ${ln}/><rect x="${X(105-5.5)}" y="${Y(34-9.16)}" width="${5.5*s}" height="${18.32*s}" ${ln}/>
+    <circle cx="${X(11)}" cy="${Y(34)}" r="1.8" fill="#fff"/><circle cx="${X(94)}" cy="${Y(34)}" r="1.8" fill="#fff"/>`;
+  return { g, X, Y, W, H, ox, oy };
+}
+function tupArrow(x1,y1,x2,y2,id,col,dash){ return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${col||'#fff'}" stroke-width="3" stroke-dasharray="${dash||'9 6'}" stroke-linecap="round" marker-end="url(#${col?'ao':'ah'}${id})"/>`; }
+function tupPitchSvg(kind){
+  const id = ++TUP_SVG_N, P = tupPitchBase(id), {X,Y,W,H,ox,oy} = P; let g = P.g, label='';
+  if (kind==='returns'){
+    g += tupArrow(X(2),Y(26),X(103),Y(26),id) + tupArrow(X(103),Y(42),X(2),Y(42),id);
+    g += `<text style="paint-order:stroke;stroke:#1b5e34;stroke-width:3.5px;stroke-linejoin:round;" x="${X(52.5)}" y="${Y(23)}" font-size="17" font-weight="800" fill="#fff" text-anchor="middle">goal line → goal line</text><text style="paint-order:stroke;stroke:#1b5e34;stroke-width:3.5px;stroke-linejoin:round;" x="${X(52.5)}" y="${Y(48.5)}" font-size="17" font-weight="800" fill="#fff" text-anchor="middle">and back (~210 m)</text>`;
+  } else if (kind==='sprints'){
+    const y0=Y(34-20.16), y1=Y(34+20.16);
+    g += `<rect x="${ox}" y="${y0}" width="${16.5*4}" height="${40.32*4}" fill="#ffe066" opacity=".22"/>`;
+    [Y(26),Y(34),Y(42)].forEach((y,i)=>{ g += tupArrow(X(2.5),y1-(i*0)-0, X(2.5),y1-0,id,'#ffe066'); });
+    g = P.g + `<rect x="${ox}" y="${y0}" width="${16.5*4}" height="${40.32*4}" fill="#ffe066" opacity=".22"/>` + tupArrow(X(8),y1-6,X(8),y0+6,id,'#ffe066','none') + `<line x1="${X(13)}" y1="${y0+6}" x2="${X(13)}" y2="${y1-6}" stroke="#fff" stroke-width="2.5" stroke-dasharray="3 7" stroke-linecap="round" marker-end="url(#ah${id})"/>`
+      + `<text style="paint-order:stroke;stroke:#1b5e34;stroke-width:3.5px;stroke-linejoin:round;" x="${X(22)}" y="${Y(30)}" font-size="17" font-weight="800" fill="#fff">sprint across the box</text><text style="paint-order:stroke;stroke:#1b5e34;stroke-width:3.5px;stroke-linejoin:round;" x="${X(22)}" y="${Y(36)}" font-size="15" fill="#fff">(~40 m, max effort)</text><text style="paint-order:stroke;stroke:#1b5e34;stroke-width:3.5px;stroke-linejoin:round;" x="${X(22)}" y="${Y(42)}" font-size="15" fill="#fff">dotted = walk back</text>`;
+  } else {
+    g += `<line x1="${X(4)}" y1="${Y(34)}" x2="${X(13)}" y2="${Y(34)}" stroke="#fff" stroke-width="3" stroke-dasharray="2 6" stroke-linecap="round"/>` + tupArrow(X(16.5),Y(34),X(88.5),Y(34),id,'#ffe066','none') + `<line x1="${X(92)}" y1="${Y(34)}" x2="${X(101)}" y2="${Y(34)}" stroke="#fff" stroke-width="3" stroke-dasharray="2 6" stroke-linecap="round"/>`
+      + `<text style="paint-order:stroke;stroke:#1b5e34;stroke-width:3.5px;stroke-linejoin:round;" x="${X(9)}" y="${Y(42)}" font-size="15" font-weight="800" fill="#fff" text-anchor="middle">walk</text><text style="paint-order:stroke;stroke:#1b5e34;stroke-width:3.5px;stroke-linejoin:round;" x="${X(52.5)}" y="${Y(28)}" font-size="17" font-weight="800" fill="#fff" text-anchor="middle">STRIDE box edge → box edge (~70 m)</text><text style="paint-order:stroke;stroke:#1b5e34;stroke-width:3.5px;stroke-linejoin:round;" x="${X(96)}" y="${Y(42)}" font-size="15" font-weight="800" fill="#fff" text-anchor="middle">walk</text>`;
+  }
+  return `<svg viewBox="0 0 ${W+2*ox} ${H+2*oy}" width="100%" style="display:block;max-width:100%;">${g}</svg>`;
+}
+// ---- bench card (print / phone) ----
+function tupBenchHtml(){
+  const m = tupMatch(), rows = tupRoster(m);
+  const grp = g => rows.filter(r=>r.group===g).sort((a,b)=>b.strides-a.strides||a.name.localeCompare(b.name));
+  const col = { Full:'#d9534f', Half:'#f0a020', Done:'#3f9b5a', GK:'#1f3a5f' };
+  const blk = (g, title, sub)=>{ const l = grp(g); return `<div class="tb-grp" style="border-color:${col[g]};"><div class="tb-gh" style="background:${col[g]};">${title} <span>${l.length}</span></div><div class="tb-gs">${sub}</div>
+    <div class="tb-gl">${l.length ? l.map(r=>`<div class="tb-p"><span>${tupEsc(r.name)}</span>${r.strides?`<b>${r.strides}</b>`:`<i>${r.min!=null?r.min+"'":''}</i>`}</div>`).join('') : '<div class="tb-none">none</div>'}</div></div>`; };
+  const none = rows.filter(r=>!r.group);
+  const S = TUP.set;
+  const pitch = (k,t,l)=>`<div class="tb-pit"><div class="tb-pt">${t}</div>${tupPitchSvg(k)}<div class="tb-pl">${l}</div></div>`;
+  return `<style>
+    .tb{font-family:Inter,system-ui,sans-serif;color:#1f2937;font-size:12px;} .tb-head{display:flex;align-items:center;justify-content:space-between;border-bottom:3px solid #f26522;padding-bottom:6px;margin-bottom:8px;} .tb-head .rpt-logo{height:46px;width:auto;}
+    .tb-title{text-align:center;flex:1;} .tb-title b{display:block;font-size:20px;color:#f26522;text-transform:uppercase;letter-spacing:.03em;} .tb-title span{font-size:12.5px;color:#4b5563;}
+    .tb-groups{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-bottom:8px;} .tb-grp{border:2px solid;border-radius:9px;overflow:hidden;} .tb-gh{color:#fff;font-weight:800;font-size:13.5px;padding:4px 8px;display:flex;justify-content:space-between;}
+    .tb-gs{font-size:9.5px;color:#6b7280;padding:3px 8px 0;min-height:24px;} .tb-gl{padding:2px 8px 6px;} .tb-p{display:flex;justify-content:space-between;font-size:11.5px;padding:1.5px 0;border-bottom:1px dotted #e5e7eb;} .tb-p b{font-size:13px;} .tb-p i{color:#9ca3af;} .tb-none{color:#9ca3af;font-size:11px;}
+    .tb-tbl{width:100%;border-collapse:collapse;font-size:11px;margin-bottom:8px;} .tb-tbl th{background:#1f3a5f;color:#fff;padding:4px 6px;text-align:left;font-size:10.5px;} .tb-tbl td{border:1px solid #d1d5db;padding:3px 6px;}
+    .tb-pits{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;} .tb-key{border:1px dashed #d1d5db;border-radius:8px;padding:8px 10px;font-size:11px;line-height:1.5;} .tb-key b{color:#1f3a5f;} .tb-pit{border:1px solid #e5e7eb;border-radius:8px;padding:5px;} .tb-pt{font-weight:800;font-size:11.5px;color:#1f3a5f;margin-bottom:3px;} .tb-pl{font-size:10.5px;font-weight:700;margin-top:3px;color:#374151;}
+    .tb-foot{font-size:9.8px;color:#6b7280;margin-top:7px;} .tb-nn{margin:4px 0 8px;font-size:11px;color:#b45309;}
+    @media(max-width:640px){.tb-groups{grid-template-columns:repeat(2,1fr);}.tb-pits{grid-template-columns:1fr;}}
+  </style><div class="tb">
+    <div class="tb-head">${ROAR_LOGO_SVG}<div class="tb-title"><b>Post-match top-up</b><span>${m.date} · ${m.ha==='Away'?'Away':'Home'} ${m.opponent?'vs '+tupEsc(m.opponent):''} · max 15 min</span></div>${ROAR_LOGO_SVG}</div>
+    ${none.length?`<div class="tb-nn">Minutes not entered for: ${none.map(r=>tupEsc(r.name)).join(', ')}</div>`:''}
+    <div class="tb-groups">${blk('Full','FULL',`${S.doneMin>0?'0–'+(S.halfMin-1)+' min (incl. unused)':''} · base ${S.fullStrides} strides`)}${blk('Half','HALF',`${S.halfMin}–${S.doneMin-1} min · base ${S.halfStrides} strides`)}${blk('Done','DONE',`${S.doneMin}+ min · cool-down only`)}${blk('GK','GK','Separate keeper top-up')}</div>
+    <div style="font-size:10.5px;color:#4b5563;margin:-3px 0 7px;">Number next to a name = box-to-box strides. Position modifiers: CB ${S.mods.CB>0?'+':''}${S.mods.CB}, W/FW +${S.mods.W}, FB/CM ${S.mods.FB}. Minimum 1 stride.</div>
+    <table class="tb-tbl"><thead><tr><th>Clock</th><th>Drill</th><th>Layout</th><th>Target</th><th>Rest</th><th>Reps</th></tr></thead><tbody>${TUP_SESSION.map(s=>`<tr><td><b>${s.clock}</b></td><td><b>${s.drill}</b></td><td>${s.layout}</td><td>${s.target}</td><td>${s.rest}</td><td>${s.reps}</td></tr>`).join('')}</tbody></table>
+    <div class="tb-pits">${pitch('returns','Pitch returns','1 pitch return · 48 s · rest 48 s')}${pitch('sprints','Box sprints','Across the box · max effort · walk back + 60 s')}${pitch('strides','Box-to-box strides','Walk – stride – walk · 12 s · rest 36 s')}<div class="tb-key"><b>How to read it</b><br>White dashed = jog / walk · Yellow = fast run<br><b>Everyone:</b> prep, 2 pitch returns, 3 box sprints.<br><b>Then strides:</b> each player does her own stride count and leaves when finished.<br><b>Clock:</b> 0–15 min, GPS off for the last minute.</div></div>
+    <div class="tb-foot">Players leave the session once they finish their stride count. Expected output per player: HSR ≈ ${S.hsrFixed} m + ${S.hsrStride} m × strides; total distance ≈ ${(S.tdFixed/1000).toFixed(2)} km + ${(S.tdStride/1000).toFixed(2)} km × strides.</div></div>`;
+}
+function openTupBench(){
+  reportKind = 'tupbench'; mpSetLandscape(false);
+  document.getElementById('rptTrainingControls').style.display = 'none';
+  document.getElementById('reportContent').innerHTML = tupBenchHtml();
+  document.getElementById('overlayReport').classList.add('show');
+}
+// ---- session timer ----
+const TUPT = { t0:0, acc:0, run:false, iv:null, mute:false, lastBeep:-1, ctx:null };
+function tupTimerBlocks(){ // seconds from start
+  const S=TUP.set;
+  return [ { name:'Prep', start:0, end:120, reps:0 }, { name:'Pitch returns', start:120, end:300, reps:2, cycle:96, go:48 }, { name:'Box sprints', start:300, end:480, reps:3, cycle:S.boxCycle||60, go:10 },
+    { name:'Box-to-box strides', start:480, end:840, reps:7, cycle:48, go:12 }, { name:'Buffer (GPS off)', start:840, end:900, reps:0 } ];
+}
+function tupBeep(n){
+  if (TUPT.mute) return; try{ if (!TUPT.ctx) TUPT.ctx = new (window.AudioContext||window.webkitAudioContext)();
+    const c=TUPT.ctx; for (let i=0;i<n;i++){ const o=c.createOscillator(), g=c.createGain(); o.frequency.value=n>1?1100:880; o.connect(g); g.connect(c.destination); const t=c.currentTime+i*0.22; g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.5,t+0.01); g.gain.exponentialRampToValueAtTime(0.0001,t+0.18); o.start(t); o.stop(t+0.2); } }catch(e){}
+}
+function tupTimerState(sec){
+  const bl = tupTimerBlocks(); let b = bl.find(x=>sec>=x.start && sec<x.end) || bl[bl.length-1];
+  let rep=0, phase='', repT=0, beepKey=-1;
+  if (b.reps){ const off = sec-b.start; rep = Math.min(b.reps, Math.floor(off/b.cycle)+1); repT = off - (rep-1)*b.cycle; phase = repT < b.go ? 'GO' : 'REST'; beepKey = b.start + (rep-1)*b.cycle; if (off >= b.reps*b.cycle) phase='DONE'; }
+  return { b, rep, phase, repT, beepKey, key:b.name+'|'+rep };
+}
+function openTupTimer(){
+  let ov = document.getElementById('tupTimerOv');
+  if (!ov){ ov = document.createElement('div'); ov.id='tupTimerOv'; ov.style.cssText='position:fixed;inset:0;background:#0f172a;color:#fff;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:Inter,system-ui,sans-serif;padding:16px;text-align:center;'; document.body.appendChild(ov); }
+  ov.innerHTML = `<button onclick="tupTimerClose()" style="position:absolute;top:14px;right:18px;background:none;border:none;color:#fff;font-size:30px;cursor:pointer;">×</button>
+    <div id="tt-block" style="font-size:clamp(22px,5vw,44px);font-weight:800;color:#f26522;text-transform:uppercase;letter-spacing:.04em;">Ready</div>
+    <div id="tt-clock" style="font-size:clamp(90px,26vw,260px);font-weight:800;line-height:1;font-variant-numeric:tabular-nums;margin:6px 0;">0:00</div>
+    <div id="tt-rep" style="font-size:clamp(20px,4.5vw,40px);font-weight:700;"></div>
+    <div id="tt-who" style="font-size:clamp(12px,2vw,16px);opacity:.75;max-width:900px;margin-top:8px;"></div>
+    <div style="margin-top:22px;display:flex;gap:12px;flex-wrap:wrap;justify-content:center;">
+      <button class="btn" id="tt-go" onclick="tupTimerToggle()" style="margin-top:0;font-size:18px;padding:12px 28px;">▶ Start</button>
+      <button class="btn-sm" onclick="tupTimerReset()" style="font-size:15px;padding:12px 20px;">Reset</button>
+      <button class="btn-sm" id="tt-mute" onclick="TUPT.mute=!TUPT.mute;this.textContent=TUPT.mute?'🔇 Muted':'🔔 Beeps on'" style="font-size:15px;padding:12px 20px;">🔔 Beeps on</button></div>`;
+  tupTimerReset(); ov.style.display='flex';
+}
+function tupTimerClose(){ tupTimerReset(); const ov=document.getElementById('tupTimerOv'); if (ov) ov.style.display='none'; try{ if (TUPT.wl){ TUPT.wl.release(); TUPT.wl=null; } }catch(e){} }
+function tupTimerReset(){ clearInterval(TUPT.iv); TUPT.run=false; TUPT.acc=0; TUPT.lastBeep=-1; TUPT.lastKey=''; const g=document.getElementById('tt-go'); if (g) g.textContent='▶ Start'; tupTimerDraw(0); }
+function tupTimerToggle(){
+  if (TUPT.run){ TUPT.acc += (Date.now()-TUPT.t0)/1000; TUPT.run=false; clearInterval(TUPT.iv); document.getElementById('tt-go').textContent='▶ Resume'; return; }
+  TUPT.run = true; TUPT.t0 = Date.now(); document.getElementById('tt-go').textContent='⏸ Pause'; tupBeep(1);
+  try{ if (navigator.wakeLock) navigator.wakeLock.request('screen').then(w=>TUPT.wl=w).catch(()=>{}); }catch(e){}
+  TUPT.iv = setInterval(()=>tupTimerDraw(TUPT.acc+(Date.now()-TUPT.t0)/1000), 200);
+}
+function tupTimerDraw(sec){
+  const st = tupTimerState(sec), m = Math.floor(sec/60), s = Math.floor(sec%60);
+  const set=(id,t)=>{ const e=document.getElementById(id); if (e) e.textContent=t; };
+  set('tt-clock', `${m}:${String(s).padStart(2,'0')}`); set('tt-block', sec>=900?'Finished':st.b.name);
+  const b=st.b; let rep='';
+  if (sec>=900) rep='Session complete'; else if (b.reps) rep = st.phase==='DONE' ? 'Block complete' : `Rep ${st.rep} of ${b.name==='Box-to-box strides'?'7 (max)':b.reps} · ${st.phase==='GO'?(b.name==='Box sprints'?'SPRINT':'GO'):'REST / WALK'}`; else rep = b.name==='Prep' ? 'Jog · dynamic mobility · 2 build-ups' : '';
+  set('tt-rep', rep);
+  if (b.name==='Box-to-box strides' && b.reps && st.phase!=='DONE'){ const rows=tupRoster(tupMatch()).filter(r=>r.strides>=st.rep); set('tt-who', `Still running this rep (${rows.length}): ${rows.map(r=>r.name).join(', ')||'—'}`); } else set('tt-who','');
+  if (TUPT.run && b.reps && st.phase!=='DONE' && st.beepKey!==TUPT.lastBeep && sec>=st.beepKey){ TUPT.lastBeep = st.beepKey; tupBeep(b.name==='Prep'?1:1); }
+  else if (TUPT.run && st.key!==TUPT.lastKey && !b.reps){ tupBeep(2); }
+  TUPT.lastKey = st.key;
+  if (sec>=900 && TUPT.run){ tupBeep(3); TUPT.acc=900; TUPT.run=false; clearInterval(TUPT.iv); document.getElementById('tt-go').textContent='▶ Start'; }
 }
 
 function openWarmupReport(rId){
