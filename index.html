@@ -14,6 +14,9 @@
 <title>Brisbane Roar — Performance Dashboard</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
+    .mins-in{width:46px;font:inherit;text-align:center;border:1px dashed #b8c0cc;border-radius:4px;background:#fff;padding:1px 2px;}
+    .mins-in.ovr{border-color:#f26522;background:#fff4ec;font-weight:700;}
+
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   :root {
     --bg:#f4f4f5; --surface:#fff; --surface-alt:#fafafa;
@@ -372,6 +375,8 @@
     #overlayReport .modal { box-shadow:none; max-width:100%; width:100%; margin:0; padding:0; overflow:visible; }
     html, body { background:#fff !important; min-height:0 !important; height:auto !important; }
     .no-print { display:none !important; }
+    .mins-in{border:none !important;background:transparent !important;-moz-appearance:textfield;appearance:textfield;}
+    .mins-in::-webkit-inner-spin-button{display:none;}
     .print-only { display:inline !important; }
     .no-data-row { display:none !important; }
     .rpt-table { font-size:11px; }
@@ -429,7 +434,7 @@
       <span id="saveAllStatus" style="flex:1;text-align:right;white-space:nowrap;">Following the sheet</span>
     </div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-17 11:35</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-17 14:40</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -6999,9 +7004,30 @@ function mdrSizing(nRows){
   const font = barH >= 27 ? 13.5 : barH >= 21 ? 12.5 : 11.5;
   return { rowH, pad, barH, font };
 }
-function openMatchDayReport(dateStr){
+// Manual minutes-played override for the match GPS reports (sheet value is the default).
+let MINS_OVR = {}, MINS_LOADED = false, MINS_CTX = null;
+async function minsLoad(){
+  if (MINS_LOADED) return; MINS_LOADED = true;
+  try{ const raw = await storageGet('roar-minsovr'); if (raw){ MINS_OVR = JSON.parse(typeof raw==='string'?raw:(raw.value||'{}'))||{}; } }catch(e){}
+}
+function gMin(aid, g){ const o = (MINS_OVR[g.date]||{})[aid]; return (o!=null && !isNaN(o)) ? o : g.minutes_played; }
+function minsIsOvr(aid, g){ const o=(MINS_OVR[g.date]||{})[aid]; return o!=null && !isNaN(o); }
+function minsInput(aid, g){
+  const v = gMin(aid,g), ov = minsIsOvr(aid,g);
+  return `<input class="mins-in${ov?' ovr':''}" type="number" min="0" max="130" step="1" value="${v!=null?Math.round(v):''}" placeholder="min" title="Type minutes played (clear to use the sheet value)" onchange="minsSet('${aid}','${g.date}',this.value)">`;
+}
+async function minsSet(aid, date, val){
+  if (!MINS_OVR[date]) MINS_OVR[date] = {};
+  const n = parseFloat(val);
+  if (val==='' || isNaN(n)) delete MINS_OVR[date][aid]; else MINS_OVR[date][aid] = n;
+  try{ await storageSet('roar-minsovr', JSON.stringify(MINS_OVR)); }catch(e){}
+  if (MINS_CTX) document.getElementById('reportContent').innerHTML = MINS_CTX();
+}
+async function openMatchDayReport(dateStr){
   if (!dateStr){ alert('Pick a match first.'); return; }
+  await minsLoad();
   reportKind = 'matchday';
+  MINS_CTX = ()=>buildMatchDayReportHtml(dateStr);
   mpSetLandscape(true);
   document.getElementById('rptTrainingControls').style.display = 'none';
   document.getElementById('reportContent').innerHTML = buildMatchDayReportHtml(dateStr);
@@ -7012,8 +7038,9 @@ function buildMatchDayReportHtml(dateStr){
   const rows = players.map(a=>{
     const g = (a.gameGps||[]).find(x=>x.date===dateStr);
     if (!g) return null;
-    const work_rate = (g.total_distance_m!=null && g.minutes_played) ? g.total_distance_m/g.minutes_played : null;
-    return { name:a.name, total_distance_m:g.total_distance_m, hsr_distance_m:g.hsr_distance_m, work_rate,
+    const mp = gMin(a.id,g);
+    const work_rate = (g.total_distance_m!=null && mp) ? g.total_distance_m/mp : null;
+    return { aid:a.id, g, mins:mp, name:a.name, total_distance_m:g.total_distance_m, hsr_distance_m:g.hsr_distance_m, work_rate,
       max_velocity_kmh:g.max_velocity_kmh, sprint_distance_m:g.sprint_distance_m,
       accel_count: g.accel_count!=null ? g.accel_count : null, decel_count: g.decel_count!=null ? g.decel_count : null,
       opponent:g.opponent, round:g.round };
@@ -7032,13 +7059,13 @@ function buildMatchDayReportHtml(dateStr){
     const pct = val>0 ? Math.max(3, Math.min(100, (val/colMax[c.key])*100)) : 0;
     return `<td class="mdr-c"><div class="mdr-bar" style="background:${c.color}1f;"><div class="mdr-fill" style="width:${pct}%;background:${c.color}7a;"></div><span class="mdr-v">${c.fmt(val)}</span></div></td>`;
   };
-  const colW = (83/cols.length).toFixed(2);
+  const colW = (76/cols.length).toFixed(2);
   return `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">Match Day Report</div><div class="rpt-sub">Brisbane Roar${meta.opponent?' vs '+meta.opponent:''} · ${dateStr}${meta.round?' · Round '+meta.round:''}</div></div>${ROAR_LOGO_SVG}</div>
     <table class="rpt-table mdr-table" style="--mdr-pad:${sz.pad}px;--mdr-bar-h:${sz.barH}px;--mdr-font:${sz.font}px;">
-    <colgroup><col style="width:17%">${cols.map(()=>`<col style="width:${colW}%">`).join('')}</colgroup>
-    <thead><tr><th>Athlete</th>${cols.map(c=>`<th>${c.label}</th>`).join('')}</tr></thead><tbody>
-    ${rows.map(r=>`<tr><td class="lbl">${r.name}</td>${cols.map(c=>barCell(c, r[c.key])).join('')}</tr>`).join('')}
-    <tr class="mdr-avg-row"><td class="lbl">Averages</td>${cols.map(c=>`<td class="mdr-c"><div class="mdr-bar"><span class="mdr-v">${c.fmt(avg(c.key))}</span></div></td>`).join('')}</tr>
+    <colgroup><col style="width:17%"><col style="width:7%">${cols.map(()=>`<col style="width:${colW}%">`).join('')}</colgroup>
+    <thead><tr><th>Athlete</th><th>Mins</th>${cols.map(c=>`<th>${c.label}</th>`).join('')}</tr></thead><tbody>
+    ${rows.map(r=>`<tr><td class="lbl">${r.name}</td><td class="mdr-c">${minsInput(r.aid,r.g)}</td>${cols.map(c=>barCell(c, r[c.key])).join('')}</tr>`).join('')}
+    <tr class="mdr-avg-row"><td class="lbl">Averages</td><td class="mdr-c"><div class="mdr-bar"><span class="mdr-v">${fmt(avg('mins'))}</span></div></td>${cols.map(c=>`<td class="mdr-c"><div class="mdr-bar"><span class="mdr-v">${c.fmt(avg(c.key))}</span></div></td>`).join('')}</tr>
     </tbody></table>`;
 }
 
@@ -7047,16 +7074,19 @@ function buildMatchDayReportHtml(dateStr){
 // rows (same look as the Match Day Report) with her own average and the
 // Team Average (all same-gender players who played those same matches) at the bottom.
 // ============================================================
-function pmrRowFor(g){
-  const work_rate = (g.total_distance_m!=null && g.minutes_played) ? g.total_distance_m/g.minutes_played : null;
+function pmrRowFor(g, aid){
+  const mp = gMin(aid,g);
+  const work_rate = (g.total_distance_m!=null && mp) ? g.total_distance_m/mp : null;
   return { total_distance_m:g.total_distance_m, hsr_distance_m:g.hsr_distance_m, work_rate,
     max_velocity_kmh:g.max_velocity_kmh, sprint_distance_m:g.sprint_distance_m,
     accel_count:g.accel_count!=null?g.accel_count:null, decel_count:g.decel_count!=null?g.decel_count:null,
-    minutes_played:g.minutes_played };
+    minutes_played:mp };
 }
-function openPlayerMatchReport(athleteId, sel){
+async function openPlayerMatchReport(athleteId, sel){
   const a = athleteMap[athleteId]; if (!a) return;
+  await minsLoad();
   reportKind = 'playermatch';
+  MINS_CTX = ()=>buildPlayerMatchReportHtml(a, sel||'all');
   mpSetLandscape(true);
   document.getElementById('rptTrainingControls').style.display = 'none';
   document.getElementById('reportContent').innerHTML = buildPlayerMatchReportHtml(a, sel||'all');
@@ -7073,8 +7103,8 @@ function buildPlayerMatchReportHtml(a, sel){
   const dates = new Set(games.map(g=>g.date));
   const mates = Object.values(athleteMap).filter(p=>p.gender===a.gender);
   const teamRows = [];
-  mates.forEach(p=>(p.gameGps||[]).forEach(g=>{ if (dates.has(g.date)) teamRows.push(pmrRowFor(g)); }));
-  const mine = games.map(g=>({ ...pmrRowFor(g), date:g.date, opponent:g.opponent, round:g.round }));
+  mates.forEach(p=>(p.gameGps||[]).forEach(g=>{ if (dates.has(g.date)) teamRows.push(pmrRowFor(g,p.id)); }));
+  const mine = games.map(g=>({ ...pmrRowFor(g,a.id), g, date:g.date, opponent:g.opponent, round:g.round }));
   const avgOf = (rows,k)=>{ const vs = rows.map(r=>r[k]).filter(v=>v!=null); return vs.length ? vs.reduce((s,v)=>s+v,0)/vs.length : null; };
   const myAvg = {}, teamAvg = {};
   const cols = MDR_COLS.filter(c=>mine.some(r=>r[c.key]!=null));
@@ -7095,7 +7125,7 @@ function buildPlayerMatchReportHtml(a, sel){
     <table class="rpt-table mdr-table" style="--mdr-pad:${sz.pad}px;--mdr-bar-h:${sz.barH}px;--mdr-font:${sz.font}px;">
     <colgroup><col style="width:20%"><col style="width:8%">${cols.map(()=>`<col style="width:${colW}%">`).join('')}</colgroup>
     <thead><tr><th>Match</th><th>Mins</th>${cols.map(c=>`<th>${c.label}</th>`).join('')}</tr></thead><tbody>
-    ${mine.map(r=>`<tr><td class="lbl">${label(r)}</td><td class="mdr-c">${r.minutes_played!=null?fmt(r.minutes_played):'—'}</td>${cols.map(c=>bar(c,r[c.key])).join('')}</tr>`).join('')}
+    ${mine.map(r=>`<tr><td class="lbl">${label(r)}</td><td class="mdr-c">${minsInput(a.id,r.g)}</td>${cols.map(c=>bar(c,r[c.key])).join('')}</tr>`).join('')}
     ${showMyAvg?`<tr class="mdr-avg-row"><td class="lbl">${a.name.split(' ')[0]} Average</td><td class="mdr-c">${fmt(avgOf(mine,'minutes_played'))}</td>${cols.map(c=>plain(c,myAvg[c.key])).join('')}</tr>`:''}
     <tr class="mdr-avg-row"><td class="lbl">Team Average</td><td class="mdr-c">${fmt(avgOf(teamRows,'minutes_played'))}</td>${cols.map(c=>plain(c,teamAvg[c.key])).join('')}</tr>
     </tbody></table>`;
