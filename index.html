@@ -429,7 +429,7 @@
       <span id="saveAllStatus" style="flex:1;text-align:right;white-space:nowrap;">Following the sheet</span>
     </div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-17 00:20</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-17 11:35</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -7834,7 +7834,7 @@ function openRecoveryReport(which){
 // ============================================================
 const TUP_DEFAULTS = { hsrFixed:80, hsrStride:50, tdFixed:1060, tdStride:140, halfStrides:3, fullStrides:6, doneMin:60, halfMin:30, mods:{CB:-2,FB:0,CM:0,W:1,FW:1}, boxCycle:60 };
 const TUP = { matches:[], cur:'', set:JSON.parse(JSON.stringify(TUP_DEFAULTS)), loaded:false };
-const TUP_POS = ['CB','FB','CM','W','FW','GK'];
+const TUP_POS = ['CB','FB','CM','W','FW'];
 const TUP_SESSION = [
   { clock:'0–2', drill:'Prep', layout:'Jog, dynamic mobility, 2 build-ups', target:'–', rest:'–', reps:'All' },
   { clock:'2–5', drill:'Pitch returns', layout:'Goal line to goal line and back (~210 m)', target:'48 s', rest:'48 s walk', reps:'2 (all)' },
@@ -7876,7 +7876,6 @@ function tupPosCode(raw){
   return 'CM';
 }
 function tupGroup(pos, min){
-  if (pos==='GK') return 'GK';
   if (min==null || min==='' || isNaN(min)) return '';
   if (min >= TUP.set.doneMin) return 'Done';
   if (min >= TUP.set.halfMin) return 'Half';
@@ -7892,7 +7891,7 @@ function tupEst(strides){
   return { hsr: TUP.set.hsrFixed + TUP.set.hsrStride*strides, td: TUP.set.tdFixed + TUP.set.tdStride*strides };
 }
 function tupRoster(m){
-  return Object.values(athleteMap).filter(a=>a.name).sort((x,y)=>x.name.localeCompare(y.name)).map(a=>{
+  return Object.values(athleteMap).filter(a=>a.name && tupPosCode(a.position)!=='GK').sort((x,y)=>x.name.localeCompare(y.name)).map(a=>{
     const p = m.players[a.id] || {};
     const pos = p.pos || tupPosCode(a.position);
     const min = (p.min===undefined||p.min===null||p.min==='') ? null : +p.min;
@@ -7956,7 +7955,7 @@ function tupFillRow(id){
 function tupRefreshSummary(){
   const m = tupMatch(); const rows = tupRoster(m); rows.forEach(r=>tupFillRow(r.id));
   const c = g=>rows.filter(r=>r.group===g).length, none = rows.filter(r=>!r.group).length;
-  const el = document.getElementById('tupSummary'); if (el) el.innerHTML = ['Full','Half','Done','GK'].map(g=>`<div><span class="tp-badge tp-${g}">${g}</span><b>${c(g)}</b></div>`).join('') + `<div>Not entered<b>${none}</b></div>`;
+  const el = document.getElementById('tupSummary'); if (el) el.innerHTML = ['Full','Half','Done'].map(g=>`<div><span class="tp-badge tp-${g}">${g}</span><b>${c(g)}</b></div>`).join('') + `<div>Not entered<b>${none}</b></div>`;
 }
 function tupMeta(k,v){ const m=tupMatch(); m[k]=v; tupSave(); if (k==='date'||k==='opponent'||k==='ha') { /* keep header select label fresh */ const sel=document.querySelector('#tupRoot select.axis-select'); if (sel) sel.innerHTML = TUP.matches.map(x=>`<option value="${x.id}" ${x.id===TUP.cur?'selected':''}>${x.date} ${tupEsc(x.opponent||'(no opponent)')}</option>`).join(''); } }
 function tupSetPlayer(id,k,v){ const m=tupMatch(); const p = m.players[id] || (m.players[id]={}); if (k==='min') p.min = (v===''?null:+v); else p[k]=v; tupSave(); tupRefreshSummary(); tupRenderCalib(); }
@@ -8060,7 +8059,7 @@ function tupBenchHtml(){
   return `<style>
     .tb{font-family:Inter,system-ui,sans-serif;color:#1f2937;font-size:12px;} .tb-head{display:flex;align-items:center;justify-content:space-between;border-bottom:3px solid #f26522;padding-bottom:6px;margin-bottom:8px;} .tb-head .rpt-logo{height:46px;width:auto;}
     .tb-title{text-align:center;flex:1;} .tb-title b{display:block;font-size:20px;color:#f26522;text-transform:uppercase;letter-spacing:.03em;} .tb-title span{font-size:12.5px;color:#4b5563;}
-    .tb-groups{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-bottom:8px;} .tb-grp{border:2px solid;border-radius:9px;overflow:hidden;} .tb-gh{color:#fff;font-weight:800;font-size:13.5px;padding:4px 8px;display:flex;justify-content:space-between;}
+    .tb-groups{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-bottom:8px;} .tb-grp{border:2px solid;border-radius:9px;overflow:hidden;} .tb-gh{color:#fff;font-weight:800;font-size:13.5px;padding:4px 8px;display:flex;justify-content:space-between;}
     .tb-gs{font-size:9.5px;color:#6b7280;padding:3px 8px 0;min-height:24px;} .tb-gl{padding:2px 8px 6px;} .tb-p{display:flex;justify-content:space-between;font-size:11.5px;padding:1.5px 0;border-bottom:1px dotted #e5e7eb;} .tb-p b{font-size:13px;} .tb-p i{color:#9ca3af;} .tb-none{color:#9ca3af;font-size:11px;}
     .tb-tbl{width:100%;border-collapse:collapse;font-size:11px;margin-bottom:8px;} .tb-tbl th{background:#1f3a5f;color:#fff;padding:4px 6px;text-align:left;font-size:10.5px;} .tb-tbl td{border:1px solid #d1d5db;padding:3px 6px;}
     .tb-pits{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;} .tb-key{border:1px dashed #d1d5db;border-radius:8px;padding:8px 10px;font-size:11px;line-height:1.5;} .tb-key b{color:#1f3a5f;} .tb-pit{border:1px solid #e5e7eb;border-radius:8px;padding:5px;} .tb-pt{font-weight:800;font-size:11.5px;color:#1f3a5f;margin-bottom:3px;} .tb-pl{font-size:10.5px;font-weight:700;margin-top:3px;color:#374151;}
@@ -8069,7 +8068,7 @@ function tupBenchHtml(){
   </style><div class="tb">
     <div class="tb-head">${ROAR_LOGO_SVG}<div class="tb-title"><b>Post-match top-up</b><span>${m.date} · ${m.ha==='Away'?'Away':'Home'} ${m.opponent?'vs '+tupEsc(m.opponent):''} · max 15 min</span></div>${ROAR_LOGO_SVG}</div>
     ${none.length?`<div class="tb-nn">Minutes not entered for: ${none.map(r=>tupEsc(r.name)).join(', ')}</div>`:''}
-    <div class="tb-groups">${blk('Full','FULL',`Played ${'0–'+(S.halfMin-1)} min or didn't play`)}${blk('Half','HALF',`Played ${S.halfMin}–${S.doneMin-1} min`)}${blk('Done','DONE',`Played ${S.doneMin}+ min. Cool-down only, no top-up`)}${blk('GK','GK','Goalkeepers: separate top-up')}</div>
+    <div class="tb-groups">${blk('Full','FULL',`Played ${'0–'+(S.halfMin-1)} min or didn't play`)}${blk('Half','HALF',`Played ${S.halfMin}–${S.doneMin-1} min`)}${blk('Done','DONE',`Played ${S.doneMin}+ min. Cool-down only, no top-up`)}</div>
     <div style="font-size:12px;color:#374151;margin:-2px 0 8px;font-weight:600;">The number next to each name = how many <u>strides</u> she runs in the last drill (box-to-box). Finish your strides, then you are done.</div>
     <table class="tb-tbl"><thead><tr><th>Clock</th><th>Drill</th><th>Layout</th><th>Target</th><th>Rest</th><th>Reps</th></tr></thead><tbody>${TUP_SESSION.map(s=>`<tr><td><b>${s.clock}</b></td><td><b>${s.drill}</b></td><td>${s.layout}</td><td>${s.target}</td><td>${s.rest}</td><td>${s.reps}</td></tr>`).join('')}</tbody></table>
     <div class="tb-pits">${pitch('returns','Pitch returns','1 pitch return · 48 s · rest 48 s')}${pitch('sprints','Box sprints','Across the box · max effort · walk back + 60 s')}${pitch('strides','Box-to-box strides','Walk – stride – walk · 12 s · rest 36 s')}<div class="tb-key"><b>How to read it</b><br>White dashed = jog / walk · Yellow = fast run<br><b>Everyone:</b> prep, 2 pitch returns, 3 box sprints.<br><b>Then strides:</b> each player does her own stride count and leaves when finished.<br><b>Clock:</b> 0–15 min, GPS off for the last minute.</div></div>
