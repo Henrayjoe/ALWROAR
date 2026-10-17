@@ -434,7 +434,7 @@
       <span id="saveAllStatus" style="flex:1;text-align:right;white-space:nowrap;">Following the sheet</span>
     </div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-17 14:40</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-17 22:55</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -1161,6 +1161,17 @@ function sessionTitleIsJustDate(t){
 // already km/h (not m/s -- confirmed against a real export earlier), and
 // sprintDistance is the raw, unreliable field since this export has no
 // per-speed-zone data to derive a corrected figure from.
+// Meters-per-minute exactly as the GPS export gives it (any header like
+// "Distance Per Min", "m/min", "metersPerMinute", "work_rate"); null when the export has none.
+function csvMpm(row){
+  for (const k of Object.keys(row)){
+    const n = k.toLowerCase().replace(/[^a-z\/]/g,'');
+    if (/^(m\/?min|mpm|workrate|avgmpermin|avgm\/min|averagem\/min)$/.test(n) || /(dist|distance|meter|metre|meterage|metreage)(s)?(per|\/)(min|minute)/.test(n) || /^(meters|metres)perminute$/.test(n)){
+      const v = pf(row[k]); if (v!=null) return v;
+    }
+  }
+  return null;
+}
 function mapSonraGameRow(row){
   const title = (row.drillTitle||'').trim();
   const sessTitle = (row.sessionTitle||'').trim();
@@ -1172,6 +1183,7 @@ function mapSonraGameRow(row){
     round: '',
     player_name: row.playerDisplayName,
     minutes_played: totalTimeSec!=null ? totalTimeSec/60 : null,
+    m_per_min: csvMpm(row),
     total_distance_m: pf(row.distanceTotal),
     hsr_distance_m: pf(row.highSpeedRunningAbs),
     sprint_distance_m: pf(row.sprintDistance),
@@ -1208,7 +1220,7 @@ function mergeGameGpsFromSheet(rows){
     if ('playerDisplayName' in r) return mapSonraGameRow(r);
     return {
       date: r.date, opponent: r.opponent||'', round: r.round||'', player_name: r.player_name,
-      minutes_played: pf(r.minutes_played), total_distance_m: pf(r.total_distance_m), hsr_distance_m: pf(r.hsr_distance_m),
+      minutes_played: pf(r.minutes_played), m_per_min: csvMpm(r), total_distance_m: pf(r.total_distance_m), hsr_distance_m: pf(r.hsr_distance_m),
       sprint_distance_m: pf(r.sprint_distance_m), accel_decel_count: pf(r.accel_decel_count),
       accel_count: pf(r.accel_count), decel_count: pf(r.decel_count),
       max_velocity_kmh: pf(r.max_velocity_kmh),
@@ -1232,14 +1244,14 @@ function mergeGameGpsFromSheet(rows){
     const whole = group.length===1 ? group[0] : group.find(r=>r._whole);
     const sum = f => group.reduce((s,r)=>s+(r[f]||0),0);
     const entry = whole ? {
-      date: whole.date, opponent: whole.opponent, round: whole.round, minutes_played: whole.minutes_played,
+      date: whole.date, opponent: whole.opponent, round: whole.round, minutes_played: whole.minutes_played, m_per_min: whole.m_per_min,
       total_distance_m: whole.total_distance_m, hsr_distance_m: whole.hsr_distance_m, sprint_distance_m: whole.sprint_distance_m,
       accel_decel_count: whole.accel_decel_count, accel_count: whole.accel_count, decel_count: whole.decel_count,
       max_velocity_kmh: whole.max_velocity_kmh,
       half1_distance_m: whole.half1_distance_m, half1_hsr_m: whole.half1_hsr_m, half2_distance_m: whole.half2_distance_m, half2_hsr_m: whole.half2_hsr_m,
     } : {
       date: group[0].date, opponent: (group.map(r=>r.opponent).find(Boolean))||'', round: (group.map(r=>r.round).find(Boolean))||'',
-      minutes_played: sum('minutes_played'), total_distance_m: sum('total_distance_m'), hsr_distance_m: sum('hsr_distance_m'),
+      minutes_played: sum('minutes_played'), m_per_min: (group.length===1||group.every(r=>r.m_per_min!=null)) ? (group.reduce((a,r)=>a+r.m_per_min,0)/group.length) : null, total_distance_m: sum('total_distance_m'), hsr_distance_m: sum('hsr_distance_m'),
       sprint_distance_m: sum('sprint_distance_m'), accel_decel_count: sum('accel_decel_count'), accel_count: sum('accel_count'), decel_count: sum('decel_count'),
       max_velocity_kmh: Math.max(0, ...group.map(r=>r.max_velocity_kmh||0)) || null,
       half1_distance_m: group[0].half1_distance_m, half1_hsr_m: group[0].half1_hsr_m, half2_distance_m: group[0].half2_distance_m, half2_hsr_m: group[0].half2_hsr_m,
@@ -7039,7 +7051,7 @@ function buildMatchDayReportHtml(dateStr){
     const g = (a.gameGps||[]).find(x=>x.date===dateStr);
     if (!g) return null;
     const mp = gMin(a.id,g);
-    const work_rate = (g.total_distance_m!=null && mp) ? g.total_distance_m/mp : null;
+    const work_rate = g.m_per_min!=null ? g.m_per_min : ((g.total_distance_m!=null && mp) ? g.total_distance_m/mp : null);
     return { aid:a.id, g, mins:mp, name:a.name, total_distance_m:g.total_distance_m, hsr_distance_m:g.hsr_distance_m, work_rate,
       max_velocity_kmh:g.max_velocity_kmh, sprint_distance_m:g.sprint_distance_m,
       accel_count: g.accel_count!=null ? g.accel_count : null, decel_count: g.decel_count!=null ? g.decel_count : null,
@@ -7076,7 +7088,7 @@ function buildMatchDayReportHtml(dateStr){
 // ============================================================
 function pmrRowFor(g, aid){
   const mp = gMin(aid,g);
-  const work_rate = (g.total_distance_m!=null && mp) ? g.total_distance_m/mp : null;
+  const work_rate = g.m_per_min!=null ? g.m_per_min : ((g.total_distance_m!=null && mp) ? g.total_distance_m/mp : null);
   return { total_distance_m:g.total_distance_m, hsr_distance_m:g.hsr_distance_m, work_rate,
     max_velocity_kmh:g.max_velocity_kmh, sprint_distance_m:g.sprint_distance_m,
     accel_count:g.accel_count!=null?g.accel_count:null, decel_count:g.decel_count!=null?g.decel_count:null,
