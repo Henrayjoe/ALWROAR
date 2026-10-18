@@ -434,7 +434,7 @@
       <span id="saveAllStatus" style="flex:1;text-align:right;white-space:nowrap;">Following the sheet</span>
     </div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-18 23:05</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-18 23:40</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -7894,7 +7894,7 @@ function openRecoveryReport(which){
 const TUP_DEFAULTS = { hsrFixed:80, hsrStride:50, tdFixed:1060, tdStride:140, halfStrides:3, fullStrides:6, doneMin:60, halfMin:30, mods:{CB:-2,FB:0,CM:0,W:1,FW:1}, boxCycle:60,
   prepTd:300, retHsr:10, retTd:260, retReps:2, boxHsr:20, boxTd:80, boxReps:3, strHsr:50, strTd:140,
   retGo:48, retRest:48, strGo:12, strRest:36, speedPct:90, speedBoxes:2, mmHigh:140, mmLow:85, mmLowMin:45, durDiff:5, maxOver:2,
-  avgN:4, shortDays:4, useOwn:false, nsReturns:3, nsBoxes:4, nsStrides:8, nsWarmTd:600, ssgSets:4, ssgMin:3, ssgRest:2, ssgMinPlayers:4,
+  avgN:4, shortDays:4, useOwn:false, nsReturns:3, nsBoxes:4, nsStrides:8, nsWarmTd:600, ssgSets:4, ssgMin:3, ssgRest:2, ssgMinPlayers:4, fsbASsg:3, fsbABox:0, fsbAStr:3, fsbBSsg:4, fsbBBox:2, fsbBStr:4, fsbUpRet:2, fsbUpStr:2, fsbModCB:-1, fsbModFB:0, fsbModCM:0, fsbModW:1, fsbModFW:1, fsbHours:48,
   targets:{CB:{hsr:370,spr:95},FB:{hsr:550,spr:140},CM:{hsr:590,spr:150},W:{hsr:610,spr:190},FW:{hsr:570,spr:190}} };
 const TUP = { matches:[], cur:'', set:JSON.parse(JSON.stringify(TUP_DEFAULTS)), loaded:false, view:'match' };
 const TUP_POS = ['CB','FB','CM','W','FW'];
@@ -8003,6 +8003,113 @@ function tupSheetStatusHtml(m){
   const msg = info.key ? `<span style="color:#3f9b5a"><b>Found:</b> “${tupEsc(info.key)}” on ${m.date} — ${Object.values(m.actual).filter(x=>x.src==='sheet').length} players filled from the GPS sheet.</span>`
     : (names.length ? `<span style="color:#b26a00"><b>No “top up” session found</b> in the GPS sheet for ${m.date}. Pick the right one from the list, or check the session was uploaded.</span>` : `<span style="color:#b26a00"><b>No training GPS in the sheet for ${m.date} yet.</b> Upload the Sonra export to the sheet, then sync.</span>`);
   return `<div style="margin-bottom:8px;">${msg}</div><div class="tp-bar">${sel}<button class="btn-sm" onclick="tupPullNow(true)">↻ Re-pull from GPS sheet</button></div>`;
+}
+// ---- First Session Back (Stage 2) ----
+function tupDaysBetween(a,b){ if(!a||!b) return null; return Math.round((new Date(b+'T00:00:00')-new Date(a+'T00:00:00'))/86400000); }
+function tupFsbDate(m){ if (m.fsbDate) return m.fsbDate; const d=new Date(m.date+'T00:00:00'); d.setDate(d.getDate()+2); return toLocalDateStr(d); }
+function tupS1Effective(r, p){   // Done / Skipped, applying the "fewer than half the prescribed strides = skipped" rule
+  const st = p.s1 || 'Done';
+  if (st==='Skipped') return 'Skipped';
+  if (st==='Partial'){ const done = +p.s1Strides||0; return (done < r.strides/2) ? 'Skipped' : 'Done'; }
+  return 'Done';
+}
+function tupFsbPlan(m){
+  const S = TUP.set, rows = tupRoster(m);
+  const hours = (tupDaysBetween(m.date, tupFsbDate(m))||0)*24;
+  const within = hours <= S.fsbHours;
+  const short = m.nextDays!=null && m.nextDays <= S.shortDays;
+  const nsRun = m.nsStatus==='Done';
+  const out = rows.map(r=>{
+    const p = m.players[r.id] || {};
+    const o = { id:r.id, name:r.name, pos:r.pos, group:r.group, min:r.min, notes:[], block:'', ssg:0, box:0, str:0, ret:0, hsr:null, s1:null, upgraded:false };
+    const mod = Math.max(0, 0);
+    if (!r.group){ o.block='Minutes not entered'; return o; }
+    if (r.group==='Done'){ o.block='Normal session'; if (within) o.notes.push('Extended recovery warm-up (bike, mobility)'); return o; }
+    if (r.group==='Non-Squad'){ if (nsRun){ o.block='Join the team'; o.notes.push('Non-squad session was run'); } else { o.block='Non-Squad session'; o.notes.push('No non-squad session logged — give her the full Non-Squad session'); } return o; }
+    // Half / Full
+    o.s1 = tupS1Effective(r, p);
+    let block = r.group==='Half' ? 'A' : 'B', extraRet = 0, extraStr = 0;
+    if (o.s1==='Skipped'){ o.upgraded = true; o.notes.push('Upgraded: no match-day top-up'); if (r.group==='Half') block='B'; else { block='B'; extraRet = S.fsbUpRet; extraStr = S.fsbUpStr; } }
+    const A = block==='A';
+    o.block = 'Block '+block + (extraRet||extraStr ? ' + extras' : '');
+    o.ssg = A ? S.fsbASsg : S.fsbBSsg; o.box = A ? S.fsbABox : S.fsbBBox;
+    const baseStr = A ? S.fsbAStr : S.fsbBStr;
+    o.str = Math.max(0, baseStr + (+S['fsbMod'+r.pos]||0)) + extraStr; o.ret = extraRet;
+    if (short){ o.ssg = Math.ceil(o.ssg/2); o.str = 0; }
+    o.hsr = S.boxHsr*o.box + S.strHsr*o.str + S.retHsr*o.ret;
+    return o;
+  });
+  const ssgPlayers = out.filter(o=>/^Block|Non-Squad session/.test(o.block)).length;
+  return { rows:out, hours, within, short, ssgPlayers, ssg:tupSsgSize(ssgPlayers) };
+}
+function tupFsbSet(id,k,v){ const m=tupMatch(); const p=m.players[id]||(m.players[id]={}); p[k]=(k==='s1Strides'?(v===''?null:+v):v); tupSave(); renderTupPlan(); }
+function tupFsbMeta(k,v){ const m=tupMatch(); m[k]=v; tupSave(); renderTupPlan(); }
+function tupFsbView(host){
+  const m = tupMatch(), S = TUP.set, pl = tupFsbPlan(m), ds = tupFsbDate(m);
+  const gp = id => m.players[id] || {};
+  const stSel = (k,cur)=>`<select class="tp-in" onchange="tupFsbMeta('${k}',this.value)">${['Planned','Done','Skipped'].map(x=>`<option ${((cur||'Planned')===x)?'selected':''}>${x}</option>`).join('')}</select>`;
+  const rowsHtml = pl.rows.sort((a,b)=>a.block.localeCompare(b.block)||a.name.localeCompare(b.name)).map(o=>{
+    const hs = o.group==='Half'||o.group==='Full';
+    const s1 = hs ? `<select class="tp-in" onchange="tupFsbSet('${o.id}','s1',this.value)">${['Done','Partial','Skipped'].map(x=>`<option ${((gp(o.id).s1||'Done')===x)?'selected':''}>${x}</option>`).join('')}</select>${gp(o.id).s1==='Partial'?` <input class="tp-in" type="number" min="0" style="width:52px" placeholder="strides" value="${gp(o.id).s1Strides==null?'':gp(o.id).s1Strides}" onchange="tupFsbSet('${o.id}','s1Strides',this.value)">`:''}` : '—';
+    const detail = hs ? `${o.ssg?o.ssg+' SSG':''}${o.box?' · '+o.box+' box':''}${o.ret?' · '+o.ret+' returns':''}${o.str?' · '+o.str+' strides':''}` : '';
+    return `<tr${o.upgraded?' style="background:#fff3d6"':''}><td><b>${tupEsc(o.name)}</b></td><td>${o.pos}</td><td>${o.group?`<span class="tp-badge tp-${o.group.replace('-','')}">${o.group}</span> ${o.min!=null?o.min+"'":''}`:'—'}</td><td>${s1}</td><td><b>${o.block}</b>${detail?`<div style="font-size:11px;color:var(--text-secondary)">${detail}</div>`:''}</td><td>${o.hsr!=null?'~'+Math.round(o.hsr):'—'}</td><td style="font-size:11.5px;">${o.notes.map(tupEsc).join('<br>')}</td></tr>`;
+  }).join('');
+  host.innerHTML = `<style>.tp-set{display:inline-flex;flex-direction:column;font-size:11px;color:var(--text-secondary);gap:2px;margin-right:10px;} .tp-set input,.tp-in{border:1px solid var(--border);border-radius:6px;padding:5px 7px;font-size:12.5px;background:var(--surface,#fff);}
+    .tp-tbl{border-collapse:collapse;width:100%;font-size:12.5px;} .tp-tbl th{background:var(--surface-2,#f3f4f6);padding:7px 8px;text-align:left;font-size:11px;} .tp-tbl td{padding:4px 8px;border-bottom:1px solid var(--border);vertical-align:top;} .tp-card{border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin:0 0 12px;} .tp-card h4{margin:0 0 8px;font-size:13.5px;} .tp-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;margin-bottom:12px;}
+    .tp-badge{display:inline-block;padding:2px 9px;border-radius:10px;font-weight:700;font-size:11.5px;color:#fff;} .tp-Full{background:#d9534f}.tp-Half{background:#f0a020}.tp-Done{background:#3f9b5a}.tp-NonSquad{background:#6b5aa6}</style>
+    <div class="tp-bar"><b style="font-size:14px;">First Session Back</b><span style="font-size:12px;color:var(--text-secondary);">for the match ${m.date}${m.opponent?' vs '+tupEsc(m.opponent):''}</span></div>
+    <div class="tp-card"><h4>This match, one cycle</h4><div class="tp-bar" style="align-items:center;">
+      <span><b>Match</b> ${m.date}</span> → <label class="tp-set">Stage 1 · Match Day top-up${stSel('s1Status',m.s1Status)}</label> → <label class="tp-set">Non-squad session${stSel('nsStatus',m.nsStatus)}</label> → <label class="tp-set">Stage 2 · First Session Back${stSel('s2Status',m.s2Status)}</label>
+      <label class="tp-set">First session date<input type="date" class="tp-in" value="${ds}" onchange="tupFsbMeta('fsbDate',this.value)"></label>
+      <label class="tp-set">Days to next match<input type="number" class="tp-in" min="0" style="width:70px" value="${m.nextDays==null?'':m.nextDays}" onchange="tupFsbMeta('nextDays',this.value===''?null:+this.value)"></label></div>
+      ${pl.short?`<div style="background:#fff3d6;border:1px solid #f0a020;border-radius:8px;padding:8px 12px;font-size:12.5px;margin-top:6px;"><b>Short turnaround (${m.nextDays} days to next match, limit ${S.shortDays}).</b> SSG sets are halved (rounded up) and the strides are dropped.</div>`:''}
+      ${pl.within?`<div style="font-size:12px;color:var(--text-secondary);margin-top:6px;">First session is ${pl.hours} h after the match (within ${S.fsbHours} h): starters get the extended recovery warm-up.</div>`:''}</div>
+    <div class="tp-card"><h4>Who does what</h4>
+      ${pl.rows.length?`<div style="overflow:auto;"><table class="tp-tbl"><thead><tr><th>Player</th><th>Pos</th><th>Group (match)</th><th>Stage 1 top-up</th><th>First session</th><th>Est. extra HSR (m)</th><th>Notes</th></tr></thead><tbody>${rowsHtml}</tbody></table></div>`:'<div class="hint">No players yet.</div>'}
+      <div class="hint" style="margin:8px 0 0;">Groups come from the minutes on the Match Day tab. Stage 1 defaults to Done; set Skipped (or Partial with the strides completed — fewer than half the prescribed strides counts as Skipped) and the player is upgraded. SSG for ${pl.ssgPlayers} player${pl.ssgPlayers===1?'':'s'}: ${pl.ssg?pl.ssg.fmt+' on '+pl.ssg.dims:'too few players'}.</div></div>
+    <div class="tp-bar"><button class="btn" style="margin-top:0" onclick="openTupFsb()">🖨 First Session Back card (print / phone)</button></div>`;
+}
+function tupFsbHtml(){
+  const m = tupMatch(), S = TUP.set, pl = tupFsbPlan(m), ds = tupFsbDate(m);
+  const by = f => pl.rows.filter(f).sort((a,b)=>a.name.localeCompare(b.name));
+  const A = by(o=>o.block==='Block A'), B = by(o=>/^Block B/.test(o.block)), St = by(o=>o.block==='Normal session'), NS = by(o=>o.block==='Non-Squad session'), J = by(o=>o.block==='Join the team');
+  const ssg = pl.ssg, ssgSetsA = pl.short?Math.ceil(S.fsbASsg/2):S.fsbASsg, ssgSetsB = pl.short?Math.ceil(S.fsbBSsg/2):S.fsbBSsg;
+  const list = (arr, fn)=> arr.length ? arr.map(o=>`<div class="fb-p"><span>${tupEsc(o.name)}</span><b>${fn(o)}</b></div>`).join('') : '<div class="fb-none">none</div>';
+  const det = o => [o.ret?o.ret+' returns':'', o.str?o.str+' strides':'', o.upgraded?'UPGRADED':''].filter(Boolean).join(' · ') || '—';
+  const pit = (svg,t,l)=>`<div class="tb-pit"><div class="tb-pt">${t}</div>${svg}<div class="tb-pl">${l}</div></div>`;
+  const dayName = d=>new Date(d+'T00:00:00').toLocaleDateString('en-AU',{weekday:'short',day:'numeric',month:'short'});
+  return `<style>
+    .tb{font-family:Inter,system-ui,sans-serif;color:#111;font-size:12px;} .tb-head{display:flex;align-items:center;justify-content:space-between;border-bottom:3px solid #111;padding-bottom:6px;margin-bottom:8px;} .tb-head .rpt-logo{height:46px;width:auto;}
+    .tb-title{text-align:center;flex:1;} .tb-title b{display:block;font-size:20px;text-transform:uppercase;letter-spacing:.03em;} .tb-title span{font-size:12.5px;color:#374151;}
+    .fb-g{display:grid;grid-template-columns:repeat(2,1fr);gap:7px;margin-bottom:8px;} .fb-b{border:2px solid #111;border-radius:8px;overflow:hidden;} .fb-h{background:#111;color:#fff;font-weight:800;padding:3px 8px;display:flex;justify-content:space-between;font-size:12.5px;} .fb-s{font-size:10px;color:#374151;padding:3px 8px 0;} .fb-l{padding:2px 8px 5px;}
+    .fb-p{display:flex;justify-content:space-between;gap:8px;font-size:11.5px;padding:1.5px 0;border-bottom:1px dotted #9ca3af;} .fb-p b{font-size:10.5px;text-align:right;} .fb-none{color:#6b7280;font-size:11px;}
+    .tb-tbl{width:100%;border-collapse:collapse;font-size:11px;margin-bottom:8px;} .tb-tbl th{background:#111;color:#fff;padding:4px 6px;text-align:left;font-size:10.5px;} .tb-tbl td{border:1px solid #9ca3af;padding:3px 6px;}
+    .tb-pits{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;} .tb-pit{border:1px solid #9ca3af;border-radius:8px;padding:5px;} .tb-pt{font-weight:800;font-size:11.5px;margin-bottom:2px;} .tb-pl{font-size:10.5px;color:#374151;margin-top:3px;}
+    .fb-ban{border:2px solid #111;border-radius:8px;padding:6px 10px;margin:0 0 8px;font-size:12px;font-weight:700;} .tb-foot{font-size:9.8px;color:#4b5563;margin-top:6px;}
+    @media(max-width:640px){.tb-pits,.fb-g{grid-template-columns:1fr;}}
+  </style><div class="tb">
+    <div class="tb-head">${ROAR_LOGO_SVG}<div class="tb-title"><b>First session back</b><span>${dayName(ds)} · after ${m.date} ${m.opponent?'vs '+tupEsc(m.opponent):''}</span></div>${ROAR_LOGO_SVG}</div>
+    ${pl.short?`<div class="fb-ban">SHORT TURNAROUND: ${m.nextDays} days to the next match. SSG sets halved, strides dropped.</div>`:''}
+    <div class="fb-g">
+      <div class="fb-b"><div class="fb-h">BLOCK A · Half group <span>${A.length}</span></div><div class="fb-s">Played ${S.halfMin}–${S.doneMin-1} min. Do Block A, then join the team.</div><div class="fb-l">${list(A,det)}</div></div>
+      <div class="fb-b"><div class="fb-h">BLOCK B · Full group <span>${B.length}</span></div><div class="fb-s">Played 0–${S.halfMin-1} min or unused (and anyone upgraded). Do Block B, then join the team.</div><div class="fb-l">${list(B,det)}</div></div>
+      <div class="fb-b"><div class="fb-h">STARTERS · normal session <span>${St.length}</span></div><div class="fb-s">${pl.within?'Extended recovery warm-up (bike, mobility) while the blocks run.':'Normal session.'}</div><div class="fb-l">${list(St,o=>(o.min!=null?o.min+"'":''))}</div></div>
+      <div class="fb-b"><div class="fb-h">NON-SQUAD <span>${NS.length+J.length}</span></div><div class="fb-s">${NS.length?'Not run yet: give them the full Non-Squad session.':'Non-squad session was run: join the team.'}</div><div class="fb-l">${list(NS.concat(J),o=>o.block==='Join the team'?'join team':'full session')}</div></div>
+    </div>
+    <table class="tb-tbl"><thead><tr><th></th><th>Block A (Half)</th><th>Block B (Full)</th></tr></thead><tbody>
+      <tr><td><b>SSG</b> ${ssg?ssg.fmt+' + GKs, '+ssg.dims:'(too few players)'}</td><td>${ssgSetsA} × ${S.ssgMin} min, ${S.ssgRest} min rest</td><td>${ssgSetsB} × ${S.ssgMin} min, ${S.ssgRest} min rest</td></tr>
+      <tr><td><b>Box sprints</b></td><td>${S.fsbABox?S.fsbABox:'—'}</td><td>${S.fsbBBox?S.fsbBBox:'—'}</td></tr>
+      <tr><td><b>Box-to-box strides</b> (${S.strGo} s)</td><td>${pl.short?'dropped':S.fsbAStr}</td><td>${pl.short?'dropped':S.fsbBStr}</td></tr>
+      <tr><td><b>Est. extra HSR</b></td><td>~${Math.round(S.boxHsr*S.fsbABox+(pl.short?0:S.strHsr*S.fsbAStr))} m</td><td>~${Math.round(S.boxHsr*S.fsbBBox+(pl.short?0:S.strHsr*S.fsbBStr))} m</td></tr></tbody></table>
+    <div class="fb-ban" style="font-weight:600;">Stride rule here: CB −1, W and FW +1, minimum 0. Upgraded = no match-day top-up: Half does Block B; Full does Block B + ${S.fsbUpRet} pitch returns + ${S.fsbUpStr} extra strides.</div>
+    <div class="tb-pits">${pit(tupSsgSvg(pl.ssgPlayers),'Small-sided game',ssg?`${ssg.fmt} + GKs · ${ssg.dims} · ${S.ssgMin} min on / ${S.ssgRest} min off`:'Needs at least 4 players')}${pit(tupPitchSvg('strides'),'Box-to-box strides',`Walk – stride – walk · ~70 m · ${S.strGo} s · rest ${S.strRest} s`)}</div>
+    <div class="tb-foot"><b>Gym:</b> Half and Full groups take normal lower-body loading. Starters get the reduced version${pl.within?' (first session is within '+S.fsbHours+' h of the match)':' if within '+S.fsbHours+' h of the match'}. Goalkeepers: keeper coach.</div></div>`;
+}
+function openTupFsb(){
+  reportKind = 'tupfsb'; mpSetLandscape(false);
+  document.getElementById('rptTrainingControls').style.display = 'none';
+  document.getElementById('reportContent').innerHTML = tupFsbHtml();
+  document.getElementById('overlayReport').classList.add('show');
 }
 // ---- Non-Squad session ----
 function tupSsgSize(n){
@@ -8207,6 +8314,10 @@ function tupSettingsView(){
   <div class="tp-card"><h4>Non-Squad session</h4>
     ${num('nsWarmTd','Warm-up TD (m)')}${num('nsReturns','Pitch returns')}${num('nsBoxes','Box sprints')}${num('nsStrides','Strides (before position change)')}${num('ssgSets','SSG sets')}${num('ssgMin','SSG minutes on')}${num('ssgRest','SSG rest (min)')}${num('ssgMinPlayers','Run SSG with at least (players)')}
     <div class="hint" style="margin:6px 0 0;">SSG size by numbers: 8+ → 4v4 on 30 × 25 m · 6–7 → 3v3 on 25 × 20 m · 4–5 → 2v2 on 20 × 15 m. Your spec said "SSG only if ≥ 8 players" and also gave sizes for 4–7, so the minimum defaults to 4 — set it to 8 for the strict version.</div></div>
+  <div class="tp-card"><h4>First Session Back blocks</h4>
+    ${num('fsbASsg','Block A: SSG sets')}${num('fsbABox','Block A: box sprints')}${num('fsbAStr','Block A: strides')}${num('fsbBSsg','Block B: SSG sets')}${num('fsbBBox','Block B: box sprints')}${num('fsbBStr','Block B: strides')}<br><br>
+    ${num('fsbUpRet','Upgrade (Full): extra pitch returns')}${num('fsbUpStr','Upgrade (Full): extra strides')}${num('fsbHours','"Within" window for starters (hours)')}<br><br>
+    <span style="font-size:11px;color:var(--text-secondary);">Stride modifiers here (minimum 0):</span> ${TUP_POS.map(p=>`<label class="tp-set">${p}<input type="number" value="${S['fsbMod'+p]}" style="width:55px" onchange="tupSetVal('fsbMod${p}',this.value)"></label>`).join('')}</div>
   <div class="tp-card"><h4>Checks</h4>
     ${num('speedPct','Speed check (% of max)')}${num('speedBoxes','Extra box sprints')}${num('mmHigh','m/min too high >')}${num('mmLow','m/min too low <')}${num('mmLowMin','…only if mins ≥')}${num('durDiff','GPS duration diff (min)')}${num('maxOver','Top speed over max by (km/h)')}</div>
   <div class="tp-card"><h4>Positional targets (full-match, working estimates)</h4>
@@ -8227,7 +8338,7 @@ async function renderTupPlan(){
   const host = document.getElementById('tupView');
   if (V==='settings'){ host.innerHTML = `<style>.tp-set{display:inline-flex;flex-direction:column;font-size:11px;color:var(--text-secondary);gap:2px;margin-right:10px;} .tp-set input,.tp-in{border:1px solid var(--border);border-radius:6px;padding:5px 7px;font-size:12.5px;background:var(--surface,#fff);} .tp-card{border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin:0 0 12px;} .tp-card h4{margin:0 0 8px;font-size:13.5px;} .tp-tbl{border-collapse:collapse;width:100%;font-size:12.5px;} .tp-tbl th{background:var(--surface-2,#f3f4f6);padding:7px 8px;text-align:left;font-size:11px;} .tp-tbl td{padding:4px 8px;border-bottom:1px solid var(--border);}</style>` + tupSettingsView(); return; }
   if (V==='nonsquad'){ tupNsView(host); return; }
-  if (V==='fsb'){ host.innerHTML = `<div class="tp-card" style="border:1px dashed var(--border);border-radius:10px;padding:18px;"><b>First Session Back</b> is built after you have reviewed the Non-Squad view.</div>`; return; }
+  if (V==='fsb'){ tupFsbView(host); return; }
   await renderTupMatchDay();
 }
 async function renderTupMatchDay(){
