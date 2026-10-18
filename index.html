@@ -434,7 +434,7 @@
       <span id="saveAllStatus" style="flex:1;text-align:right;white-space:nowrap;">Following the sheet</span>
     </div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-17 23:10</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-18 21:50</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -7891,8 +7891,12 @@ function openRecoveryReport(which){
 // expected HSR/TD, a printable bench card with pitch diagrams, a session timer, and
 // post-session logging that calibrates the per-stride estimates.
 // ============================================================
-const TUP_DEFAULTS = { hsrFixed:80, hsrStride:50, tdFixed:1060, tdStride:140, halfStrides:3, fullStrides:6, doneMin:60, halfMin:30, mods:{CB:-2,FB:0,CM:0,W:1,FW:1}, boxCycle:60 };
-const TUP = { matches:[], cur:'', set:JSON.parse(JSON.stringify(TUP_DEFAULTS)), loaded:false };
+const TUP_DEFAULTS = { hsrFixed:80, hsrStride:50, tdFixed:1060, tdStride:140, halfStrides:3, fullStrides:6, doneMin:60, halfMin:30, mods:{CB:-2,FB:0,CM:0,W:1,FW:1}, boxCycle:60,
+  prepTd:300, retHsr:10, retTd:260, retReps:2, boxHsr:20, boxTd:80, boxReps:3, strHsr:50, strTd:140,
+  retGo:48, retRest:48, strGo:12, strRest:36, speedPct:90, speedBoxes:2, mmHigh:140, mmLow:85, mmLowMin:45, durDiff:5, maxOver:2,
+  avgN:4, shortDays:4, useOwn:false,
+  targets:{CB:{hsr:370,spr:95},FB:{hsr:550,spr:140},CM:{hsr:590,spr:150},W:{hsr:610,spr:190},FW:{hsr:570,spr:190}} };
+const TUP = { matches:[], cur:'', set:JSON.parse(JSON.stringify(TUP_DEFAULTS)), loaded:false, view:'match' };
 const TUP_POS = ['CB','FB','CM','W','FW'];
 const TUP_SESSION = [
   { clock:'0–2', drill:'Prep', layout:'Jog, dynamic mobility, 2 build-ups', target:'–', rest:'–', reps:'All' },
@@ -7905,7 +7909,7 @@ function tupEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/<
 async function tupLoad(){
   if (TUP.loaded) return; TUP.loaded = true;
   try{ const raw = await storageGet('roar-tupplan'); if (raw){ const o = JSON.parse(typeof raw==='string'?raw:(raw.value||'{}'));
-    TUP.matches = o.matches||[]; TUP.cur = o.cur||''; TUP.set = Object.assign(JSON.parse(JSON.stringify(TUP_DEFAULTS)), o.set||{}); TUP.set.mods = Object.assign({}, TUP_DEFAULTS.mods, (o.set||{}).mods||{}); } }catch(e){}
+    TUP.matches = o.matches||[]; TUP.cur = o.cur||''; TUP.set = Object.assign(JSON.parse(JSON.stringify(TUP_DEFAULTS)), o.set||{}); TUP.set.mods = Object.assign({}, TUP_DEFAULTS.mods, (o.set||{}).mods||{}); TUP.set.targets = Object.assign({}, JSON.parse(JSON.stringify(TUP_DEFAULTS.targets)), (o.set||{}).targets||{}); } }catch(e){}
   if (!TUP.matches.length) tupNewMatch(true);
   if (!tupMatch()) TUP.cur = TUP.matches[0].id;
 }
@@ -7934,7 +7938,8 @@ function tupPosCode(raw){
   if (/\b(ST|CF|FW|STRIKER|FORWARD|SS)\b/.test(s)) return 'FW';
   return 'CM';
 }
-function tupGroup(pos, min){
+function tupGroup(pos, min, status){
+  if (status==='Non-squad') return 'Non-Squad';
   if (min==null || min==='' || isNaN(min)) return '';
   if (min >= TUP.set.doneMin) return 'Done';
   if (min >= TUP.set.halfMin) return 'Half';
@@ -7954,14 +7959,152 @@ function tupRoster(m){
     const p = m.players[a.id] || {};
     const pos = p.pos || tupPosCode(a.position);
     const min = (p.min===undefined||p.min===null||p.min==='') ? null : +p.min;
-    const group = tupGroup(pos, min), strides = tupStrides(pos, group);
-    return { id:a.id, name:a.name, pos, min, group, strides, est:tupEst(strides), actual:m.actual[a.id]||{} };
+    const status = p.status || '';
+    const group = tupGroup(pos, min, status), strides = tupStrides(pos, group);
+    const r = { id:a.id, name:a.name, pos, min, status, group, strides, est:tupEst(strides), actual:m.actual[a.id]||{}, gps:p.gps||{}, checked:!!p.checked, maxOverride:(p.maxSpeed==null||p.maxSpeed==='')?null:+p.maxSpeed };
+    r.maxSpeed = r.maxOverride!=null ? r.maxOverride : tupHistMax(a, m.date);
+    r.mpm = (r.gps.td!=null && r.min) ? r.gps.td/r.min : null;
+    r.flags = tupFlags(r);
+    r.speedCheck = (group==='Done') ? tupSpeedCheck(r) : '';
+    return r;
   });
+}
+// ---- Match Day additions: data checks, speed check, positional averages ----
+function tupHistMax(a, exceptDate){
+  let mx = null; (a.gameGps||[]).forEach(g=>{ if (g.date!==exceptDate && g.max_velocity_kmh!=null && (mx==null || g.max_velocity_kmh>mx)) mx = g.max_velocity_kmh; });
+  return mx;
+}
+function tupFlags(r){
+  const S = TUP.set, g = r.gps, out = [];
+  if (g.td==null || r.status==='Non-squad') return out;
+  if (r.min==null) out.push('Minutes missing');
+  else if (r.min===0 && g.td>0) out.push('TD recorded but minutes = 0');
+  else {
+    const mm = g.td/r.min;
+    if (mm > S.mmHigh) out.push('Check the GPS period was trimmed to time on the pitch');
+    else if (mm < S.mmLow && r.min >= S.mmLowMin) out.push('Possible GPS dropout or wrong minutes');
+  }
+  if (g.dur!=null && r.min!=null && Math.abs(g.dur - r.min) > S.durDiff) out.push('GPS file duration differs from minutes played');
+  if (g.top!=null && r.maxSpeed!=null && g.top > r.maxSpeed + S.maxOver) out.push('Check before updating max speed');
+  return out;
+}
+function tupSpeedCheck(r){
+  const S = TUP.set;
+  if (r.gps.top==null || r.maxSpeed==null) return 'Done (speed check needs top speed + max speed)';
+  return r.gps.top < (S.speedPct/100)*r.maxSpeed ? ('+ '+S.speedBoxes+' box sprints') : 'Done';
+}
+function tupPosAvgs(rows){
+  const keys = ['min','td','hsr','mpm','top','spr','acc','dec'];
+  const out = {};
+  TUP_POS.forEach(pos=>{
+    const use = rows.filter(r=>r.pos===pos && r.gps.td!=null && (!r.flags.length || r.checked) && r.status!=='Non-squad');
+    const o = { n:use.length };
+    keys.forEach(k=>{ const vs = use.map(r=> k==='min'?r.min : k==='mpm'?r.mpm : r.gps[k]).filter(v=>v!=null); o[k] = vs.length ? vs.reduce((a,b)=>a+b,0)/vs.length : null; });
+    out[pos] = o;
+  });
+  return out;
+}
+function tupSetGps(id,k,v){
+  const m=tupMatch(); const p = m.players[id] || (m.players[id]={}); const g = p.gps || (p.gps={});
+  g[k] = (v===''||v==null||isNaN(+v)) ? null : +v;
+  tupSave(); tupGpsRefresh(id);
+}
+function tupSetChecked(id,on){ const m=tupMatch(); (m.players[id]||(m.players[id]={})).checked = !!on; tupSave(); tupGpsRefresh(id); }
+function tupSetMax(id,v){ const m=tupMatch(); (m.players[id]||(m.players[id]={})).maxSpeed = (v===''?null:+v); tupSave(); tupRefreshSummary(); tupGpsRefresh(id); }
+function tupGpsRowHtml(r){
+  const g = r.gps, n = (k,w,step)=>`<input class="tp-in" type="number" step="${step||'any'}" min="0" style="width:${w}px" value="${g[k]==null?'':g[k]}" onchange="tupSetGps('${r.id}','${k}',this.value)">`;
+  return `<tr data-id="${r.id}"><td><b>${tupEsc(r.name)}</b></td><td data-c="gpos"></td><td data-c="gmin"></td>
+    <td>${n('td',72)}</td><td>${n('hsr',60)}</td><td data-c="mpm"></td><td>${n('top',56)}</td>
+    <td><input class="tp-in" type="number" step="any" min="0" style="width:56px" value="${r.maxOverride==null?'':r.maxOverride}" placeholder="${r.maxSpeed==null?'':(Math.round(r.maxSpeed*10)/10)}" onchange="tupSetMax('${r.id}',this.value)"></td>
+    <td>${n('spr',56)}</td><td>${n('acc',48)}</td><td>${n('dec',48)}</td><td>${n('dur',52)}</td>
+    <td data-c="flag" style="font-size:11.5px;max-width:230px;"></td><td data-c="chk"></td></tr>`;
+}
+function tupGpsRefresh(id){
+  const m = tupMatch(); const r = tupRoster(m).find(x=>x.id===id); const tr = document.querySelector(`#tupGpsBody tr[data-id="${id}"]`);
+  if (r && tr){
+    const set=(c,h)=>{ const el=tr.querySelector(`[data-c="${c}"]`); if (el) el.innerHTML=h; };
+    set('gpos', r.pos); set('gmin', r.status==='Non-squad' ? '<span style="color:var(--text-muted)">n/s</span>' : (r.min==null?'—':r.min));
+    set('mpm', r.mpm!=null ? `<b>${Math.round(r.mpm*10)/10}</b>` : '—');
+    tr.style.background = r.flags.length ? (r.checked ? '#eef7ee' : '#fff3d6') : '';
+    set('flag', r.flags.length ? r.flags.map(f=>`⚠ ${tupEsc(f)}`).join('<br>') : (r.gps.td!=null?'<span style="color:#3f9b5a">OK</span>':''));
+    set('chk', r.flags.length ? `<label style="cursor:pointer;font-size:11.5px;"><input type="checkbox" ${r.checked?'checked':''} onchange="tupSetChecked('${r.id}',this.checked)"> Data checked</label>` : '');
+  }
+  tupAvgRender();
+}
+function tupAvgRender(){
+  const el = document.getElementById('tupAvgs'); if (!el) return;
+  const m = tupMatch(), rows = tupRoster(m), av = tupPosAvgs(rows);
+  const f = (v,d)=> v==null ? '—' : (d? (Math.round(v*10)/10) : Math.round(v));
+  const flagged = rows.filter(r=>r.flags.length && !r.checked).length;
+  el.innerHTML = `<div class="hint" style="margin:0 0 6px;">Positional averages use only players with GPS entered and no open data flag${flagged?` (<b>${flagged}</b> flagged row${flagged===1?'':'s'} excluded until ticked "Data checked")`:''}. Minutes are not filtered here.</div>
+  <table class="tp-tbl"><thead><tr><th>Position</th><th>n</th><th>Mins</th><th>TD (m)</th><th>HSR (m)</th><th>m/min</th><th>Top speed</th><th>Sprint (m)</th><th>#Acc</th><th>#Dec</th></tr></thead><tbody>
+  ${TUP_POS.map(p=>{ const o=av[p]; return `<tr><td><b>${p}</b></td><td>${o.n}</td><td>${f(o.min)}</td><td>${f(o.td)}</td><td>${f(o.hsr)}</td><td>${f(o.mpm,1)}</td><td>${f(o.top,1)}</td><td>${f(o.spr)}</td><td>${f(o.acc)}</td><td>${f(o.dec)}</td></tr>`; }).join('')}</tbody></table>`;
+}
+// Import the match-report layout: Athlete, Mins, TD (m), HSR (m), Ave m/min, Top Speed (kph), Sprint Dist (m), #Accelerations, #Decelerations
+function tupImportMatchCsv(ev){
+  const f = ev.target.files[0]; if (!f) return; const rd = new FileReader();
+  rd.onload = ()=>{ try{
+    const rows = parseCSV(rd.result), m = tupMatch(); let n=0, miss=[];
+    const pick = (r, re)=>{ for (const k of Object.keys(r)){ if (re.test(k.toLowerCase().replace(/[^a-z#\/]/g,''))) return r[k]; } return undefined; };
+    rows.forEach(r=>{
+      const nm = pick(r,/^(athlete|player|playername|name|playerdisplayname)$/); if (!nm) return;
+      const id = resolvePlayerId(nm); if (!id || !athleteMap[id]){ miss.push(nm); return; }
+      const p = m.players[id] || (m.players[id]={}); const g = p.gps || (p.gps={});
+      const mins = pf(pick(r,/^(mins|minutes|minutesplayed)$/)); if (mins!=null) p.min = Math.round(mins);
+      const set = (k,re)=>{ const v = pf(pick(r,re)); if (v!=null) g[k]=v; };
+      set('td',/^(td|tdm|totaldistance|totaldistancem)$/); set('hsr',/^(hsr|hsrm|hsrdistance)$/); set('top',/^(topspeed|topspeedkph|topspeedkmh|maxspeed)$/);
+      set('spr',/^(sprintdist|sprintdistm|sprint)$/); set('acc',/^(#accelerations|accelerations|acc)$/); set('dec',/^(#decelerations|decelerations|dec)$/);
+      n++;
+    });
+    tupSave(); renderTupPlan(); alert(`Imported GPS for ${n} player${n===1?'':'s'}.`+(miss.length?`\nNot matched: ${miss.slice(0,8).join(', ')}`:''));
+  }catch(e){ alert('Could not read that CSV.'); } };
+  rd.readAsText(f);
+}
+function tupSetView(v){ TUP.view = v; renderTupPlan(); }
+function tupSetTarget(pos,k,v){ TUP.set.targets[pos][k] = +v; tupSave(); }
+function tupSetDerived(k,v){ tupSetVal(k,v); tupDerive(); }
+function tupDerive(){
+  const S = TUP.set;
+  S.hsrFixed = S.retHsr*S.retReps + S.boxHsr*S.boxReps; S.hsrStride = S.strHsr;
+  S.tdFixed = S.prepTd + S.retTd*S.retReps + S.boxTd*S.boxReps; S.tdStride = S.strTd;
+  tupSave(); renderTupPlan();
+}
+function tupSettingsView(){
+  const S = TUP.set;
+  const num = (k,l,w,fn)=>`<label class="tp-set">${l}<input type="number" step="any" value="${S[k]}" style="width:${w||70}px" onchange="${fn||'tupSetVal'}('${k}',this.value)"></label>`;
+  const der = (k,l)=>num(k,l,70,'tupSetDerived');
+  return `<div class="tp-card"><h4>Group cut-offs and strides</h4>
+    ${num('doneMin','Done at (min ≥)')}${num('halfMin','Half at (min ≥)')}${num('halfStrides','Half strides')}${num('fullStrides','Full strides')}<br><br>
+    <span style="font-size:11px;color:var(--text-secondary);">Stride modifiers:</span> ${TUP_POS.map(p=>`<label class="tp-set">${p}<input type="number" value="${S.mods[p]}" style="width:55px" onchange="tupSetMod('${p}',this.value)"></label>`).join('')}</div>
+  <div class="tp-card"><h4>Drill times</h4>${num('retGo','Pitch return (s)')}${num('retRest','Return rest (s)')}${num('strGo','Stride (s)')}${num('strRest','Stride rest (s)')}${num('boxCycle','Box sprint cycle (s)')}
+    <div class="hint" style="margin:6px 0 0;">The session timer reads these.</div></div>
+  <div class="tp-card"><h4>Per-rep estimates (HSR m / TD m incl. walk recovery)</h4>
+    ${der('prepTd','Prep TD')}${der('retHsr','Return HSR')}${der('retTd','Return TD')}${der('retReps','Return reps')}${der('boxHsr','Box sprint HSR')}${der('boxTd','Box sprint TD')}${der('boxReps','Box sprint reps')}${der('strHsr','Stride HSR')}${der('strTd','Stride TD')}
+    <div class="hint" style="margin:6px 0 0;">Fixed blocks now = <b>${Math.round(S.hsrFixed)} m HSR / ${Math.round(S.tdFixed)} m TD</b>, derived from the values above. Calibration "Apply" buttons overwrite the derived numbers directly until a per-rep value is edited again.</div></div>
+  <div class="tp-card"><h4>Checks</h4>
+    ${num('speedPct','Speed check (% of max)')}${num('speedBoxes','Extra box sprints')}${num('mmHigh','m/min too high >')}${num('mmLow','m/min too low <')}${num('mmLowMin','…only if mins ≥')}${num('durDiff','GPS duration diff (min)')}${num('maxOver','Top speed over max by (km/h)')}</div>
+  <div class="tp-card"><h4>Positional targets (full-match, working estimates)</h4>
+    <table class="tp-tbl" style="max-width:380px;"><thead><tr><th>Pos</th><th>HSR (m)</th><th>Sprint (m)</th></tr></thead><tbody>
+    ${TUP_POS.map(p=>`<tr><td><b>${p}</b></td><td><input class="tp-in" type="number" style="width:80px" value="${S.targets[p].hsr}" onchange="tupSetTarget('${p}','hsr',this.value)"></td><td><input class="tp-in" type="number" style="width:80px" value="${S.targets[p].spr}" onchange="tupSetTarget('${p}','spr',this.value)"></td></tr>`).join('')}</tbody></table><br>
+    ${num('avgN','Averaging window (matches)')}${num('shortDays','Short turnaround (days ≤)')}</div>
+  <button class="btn-sm" onclick="tupResetSettings()">Reset all to defaults</button>`;
 }
 // ---- entry view ----
 async function renderTupPlan(){
   const root = document.getElementById('tupRoot'); if (!root) return;
   await tupLoad();
+  const V = TUP.view||'match';
+  const tabs = [['match','Match Day'],['nonsquad','Non-Squad'],['fsb','First Session Back'],['settings','Settings']];
+  root.innerHTML = `<style>.tp-nav{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;} .tp-nav button{border:1px solid var(--border);background:var(--surface,#fff);border-radius:16px;padding:6px 14px;font-size:12.5px;font-weight:600;cursor:pointer;} .tp-nav button.on{background:#F26522;color:#fff;border-color:#F26522;}
+    .tp-NonSquad{background:#6b5aa6}</style>
+    <div class="tp-nav">${tabs.map(t=>`<button class="${V===t[0]?'on':''}" onclick="tupSetView('${t[0]}')">${t[1]}</button>`).join('')}</div><div id="tupView"></div>`;
+  const host = document.getElementById('tupView');
+  if (V==='settings'){ host.innerHTML = `<style>.tp-set{display:inline-flex;flex-direction:column;font-size:11px;color:var(--text-secondary);gap:2px;margin-right:10px;} .tp-set input,.tp-in{border:1px solid var(--border);border-radius:6px;padding:5px 7px;font-size:12.5px;background:var(--surface,#fff);} .tp-card{border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin:0 0 12px;} .tp-card h4{margin:0 0 8px;font-size:13.5px;} .tp-tbl{border-collapse:collapse;width:100%;font-size:12.5px;} .tp-tbl th{background:var(--surface-2,#f3f4f6);padding:7px 8px;text-align:left;font-size:11px;} .tp-tbl td{padding:4px 8px;border-bottom:1px solid var(--border);}</style>` + tupSettingsView(); return; }
+  if (V==='nonsquad' || V==='fsb'){ host.innerHTML = `<div class="tp-card" style="border:1px dashed var(--border);border-radius:10px;padding:18px;"><b>${V==='nonsquad'?'Non-Squad session':'First Session Back'}</b> is built after you have reviewed the Match Day view.</div>`; return; }
+  await renderTupMatchDay();
+}
+async function renderTupMatchDay(){
+  const root = document.getElementById('tupView'); if (!root) return;
   const m = tupMatch(); const rows = tupRoster(m);
   const cnt = g => rows.filter(r=>r.group===g).length;
   const S = TUP.set;
@@ -7979,26 +8122,29 @@ async function renderTupPlan(){
   <div class="tp-bar">
     <label class="tp-set">Date<input type="date" value="${m.date}" onchange="tupMeta('date',this.value)"></label>
     <label class="tp-set">Opponent<input type="text" value="${tupEsc(m.opponent)}" style="width:170px" onchange="tupMeta('opponent',this.value)"></label>
+    <label class="tp-set">Round<input type="text" value="${tupEsc(m.round||'')}" style="width:60px" onchange="tupMeta('round',this.value)"></label>
+    <label class="tp-set">Days to next match<input type="number" min="0" value="${m.nextDays==null?'':m.nextDays}" style="width:70px" onchange="tupMeta('nextDays',this.value===''?null:+this.value)"></label>
     <label class="tp-set">Home / Away<select class="tp-in" onchange="tupMeta('ha',this.value)"><option ${m.ha==='Home'?'selected':''}>Home</option><option ${m.ha==='Away'?'selected':''}>Away</option></select></label>
-    <button class="btn-sm" onclick="tupFillFromGps()" title="Fills minutes from the match GPS on this date">⬇ Fill minutes from match GPS</button>
+    <button class="btn-sm" onclick="tupFillFromGps()" title="Fills minutes and the match GPS numbers for this date">⬇ Fill minutes + GPS from match GPS</button>
     <button class="btn-sm" onclick="tupBlankToZero()" title="Marks every player with blank minutes as unused (0 min, so they do the Full top-up)">Blank = unused (0)</button></div>
   <div class="tp-sum" id="tupSummary"></div>
   <div class="tp-bar"><button class="btn" style="margin-top:0" onclick="openTupBench()">🖨 Bench card (print / phone)</button><button class="btn" style="margin-top:0" onclick="openTupTimer()">⏱ Session timer</button></div>
-  <div style="overflow:auto;max-height:560px;"><table class="tp-tbl"><thead><tr><th>Player</th><th>Position</th><th>Minutes</th><th>Group</th><th>Strides</th><th>Est. HSR (m)</th><th>Est. TD (m)</th><th>Actual HSR (m)</th><th>Actual TD (m)</th><th>HSR/stride</th></tr></thead><tbody id="tupBody">
+  <div style="overflow:auto;max-height:560px;"><table class="tp-tbl"><thead><tr><th>Player</th><th>Position</th><th>Squad status</th><th>Minutes</th><th>Group</th><th>Strides</th><th>Est. HSR (m)</th><th>Est. TD (m)</th><th>Actual HSR (m)</th><th>Actual TD (m)</th><th>HSR/stride</th></tr></thead><tbody id="tupBody">
     ${rows.map(r=>tupRowHtml(r)).join('')}</tbody></table></div>
   <div class="tp-card"><h4>Post-session GPS (STATSports Sonra)</h4><div class="hint" style="margin:0 0 8px;">Type the actual top-up HSR and total distance per player in the table above, or import a Sonra CSV (columns: player name, HSR, total distance).</div>
     <input type="file" accept=".csv" onchange="tupImportCsv(event)"> <div id="tupCalib"></div></div>
-  <details class="tp-card"><summary style="cursor:pointer;font-weight:700;font-size:13.5px;">Settings (all editable)</summary><div style="margin-top:10px;">
-    ${num('hsrFixed','Fixed blocks HSR (m)')}${num('hsrStride','HSR per stride (m)')}${num('tdFixed','Fixed blocks TD (m)')}${num('tdStride','TD per stride (m)')}<br><br>
-    ${num('halfStrides','Half strides')}${num('fullStrides','Full strides')}${num('doneMin','Done at (min ≥)')}${num('halfMin','Half at (min ≥)')}<br><br>
-    <span style="font-size:11px;color:var(--text-secondary);">Stride modifiers:</span> ${TUP_POS.filter(p=>p!=='GK').map(p=>`<label class="tp-set">${p}<input type="number" value="${S.mods[p]}" style="width:55px" onchange="tupSetMod('${p}',this.value)"></label>`).join('')}
-    <br><button class="btn-sm" onclick="tupResetSettings()">Reset to defaults</button> <span class="hint" style="margin:0;">Defaults reproduce Half CM ≈ 230 m HSR / 1.5 km and Full CM ≈ 380 m / 1.9 km.</span></div></details>`;
+  <div class="tp-card"><h4>Match GPS and data checks</h4>
+    <div class="hint" style="margin:0 0 8px;">Enter by hand, fill from the match GPS above, or import a CSV with the match-report columns (Athlete, Mins, TD (m), HSR (m), Ave m/min, Top Speed (kph), Sprint Dist (m), #Accelerations, #Decelerations). Ave m/min is always TD ÷ minutes played. Amber rows are left out of the positional averages until you tick "Data checked". Max speed is each player's best top speed in the dashboard from other matches; type over it to edit.</div>
+    <input type="file" accept=".csv" onchange="tupImportMatchCsv(event)">
+    <div style="overflow:auto;max-height:560px;margin-top:8px;"><table class="tp-tbl"><thead><tr><th>Player</th><th>Pos</th><th>Mins</th><th>TD (m)</th><th>HSR (m)</th><th>m/min</th><th>Top speed</th><th>Max speed</th><th>Sprint (m)</th><th>#Acc</th><th>#Dec</th><th>GPS dur (min)</th><th>Flag</th><th></th></tr></thead><tbody id="tupGpsBody">${rows.map(r=>tupGpsRowHtml(r)).join('')}</tbody></table></div></div>
+  <div class="tp-card"><h4>Positional averages</h4><div id="tupAvgs"></div></div>`;
   tupRefreshSummary(); tupRenderCalib();
 }
 function tupRowHtml(r){
   const a = r.actual;
   return `<tr data-id="${r.id}"><td><b>${tupEsc(r.name)}</b></td>
     <td><select class="tp-in" onchange="tupSetPlayer('${r.id}','pos',this.value)">${TUP_POS.map(p=>`<option ${p===r.pos?'selected':''}>${p}</option>`).join('')}</select></td>
+    <td><select class="tp-in" onchange="tupSetPlayer('${r.id}','status',this.value);renderTupPlan()"><option value=""></option>${['Started','Sub','Unused','Non-squad'].map(x=>`<option ${x===r.status?'selected':''}>${x}</option>`).join('')}</select></td>
     <td><input class="tp-in" type="number" min="0" max="130" style="width:70px" value="${r.min==null?'':r.min}" onchange="tupSetPlayer('${r.id}','min',this.value)"></td>
     <td data-c="g"></td><td data-c="s"></td><td data-c="eh"></td><td data-c="et"></td>
     <td><input class="tp-in" type="number" min="0" style="width:78px" value="${a.hsr==null?'':a.hsr}" onchange="tupSetActual('${r.id}','hsr',this.value)"></td>
@@ -8007,24 +8153,25 @@ function tupRowHtml(r){
 function tupFillRow(id){
   const m = tupMatch(); const r = tupRoster(m).find(x=>x.id===id); const tr = document.querySelector(`#tupBody tr[data-id="${id}"]`); if (!r||!tr) return;
   const set=(c,h)=>{ const el=tr.querySelector(`[data-c="${c}"]`); if (el) el.innerHTML=h; };
-  set('g', `<span class="tp-badge tp-${r.group||'none'}">${r.group||'—'}</span>`);
+  set('g', `<span class="tp-badge tp-${(r.group||'none').replace('-','')}">${r.group||'—'}</span>` + (r.group==='Done' && r.speedCheck && r.speedCheck!=='Done' ? `<div style="font-size:11px;margin-top:2px;"><b>${tupEsc(r.speedCheck)}</b></div>` : ''));
   set('s', r.strides?`<b>${r.strides}</b>`:'—'); set('eh', r.est.hsr!=null?Math.round(r.est.hsr):'—'); set('et', r.est.td!=null?Math.round(r.est.td):'—');
   const hs = (r.actual.hsr!=null && r.strides) ? Math.round((r.actual.hsr - TUP.set.hsrFixed)/r.strides) : null; set('hs', hs!=null?hs:'—');
 }
 function tupRefreshSummary(){
   const m = tupMatch(); const rows = tupRoster(m); rows.forEach(r=>tupFillRow(r.id));
   const c = g=>rows.filter(r=>r.group===g).length, none = rows.filter(r=>!r.group).length;
-  const el = document.getElementById('tupSummary'); if (el) el.innerHTML = ['Full','Half','Done'].map(g=>`<div><span class="tp-badge tp-${g}">${g}</span><b>${c(g)}</b></div>`).join('') + `<div>Not entered<b>${none}</b></div>`;
+  const el = document.getElementById('tupSummary'); if (el) el.innerHTML = ['Full','Half','Done','Non-Squad'].map(g=>`<div><span class="tp-badge tp-${g.replace('-','')}">${g}</span><b>${c(g)}</b></div>`).join('') + `<div>Not entered<b>${none}</b></div>`;
+  rows.forEach(r=>tupGpsRefresh(r.id));
 }
 function tupMeta(k,v){ const m=tupMatch(); m[k]=v; tupSave(); if (k==='date'||k==='opponent'||k==='ha') { /* keep header select label fresh */ const sel=document.querySelector('#tupRoot select.axis-select'); if (sel) sel.innerHTML = TUP.matches.map(x=>`<option value="${x.id}" ${x.id===TUP.cur?'selected':''}>${x.date} ${tupEsc(x.opponent||'(no opponent)')}</option>`).join(''); } }
-function tupSetPlayer(id,k,v){ const m=tupMatch(); const p = m.players[id] || (m.players[id]={}); if (k==='min') p.min = (v===''?null:+v); else p[k]=v; tupSave(); tupRefreshSummary(); tupRenderCalib(); }
+function tupSetPlayer(id,k,v){ const m=tupMatch(); const p = m.players[id] || (m.players[id]={}); if (k==='min') p.min = (v===''?null:+v); else if (k==='status'){ p.status=v; if (v==='Unused' && (p.min==null)) p.min=0; } else p[k]=v; tupSave(); tupRefreshSummary(); tupRenderCalib(); }
 function tupSetActual(id,k,v){ const m=tupMatch(); const a = m.actual[id] || (m.actual[id]={}); a[k] = (v===''?null:+v); tupSave(); tupFillRow(id); tupRenderCalib(); }
 function tupSetVal(k,v){ TUP.set[k] = +v; tupSave(); tupRefreshSummary(); tupRenderCalib(); }
 function tupSetMod(p,v){ TUP.set.mods[p] = +v; tupSave(); tupRefreshSummary(); }
 function tupResetSettings(){ if (!confirm('Reset all top-up settings to the defaults?')) return; TUP.set = JSON.parse(JSON.stringify(TUP_DEFAULTS)); tupSave(); renderTupPlan(); }
 function tupFillFromGps(){
   const m = tupMatch(); let n = 0;
-  Object.values(athleteMap).forEach(a=>{ const g=(a.gameGps||[]).find(x=>x.date===m.date); if (g && g.minutes_played!=null){ (m.players[a.id]||(m.players[a.id]={})).min = Math.round(g.minutes_played); n++; if (!m.opponent && g.opponent) m.opponent=g.opponent; } });
+  Object.values(athleteMap).forEach(a=>{ const g=(a.gameGps||[]).find(x=>x.date===m.date); if (g && g.minutes_played!=null){ const pp=(m.players[a.id]||(m.players[a.id]={})); pp.min = Math.round(g.minutes_played); const gg = pp.gps||(pp.gps={}); if (g.total_distance_m!=null) gg.td=g.total_distance_m; if (g.hsr_distance_m!=null) gg.hsr=g.hsr_distance_m; if (g.max_velocity_kmh!=null) gg.top=g.max_velocity_kmh; if (g.sprint_distance_m!=null) gg.spr=g.sprint_distance_m; if (g.accel_count!=null) gg.acc=g.accel_count; if (g.decel_count!=null) gg.dec=g.decel_count; n++; if (!m.opponent && g.opponent) m.opponent=g.opponent; } });
   tupSave(); renderTupPlan(); if (!n) alert('No match GPS found on '+m.date+'.');
 }
 function tupBlankToZero(){ const m=tupMatch(); tupRoster(m).forEach(r=>{ if (r.min==null && r.pos!=='GK'){ (m.players[r.id]||(m.players[r.id]={})).min = 0; } }); tupSave(); renderTupPlan(); }
@@ -8143,8 +8290,8 @@ function openTupBench(){
 const TUPT = { t0:0, acc:0, run:false, iv:null, mute:false, lastBeep:-1, ctx:null };
 function tupTimerBlocks(){ // seconds from start
   const S=TUP.set;
-  return [ { name:'Prep', start:0, end:120, reps:0 }, { name:'Pitch returns', start:120, end:300, reps:2, cycle:96, go:48 }, { name:'Box sprints', start:300, end:480, reps:3, cycle:S.boxCycle||60, go:10 },
-    { name:'Box-to-box strides', start:480, end:840, reps:7, cycle:48, go:12 }, { name:'Buffer (GPS off)', start:840, end:900, reps:0 } ];
+  return [ { name:'Prep', start:0, end:120, reps:0 }, { name:'Pitch returns', start:120, end:300, reps:2, cycle:(S.retGo+S.retRest)||96, go:S.retGo||48 }, { name:'Box sprints', start:300, end:480, reps:3, cycle:S.boxCycle||60, go:10 },
+    { name:'Box-to-box strides', start:480, end:840, reps:7, cycle:(S.strGo+S.strRest)||48, go:S.strGo||12 }, { name:'Buffer (GPS off)', start:840, end:900, reps:0 } ];
 }
 function tupBeep(n){
   if (TUPT.mute) return; try{ if (!TUPT.ctx) TUPT.ctx = new (window.AudioContext||window.webkitAudioContext)();
