@@ -434,7 +434,7 @@
       <span id="saveAllStatus" style="flex:1;text-align:right;white-space:nowrap;">Following the sheet</span>
     </div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-18 22:20</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-18 23:05</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -7894,7 +7894,7 @@ function openRecoveryReport(which){
 const TUP_DEFAULTS = { hsrFixed:80, hsrStride:50, tdFixed:1060, tdStride:140, halfStrides:3, fullStrides:6, doneMin:60, halfMin:30, mods:{CB:-2,FB:0,CM:0,W:1,FW:1}, boxCycle:60,
   prepTd:300, retHsr:10, retTd:260, retReps:2, boxHsr:20, boxTd:80, boxReps:3, strHsr:50, strTd:140,
   retGo:48, retRest:48, strGo:12, strRest:36, speedPct:90, speedBoxes:2, mmHigh:140, mmLow:85, mmLowMin:45, durDiff:5, maxOver:2,
-  avgN:4, shortDays:4, useOwn:false,
+  avgN:4, shortDays:4, useOwn:false, nsReturns:3, nsBoxes:4, nsStrides:8, nsWarmTd:600, ssgSets:4, ssgMin:3, ssgRest:2, ssgMinPlayers:4,
   targets:{CB:{hsr:370,spr:95},FB:{hsr:550,spr:140},CM:{hsr:590,spr:150},W:{hsr:610,spr:190},FW:{hsr:570,spr:190}} };
 const TUP = { matches:[], cur:'', set:JSON.parse(JSON.stringify(TUP_DEFAULTS)), loaded:false, view:'match' };
 const TUP_POS = ['CB','FB','CM','W','FW'];
@@ -8003,6 +8003,94 @@ function tupSheetStatusHtml(m){
   const msg = info.key ? `<span style="color:#3f9b5a"><b>Found:</b> “${tupEsc(info.key)}” on ${m.date} — ${Object.values(m.actual).filter(x=>x.src==='sheet').length} players filled from the GPS sheet.</span>`
     : (names.length ? `<span style="color:#b26a00"><b>No “top up” session found</b> in the GPS sheet for ${m.date}. Pick the right one from the list, or check the session was uploaded.</span>` : `<span style="color:#b26a00"><b>No training GPS in the sheet for ${m.date} yet.</b> Upload the Sonra export to the sheet, then sync.</span>`);
   return `<div style="margin-bottom:8px;">${msg}</div><div class="tp-bar">${sel}<button class="btn-sm" onclick="tupPullNow(true)">↻ Re-pull from GPS sheet</button></div>`;
+}
+// ---- Non-Squad session ----
+function tupSsgSize(n){
+  if (n >= 8) return { per:4, fmt:'4v4', dims:'30 × 25 m', w:30, h:25 };
+  if (n >= 6) return { per:3, fmt:'3v3', dims:'25 × 20 m', w:25, h:20 };
+  if (n >= 4) return { per:2, fmt:'2v2', dims:'20 × 15 m', w:20, h:15 };
+  return null;
+}
+function tupNsPlayers(m){
+  const S = TUP.set;
+  return tupRoster(m).filter(r=>r.status==='Non-squad').map(r=>{
+    const strides = Math.max(1, S.nsStrides + (+S.mods[r.pos]||0));
+    const hsr = S.retHsr*S.nsReturns + S.boxHsr*S.nsBoxes + S.strHsr*strides;
+    const td = S.nsWarmTd + S.retTd*S.nsReturns + S.boxTd*S.nsBoxes + S.strTd*strides;
+    return Object.assign({}, r, { nsStrides:strides, nsHsr:hsr, nsTd:td });
+  });
+}
+function tupNsSession(n){
+  const S = TUP.set, ssg = tupSsgSize(n), useSsg = !!ssg && n >= S.ssgMinPlayers;
+  const rows = [
+    { block:'Warm-up', content:'RAMP, accel-themed: marches → broad jump & stick → bound & stick → submax accels', amt:`10 min (~${S.nsWarmTd} m TD)` },
+    { block:'Pitch returns', content:`${S.retGo} s, rest ${S.retRest} s`, amt:`${S.nsReturns} reps` },
+    { block:'Box sprints', content:`Max effort, walk back + ${S.boxCycle} s`, amt:`${S.nsBoxes} reps` },
+    { block:'Box-to-box strides', content:`${S.strGo} s, rest ${S.strRest} s`, amt:`${S.nsStrides} reps (CB ${S.mods.CB}, W/FW +${S.mods.W})` }
+  ];
+  if (useSsg) rows.push({ block:'SSG', content:`${ssg.fmt} + GKs, ${ssg.dims}, max intensity`, amt:`${S.ssgSets} × ${S.ssgMin} min, ${S.ssgRest} min rest` });
+  else rows.push({ block:'SSG', content: n? 'Not enough players for an SSG today' : '—', amt:'—' });
+  rows.push({ block:'Gym (optional)', content:'Hinge-dominant or lower-body strength day', amt:'—' });
+  return { rows, ssg, useSsg };
+}
+function tupSsgSvg(n){
+  const ssg = tupSsgSize(n) || tupSsgSize(8), id = ++TUP_SVG_N, P = tupPitchBase(id), {X,Y,W,H,ox,oy} = P; let g = P.g;
+  const x0 = 62, y0 = 34 - ssg.h/2, x1 = x0 + ssg.w, y1 = y0 + ssg.h, T = 'style="paint-order:stroke;stroke:#1b5e34;stroke-width:3.5px;stroke-linejoin:round;"';
+  g += `<rect x="${X(x0)}" y="${Y(y0)}" width="${ssg.w*4}" height="${ssg.h*4}" fill="#ffe066" opacity=".22"/><rect x="${X(x0)}" y="${Y(y0)}" width="${ssg.w*4}" height="${ssg.h*4}" fill="none" stroke="#ffe066" stroke-width="2.5" stroke-dasharray="7 4"/>`;
+  [[x0-1.2,'l'],[x1,'r']].forEach(([gx])=>{ g += `<rect x="${X(gx)}" y="${Y(34-2)}" width="${1.2*4}" height="${4*4}" fill="#fff" stroke="#1f3a5f" stroke-width="1.5"/>`; });
+  for (let i=0;i<ssg.per;i++){
+    const ya = y0 + (i+1)*ssg.h/(ssg.per+1);
+    g += `<circle cx="${X(x0+ssg.w*0.35)}" cy="${Y(ya)}" r="5.5" fill="#fff" stroke="#1f3a5f" stroke-width="2"/>`;
+    g += `<circle cx="${X(x0+ssg.w*0.65)}" cy="${Y(ya)}" r="5.5" fill="#1f3a5f" stroke="#fff" stroke-width="2"/>`;
+  }
+  g += `<text ${T} x="${X((x0+x1)/2)}" y="${Y(y0)-6}" font-size="15" font-weight="800" fill="#fff" text-anchor="middle">${ssg.w} m</text>`;
+  g += `<text ${T} x="${X(x1)+8}" y="${Y(34)+5}" font-size="15" font-weight="800" fill="#fff">${ssg.h} m</text>`;
+  g += `<text ${T} x="${X(40)}" y="${Y(58)}" font-size="17" font-weight="800" fill="#fff" text-anchor="middle">${ssg.fmt} + GKs · ${ssg.dims}</text><text ${T} x="${X(40)}" y="${Y(64)}" font-size="15" font-weight="700" fill="#fff" text-anchor="middle">${TUP.set.ssgMin} min on / ${TUP.set.ssgRest} min off</text>`;
+  return `<svg viewBox="0 0 ${W+2*ox} ${H+2*oy}" width="100%" style="display:block;max-width:100%;">${g}</svg>`;
+}
+function tupNsHtml(){
+  const m = tupMatch(), S = TUP.set, pl = tupNsPlayers(m).sort((a,b)=>a.name.localeCompare(b.name)), n = pl.length, ses = tupNsSession(n);
+  const pit = (svg,t,l)=>`<div class="tb-pit"><div class="tb-pt">${t}</div>${svg}<div class="tb-pl">${l}</div></div>`;
+  return `<style>
+    .tb{font-family:Inter,system-ui,sans-serif;color:#111;font-size:12px;} .tb-head{display:flex;align-items:center;justify-content:space-between;border-bottom:3px solid #111;padding-bottom:6px;margin-bottom:8px;} .tb-head .rpt-logo{height:46px;width:auto;}
+    .tb-title{text-align:center;flex:1;} .tb-title b{display:block;font-size:20px;text-transform:uppercase;letter-spacing:.03em;} .tb-title span{font-size:12.5px;color:#374151;}
+    .tb-tbl{width:100%;border-collapse:collapse;font-size:11px;margin-bottom:8px;} .tb-tbl th{background:#111;color:#fff;padding:4px 6px;text-align:left;font-size:10.5px;} .tb-tbl td{border:1px solid #9ca3af;padding:3px 6px;}
+    .tb-pl2{display:flex;flex-wrap:wrap;gap:4px 10px;border:2px solid #111;border-radius:8px;padding:6px 8px;margin-bottom:8px;} .tb-pl2 span{font-size:12px;} .tb-pl2 b{margin-left:3px;}
+    .tb-pits{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;} .tb-pit{border:1px solid #9ca3af;border-radius:8px;padding:5px;} .tb-pt{font-weight:800;font-size:11.5px;margin-bottom:2px;} .tb-pl{font-size:10.5px;color:#374151;margin-top:3px;}
+    .tb-cue{border:2px solid #111;border-radius:8px;padding:6px 10px;margin:8px 0;font-size:12px;font-weight:600;} .tb-foot{font-size:9.8px;color:#4b5563;margin-top:6px;}
+    @media(max-width:640px){.tb-pits{grid-template-columns:1fr;}}
+  </style><div class="tb">
+    <div class="tb-head">${ROAR_LOGO_SVG}<div class="tb-title"><b>Non-squad session</b><span>${m.date} · ${m.ha==='Away'?'Away':'Home'} ${m.opponent?'vs '+tupEsc(m.opponent):''} · ~40 min</span></div>${ROAR_LOGO_SVG}</div>
+    <div class="tb-pl2"><b style="margin:0 6px 0 0;">Players (${n}) — strides in brackets:</b>${n?pl.map(r=>`<span>${tupEsc(r.name)} <b>(${r.nsStrides})</b></span>`).join(''):'<span>none marked Non-squad</span>'}</div>
+    <table class="tb-tbl"><thead><tr><th>Block</th><th>Content</th><th>Reps / time</th></tr></thead><tbody>${ses.rows.map(r=>`<tr><td><b>${r.block}</b></td><td>${r.content}</td><td>${r.amt}</td></tr>`).join('')}</tbody></table>
+    <div class="tb-cue">Make the ${S.retGo} s and the ${S.strGo} s. If you miss one, still go on the next beep.</div>
+    <div class="tb-pits">${pit(tupPitchSvg('returns'),'1. Pitch returns',`Goal line → goal line and back · ~210 m · ${S.retGo} s · rest ${S.retRest} s`)}${pit(tupPitchSvg('sprints'),'2. Box sprints',`Across the box · ~40 m · max effort · walk back + ${S.boxCycle} s`)}${pit(tupPitchSvg('strides'),'3. Box-to-box strides',`Walk – stride – walk · ~70 m · ${S.strGo} s · rest ${S.strRest} s`)}${pit(tupSsgSvg(n),'4. Small-sided game',ses.useSsg?`${ses.ssg.fmt} + GKs · ${ses.ssg.dims} · ${S.ssgMin} min on / ${S.ssgRest} min off · ${S.ssgSets} sets`:'Needs at least '+S.ssgMinPlayers+' players')}</div>
+    <div class="tb-foot">SSG size by numbers: 8+ → 4v4 (30 × 25 m) · 6–7 → 3v3 (25 × 20 m) · 4–5 → 2v2 (20 × 15 m). Solid dots and hollow dots are the two teams. Dashed lines = run, dotted = walk.</div></div>`;
+}
+function openTupNs(){
+  reportKind = 'tupns'; mpSetLandscape(false);
+  document.getElementById('rptTrainingControls').style.display = 'none';
+  document.getElementById('reportContent').innerHTML = tupNsHtml();
+  document.getElementById('overlayReport').classList.add('show');
+}
+function tupNsSet(k,v){ const m=tupMatch(); m[k]=v; tupSave(); renderTupPlan(); }
+function tupNsView(host){
+  const m = tupMatch(), pl = tupNsPlayers(m).sort((a,b)=>a.name.localeCompare(b.name)), n = pl.length, ses = tupNsSession(n), S = TUP.set;
+  const cm = { hsr:S.retHsr*S.nsReturns+S.boxHsr*S.nsBoxes+S.strHsr*S.nsStrides, td:S.nsWarmTd+S.retTd*S.nsReturns+S.boxTd*S.nsBoxes+S.strTd*S.nsStrides };
+  host.innerHTML = `<style>.tp-set{display:inline-flex;flex-direction:column;font-size:11px;color:var(--text-secondary);gap:2px;margin-right:10px;} .tp-set input,.tp-in{border:1px solid var(--border);border-radius:6px;padding:5px 7px;font-size:12.5px;background:var(--surface,#fff);}
+    .tp-tbl{border-collapse:collapse;width:100%;font-size:12.5px;} .tp-tbl th{background:var(--surface-2,#f3f4f6);padding:7px 8px;text-align:left;font-size:11px;} .tp-tbl td{padding:4px 8px;border-bottom:1px solid var(--border);} .tp-card{border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin:0 0 12px;} .tp-card h4{margin:0 0 8px;font-size:13.5px;} .tp-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px;}</style>
+    <div class="tp-bar"><b style="font-size:14px;">Non-Squad session</b><span style="font-size:12px;color:var(--text-secondary);">for the match ${m.date}${m.opponent?' vs '+tupEsc(m.opponent):''} (change the match on the Match Day tab)</span></div>
+    <div class="tp-card"><h4>Who is in it (${n})</h4>
+      ${n ? `<table class="tp-tbl"><thead><tr><th>Player</th><th>Pos</th><th>Strides</th><th>Est. HSR (m)</th><th>Est. TD (m)</th></tr></thead><tbody>${pl.map(r=>`<tr><td><b>${tupEsc(r.name)}</b></td><td>${r.pos}</td><td>${r.nsStrides}</td><td>${Math.round(r.nsHsr)}</td><td>${Math.round(r.nsTd)}</td></tr>`).join('')}</tbody></table>`
+        : `<div class="hint" style="margin:0;">Nobody yet. On the Match Day tab set <b>Squad status = Non-squad</b> for each player who wasn't selected, and they appear here.</div>`}
+      <div class="hint" style="margin:8px 0 0;">Estimates before the SSG. A CM comes to ≈ ${Math.round(cm.hsr)} m HSR / ${(cm.td/1000).toFixed(1)} km TD (HSR is only the running blocks; the SSG adds more).</div></div>
+    <div class="tp-card"><h4>Session</h4><table class="tp-tbl"><thead><tr><th>Block</th><th>Content</th><th>Reps / time</th></tr></thead><tbody>${ses.rows.map(r=>`<tr><td><b>${r.block}</b></td><td>${r.content}</td><td>${r.amt}</td></tr>`).join('')}</tbody></table>
+      <div class="hint" style="margin:8px 0 0;">Run on match day at the training ground, or MD+1 if that isn't possible. Coached by an intern from the printed card.</div></div>
+    <div class="tp-card"><h4>Was it run?</h4>
+      <label class="tp-set">Status<select class="tp-in" onchange="tupNsSet('nsStatus',this.value)">${['Planned','Done','Skipped'].map(x=>`<option ${((m.nsStatus||'Planned')===x)?'selected':''}>${x}</option>`).join('')}</select></label>
+      <label class="tp-set">Date run<input type="date" class="tp-in" value="${m.nsDate||''}" onchange="tupNsSet('nsDate',this.value)"></label>
+      <div class="hint" style="margin:6px 0 0;">First Session Back uses this: if it was run, non-squad players just join the team; if not, they are given this session.</div></div>
+    <div class="tp-bar"><button class="btn" style="margin-top:0" onclick="openTupNs()">🖨 Non-Squad card (print / phone)</button></div>`;
 }
 // ---- Match Day additions: data checks, speed check, positional averages ----
 function tupHistMax(a, exceptDate){
@@ -8116,6 +8204,9 @@ function tupSettingsView(){
   <div class="tp-card"><h4>Per-rep estimates (HSR m / TD m incl. walk recovery)</h4>
     ${der('prepTd','Prep TD')}${der('retHsr','Return HSR')}${der('retTd','Return TD')}${der('retReps','Return reps')}${der('boxHsr','Box sprint HSR')}${der('boxTd','Box sprint TD')}${der('boxReps','Box sprint reps')}${der('strHsr','Stride HSR')}${der('strTd','Stride TD')}
     <div class="hint" style="margin:6px 0 0;">Fixed blocks now = <b>${Math.round(S.hsrFixed)} m HSR / ${Math.round(S.tdFixed)} m TD</b>, derived from the values above. Calibration "Apply" buttons overwrite the derived numbers directly until a per-rep value is edited again.</div></div>
+  <div class="tp-card"><h4>Non-Squad session</h4>
+    ${num('nsWarmTd','Warm-up TD (m)')}${num('nsReturns','Pitch returns')}${num('nsBoxes','Box sprints')}${num('nsStrides','Strides (before position change)')}${num('ssgSets','SSG sets')}${num('ssgMin','SSG minutes on')}${num('ssgRest','SSG rest (min)')}${num('ssgMinPlayers','Run SSG with at least (players)')}
+    <div class="hint" style="margin:6px 0 0;">SSG size by numbers: 8+ → 4v4 on 30 × 25 m · 6–7 → 3v3 on 25 × 20 m · 4–5 → 2v2 on 20 × 15 m. Your spec said "SSG only if ≥ 8 players" and also gave sizes for 4–7, so the minimum defaults to 4 — set it to 8 for the strict version.</div></div>
   <div class="tp-card"><h4>Checks</h4>
     ${num('speedPct','Speed check (% of max)')}${num('speedBoxes','Extra box sprints')}${num('mmHigh','m/min too high >')}${num('mmLow','m/min too low <')}${num('mmLowMin','…only if mins ≥')}${num('durDiff','GPS duration diff (min)')}${num('maxOver','Top speed over max by (km/h)')}</div>
   <div class="tp-card"><h4>Positional targets (full-match, working estimates)</h4>
@@ -8135,7 +8226,8 @@ async function renderTupPlan(){
     <div class="tp-nav">${tabs.map(t=>`<button class="${V===t[0]?'on':''}" onclick="tupSetView('${t[0]}')">${t[1]}</button>`).join('')}</div><div id="tupView"></div>`;
   const host = document.getElementById('tupView');
   if (V==='settings'){ host.innerHTML = `<style>.tp-set{display:inline-flex;flex-direction:column;font-size:11px;color:var(--text-secondary);gap:2px;margin-right:10px;} .tp-set input,.tp-in{border:1px solid var(--border);border-radius:6px;padding:5px 7px;font-size:12.5px;background:var(--surface,#fff);} .tp-card{border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin:0 0 12px;} .tp-card h4{margin:0 0 8px;font-size:13.5px;} .tp-tbl{border-collapse:collapse;width:100%;font-size:12.5px;} .tp-tbl th{background:var(--surface-2,#f3f4f6);padding:7px 8px;text-align:left;font-size:11px;} .tp-tbl td{padding:4px 8px;border-bottom:1px solid var(--border);}</style>` + tupSettingsView(); return; }
-  if (V==='nonsquad' || V==='fsb'){ host.innerHTML = `<div class="tp-card" style="border:1px dashed var(--border);border-radius:10px;padding:18px;"><b>${V==='nonsquad'?'Non-Squad session':'First Session Back'}</b> is built after you have reviewed the Match Day view.</div>`; return; }
+  if (V==='nonsquad'){ tupNsView(host); return; }
+  if (V==='fsb'){ host.innerHTML = `<div class="tp-card" style="border:1px dashed var(--border);border-radius:10px;padding:18px;"><b>First Session Back</b> is built after you have reviewed the Non-Squad view.</div>`; return; }
   await renderTupMatchDay();
 }
 async function renderTupMatchDay(){
