@@ -434,7 +434,7 @@
       <span id="saveAllStatus" style="flex:1;text-align:right;white-space:nowrap;">Following the sheet</span>
     </div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-19 11:20</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-19 12:05</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -3998,7 +3998,14 @@ function openPlayerDrillReport(aid, dateStr){
   mpSetLandscape(false);
   document.getElementById('rptTrainingControls').style.display = 'none';
   document.getElementById('reportContent').innerHTML = buildPlayerDrillReportHtml(a, dateStr);
+  pdrApplyHide();
   document.getElementById('overlayReport').classList.add('show');
+}
+const PDR_METRICS = [['dist','Distance'],['rate','Work rate'],['hsr','HSR / HID'],['spr','Sprint (SD)'],['spd','Top speed'],['acc','Accelerations'],['dec','Decelerations'],['dur','Duration'],['adc','Accel/Decel (drills)'],['dpm','Dist/min'],['hpm','HSR/min'],['apm','Accel/Decel per min'],['avg','Squad average'],['kpi','Headline cards'],['sum','Session summary']];
+function pdrApplyHide(){
+  const hidden = [...document.querySelectorAll('.pdr-ctl input[type=checkbox]')].filter(x=>!x.checked).map(x=>x.dataset.k);
+  let el = document.getElementById('pdrHideCss'); if (!el){ el = document.createElement('style'); el.id='pdrHideCss'; document.head.appendChild(el); }
+  el.textContent = hidden.map(k=>`.pdr .m-${k}{display:none !important}`).join('\n');
 }
 function buildPlayerDrillReportHtml(a, dateStr){
   const mates = Object.values(athleteMap).filter(p=>p.gender===a.gender);
@@ -4006,7 +4013,6 @@ function buildPlayerDrillReportHtml(a, dateStr){
   const hdr = (sub)=>`<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">${tupEsc(a.name)}</div><div class="rpt-sub">${sub}</div></div>${ROAR_LOGO_SVG}</div>`;
   if (!mine.playerTotals.length) return hdr(`Brisbane Roar · ${dateStr}`) + `<p style="padding:20px 4px;color:var(--text-muted);">No training GPS for ${tupEsc(a.name)} on ${dateStr}.</p>`;
   const t = mine.playerTotals[0]; t.workRate = t.duration ? t.distance/t.duration : null;
-  // squad average for the same day (same exclusions as the squad report: No GPS / Rehab players are left out)
   const sq = daySquadBreakdown(mates, dateStr), st = participationStatus(mates, dateStr, sq.playerTotals), stBy = {}; st.forEach(x=>stBy[x.id]=x.label);
   const el = sq.playerTotals.filter(x=>stBy[x.id]!=='No GPS' && stBy[x.id]!=='Rehab'), n = el.length||1;
   const sum = k => el.reduce((s,x)=>s+(x[k]||0),0)/n;
@@ -4017,30 +4023,35 @@ function buildPlayerDrillReportHtml(a, dateStr){
   const labelRow = rowsToday.find(e=>e.session_label && !sessionTitleIsJustDate(e.session_label));
   const meta = SESSION_META[dateStr] || {};
   const sessLabel = meta.sessionLabel || (labelRow ? labelRow.session_label : '');
-  const kpi = (icon,label,val,sq2)=>`<div class="kpi-card">${icon}<div class="kpi-card-label">${label}</div><div class="kpi-card-value">${val}</div><div class="kpi-card-sub">Squad average ${sq2}</div></div>`;
-  let html = hdr(`DATE: ${dateStr}${sessLabel?'&nbsp;&nbsp;SESSION: '+tupEsc(sessLabel):''}`) + `
-  <div class="rpt-conditions"><span>☀ Conditions: <b>${tupEsc(meta.conditions||'—')}</b></span><span>🌡 Temperature: <b>${meta.temperature?tupEsc(meta.temperature)+'°':'—'}</b></span><span>⏱ Duration: <b>${fmt(t.duration)}min</b></span></div>
+  const E = (v, cls)=>`<td class="${cls||''}" contenteditable="true" spellcheck="false">${v}</td>`;
+  const kpi = (icon,label,val,sq2,k)=>`<div class="kpi-card m-kpi m-${k}">${icon}<div class="kpi-card-label">${label}</div><div class="kpi-card-value" contenteditable="true" spellcheck="false">${val}</div><div class="kpi-card-sub m-avg">Squad average ${sq2}</div></div>`;
+  const ctl = `<div class="pdr-ctl no-print"><style>.pdr-ctl{background:#fff4ec;border:1px solid #f2c9ad;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:12px;} .pdr-ctl label{display:inline-block;margin:2px 12px 2px 0;cursor:pointer;} .pdr [contenteditable=true]{outline:1px dashed #d8dde5;outline-offset:1px;} .pdr [contenteditable=true]:focus{outline:2px solid #F26522;background:#fff8f2;} .pdr-note:empty:before{content:'Add a note for the player (optional, prints if filled)';color:#9ca3af;} @media print{ .pdr [contenteditable=true]{outline:none !important;background:none !important;} .pdr-note:empty{display:none;} }</style>
+    <b>Edit before printing:</b> click any number or the note to change it (edits are not saved). Untick anything you don't want on the page.<br>${PDR_METRICS.map(m=>`<label><input type="checkbox" data-k="${m[0]}" checked onchange="pdrApplyHide()"> ${m[1]}</label>`).join('')}
+    <br><button class="btn-sm" onclick="document.getElementById('reportContent').innerHTML=buildPlayerDrillReportHtml(athleteMap['${a.id}'],'${dateStr}');pdrApplyHide();">↺ Reset edits</button></div>`;
+  let html = `<div class="pdr">` + ctl + hdr(`DATE: ${dateStr}${sessLabel?'&nbsp;&nbsp;SESSION: '+tupEsc(sessLabel):''}`) + `
+  <div class="rpt-conditions"><span>☀ Conditions: <b>${tupEsc(meta.conditions||'—')}</b></span><span>🌡 Temperature: <b>${meta.temperature?tupEsc(meta.temperature)+'°':'—'}</b></span><span class="m-dur">⏱ Duration: <b contenteditable="true" spellcheck="false">${fmt(t.duration)}min</b></span></div>
   <div class="kpi-cards">
-    ${kpi(KPI_ICONS.distance,'Total Distance (m)',fmt(t.distance),fmt(sqa.distance))}
-    ${kpi(KPI_ICONS.workRate,'Work Rate (m/min)',fmt(t.workRate),fmt(sqa.workRate))}
-    ${kpi(KPI_ICONS.hid,'HID (m)',fmt(t.hsr),fmt(sqa.hsr))}
-    ${kpi(KPI_ICONS.sprint,'SD (m)',fmt(t.sprint),fmt(sqa.sprint))}
+    ${kpi(KPI_ICONS.distance,'Total Distance (m)',fmt(t.distance),fmt(sqa.distance),'dist')}
+    ${kpi(KPI_ICONS.workRate,'Work Rate (m/min)',fmt(t.workRate),fmt(sqa.workRate),'rate')}
+    ${kpi(KPI_ICONS.hid,'HID (m)',fmt(t.hsr),fmt(sqa.hsr),'hsr')}
+    ${kpi(KPI_ICONS.sprint,'SD (m)',fmt(t.sprint),fmt(sqa.sprint),'spr')}
   </div>
-  <div class="rpt-section-title">Session summary</div>
-  <table class="rpt-table"><thead><tr><th></th><th>Training Time (min)</th><th>Total Distance (m)</th><th>Work Rate (m/min)</th><th>HID (&gt;19.8kph)</th><th>SD (&gt;25.2kph)</th><th>Speed (kph)</th><th>Acc (&gt;4m/s)</th><th>Dec (&gt;4m/s)</th></tr></thead><tbody>
-    <tr><td class="lbl">${tupEsc(a.name)}</td><td>${fmt(t.duration)}</td><td>${fmt(t.distance)}</td><td>${fmt(t.workRate)}</td><td>${fmt(t.hsr)}</td><td>${fmt(t.sprint)}</td><td>${t.maxVel!=null?fmt(t.maxVel):'—'}</td><td>${fmt(t.accel)}</td><td>${fmt(t.decel)}</td></tr>
-    <tr class="mdr-avg-row"><td class="lbl">Squad average</td><td>${fmt(sqa.duration)}</td><td>${fmt(sqa.distance)}</td><td>${fmt(sqa.workRate)}</td><td>${fmt(sqa.hsr)}</td><td>${fmt(sqa.sprint)}</td><td>${sqa.maxVel!=null?fmt(sqa.maxVel):'—'}</td><td>${fmt(sqa.accel)}</td><td>${fmt(sqa.decel)}</td></tr></tbody></table>`;
+  <div class="m-sum"><div class="rpt-section-title">Session summary</div>
+  <table class="rpt-table"><thead><tr><th></th><th class="m-dur">Training Time (min)</th><th class="m-dist">Total Distance (m)</th><th class="m-rate">Work Rate (m/min)</th><th class="m-hsr">HID (&gt;19.8kph)</th><th class="m-spr">SD (&gt;25.2kph)</th><th class="m-spd">Speed (kph)</th><th class="m-acc">Acc (&gt;4m/s)</th><th class="m-dec">Dec (&gt;4m/s)</th></tr></thead><tbody>
+    <tr><td class="lbl">${tupEsc(a.name)}</td>${E(fmt(t.duration),'m-dur')}${E(fmt(t.distance),'m-dist')}${E(fmt(t.workRate),'m-rate')}${E(fmt(t.hsr),'m-hsr')}${E(fmt(t.sprint),'m-spr')}${E(t.maxVel!=null?fmt(t.maxVel):'—','m-spd')}${E(fmt(t.accel),'m-acc')}${E(fmt(t.decel),'m-dec')}</tr>
+    <tr class="mdr-avg-row m-avg"><td class="lbl">Squad average</td>${E(fmt(sqa.duration),'m-dur')}${E(fmt(sqa.distance),'m-dist')}${E(fmt(sqa.workRate),'m-rate')}${E(fmt(sqa.hsr),'m-hsr')}${E(fmt(sqa.sprint),'m-spr')}${E(sqa.maxVel!=null?fmt(sqa.maxVel):'—','m-spd')}${E(fmt(sqa.accel),'m-acc')}${E(fmt(sqa.decel),'m-dec')}</tr></tbody></table></div>`;
   const drillRow = (label, d)=>{
     const dist = d.distance, hsr = d.hsr, ad = d.accelDecel, dur = d.duration;
-    return `<tr><td class="lbl">${tupEsc(label)}</td><td>${fmt(dur)} min</td><td>${fmt(dist)} m</td><td>${fmt(hsr)} m</td><td>${fmt(ad)}</td><td>${dur?fmt(dist/dur):'—'} m/min</td><td>${dur?fmt(hsr/dur):'—'} m/min</td><td>${dur?fmt(ad/dur):'—'}</td></tr>`;
+    return `<tr><td class="lbl" contenteditable="true" spellcheck="false">${tupEsc(label)}</td>${E(fmt(dur)+' min','m-dur')}${E(fmt(dist)+' m','m-dist')}${E(fmt(hsr)+' m','m-hsr')}${E(fmt(ad),'m-adc')}${E((dur?fmt(dist/dur):'—')+' m/min','m-dpm')}${E((dur?fmt(hsr/dur):'—')+' m/min','m-hpm')}${E(dur?fmt(ad/dur):'—','m-apm')}</tr>`;
   };
-  const head = `<thead><tr><th>Drill</th><th>Duration</th><th>Distance</th><th>HSR</th><th>Accel/Decel</th><th>Dist/min</th><th>HSR/min</th><th>Accel/Decel per min</th></tr></thead>`;
+  const head = `<thead><tr><th>Drill</th><th class="m-dur">Duration</th><th class="m-dist">Distance</th><th class="m-hsr">HSR</th><th class="m-adc">Accel/Decel</th><th class="m-dpm">Dist/min</th><th class="m-hpm">HSR/min</th><th class="m-apm">Accel/Decel per min</th></tr></thead>`;
   const labels = Object.keys(mine.drillTotals).sort((x,y)=>(mine.drillTotals[x].startSec==null?Infinity:mine.drillTotals[x].startSec)-(mine.drillTotals[y].startSec==null?Infinity:mine.drillTotals[y].startSec));
   html += `<div class="chart-block"><div class="rpt-section-title">Drill-by-Drill</div>` + (labels.length
     ? `<table class="rpt-table">${head}<tbody>${labels.map(l=>drillRow(l, mine.drillTotals[l])).join('')}</tbody></table>`
     : `<p style="color:var(--text-muted);font-size:12px;">No drill-level rows for this session, only the whole-session total above.</p>`) + `</div>`;
   const rh = mine.rehabByPlayer[a.name];
   if (rh) html += `<div class="chart-block"><div class="rpt-section-title">Individual program</div><table class="rpt-table">${head}<tbody>${Object.keys(rh).map(l=>drillRow(l, rh[l])).join('')}</tbody></table></div>`;
+  html += `<div class="pdr-note" contenteditable="true" spellcheck="false" style="margin-top:14px;border:1px solid #d1d5db;border-radius:8px;padding:8px 10px;font-size:12.5px;min-height:18px;"></div></div>`;
   return html;
 }
 function findReferenceSession(a, todayDate, label){
