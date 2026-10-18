@@ -434,7 +434,7 @@
       <span id="saveAllStatus" style="flex:1;text-align:right;white-space:nowrap;">Following the sheet</span>
     </div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-18 21:50</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-18 22:20</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -7969,6 +7969,41 @@ function tupRoster(m){
     return r;
   });
 }
+// ---- Post-session top-up GPS comes from the training GPS sheet (no separate CSV) ----
+const TUP_LABEL_RE = /top[\s_-]?up/i;
+function tupSheetLabels(date){          // label -> number of players with rows
+  const out = {};
+  Object.values(athleteMap).forEach(a=>(a.trainingGps||[]).forEach(e=>{
+    if (e.date!==date) return; const k = (e.drill_name || e.session_label || '').trim(); if (!k) return;
+    (out[k]||(out[k]=new Set())).add(a.id);
+  }));
+  return out;
+}
+function tupPullSheet(m, force){
+  const labels = tupSheetLabels(m.date);
+  let key = m.topupLabel && labels[m.topupLabel] ? m.topupLabel : Object.keys(labels).find(k=>TUP_LABEL_RE.test(k));
+  const info = { date:m.date, labels:Object.keys(labels), key:key||null, n:0 };
+  if (!key) return info;
+  Object.values(athleteMap).forEach(a=>{
+    const rows = (a.trainingGps||[]).filter(e=>e.date===m.date && ((e.drill_name||e.session_label||'').trim()===key));
+    if (!rows.length) return;
+    const cur = m.actual[a.id];
+    if (cur && cur.src==='manual' && !force) return;
+    const hsr = rows.reduce((t,e)=>t+(+e.hsr_distance_m||0),0), td = rows.reduce((t,e)=>t+(+e.total_distance_m||0),0);
+    m.actual[a.id] = { hsr:Math.round(hsr*10)/10, td:Math.round(td*10)/10, src:'sheet' }; info.n++;
+  });
+  return info;
+}
+function tupPullNow(force){ const m=tupMatch(); tupPullSheet(m,!!force); tupSave(); renderTupPlan(); }
+function tupSetLabel(v){ const m=tupMatch(); m.topupLabel = v||''; tupPullSheet(m,true); tupSave(); renderTupPlan(); }
+function tupSheetStatusHtml(m){
+  const info = tupPullSheet(m,false); tupSave();
+  const labels = tupSheetLabels(m.date), names = Object.keys(labels);
+  const sel = `<select class="tp-in" onchange="tupSetLabel(this.value)"><option value="">Auto-detect ("top up")</option>${names.map(k=>`<option value="${tupEsc(k)}" ${m.topupLabel===k?'selected':''}>${tupEsc(k)} (${labels[k].size} players)</option>`).join('')}</select>`;
+  const msg = info.key ? `<span style="color:#3f9b5a"><b>Found:</b> “${tupEsc(info.key)}” on ${m.date} — ${Object.values(m.actual).filter(x=>x.src==='sheet').length} players filled from the GPS sheet.</span>`
+    : (names.length ? `<span style="color:#b26a00"><b>No “top up” session found</b> in the GPS sheet for ${m.date}. Pick the right one from the list, or check the session was uploaded.</span>` : `<span style="color:#b26a00"><b>No training GPS in the sheet for ${m.date} yet.</b> Upload the Sonra export to the sheet, then sync.</span>`);
+  return `<div style="margin-bottom:8px;">${msg}</div><div class="tp-bar">${sel}<button class="btn-sm" onclick="tupPullNow(true)">↻ Re-pull from GPS sheet</button></div>`;
+}
 // ---- Match Day additions: data checks, speed check, positional averages ----
 function tupHistMax(a, exceptDate){
   let mx = null; (a.gameGps||[]).forEach(g=>{ if (g.date!==exceptDate && g.max_velocity_kmh!=null && (mx==null || g.max_velocity_kmh>mx)) mx = g.max_velocity_kmh; });
@@ -8131,8 +8166,8 @@ async function renderTupMatchDay(){
   <div class="tp-bar"><button class="btn" style="margin-top:0" onclick="openTupBench()">🖨 Bench card (print / phone)</button><button class="btn" style="margin-top:0" onclick="openTupTimer()">⏱ Session timer</button></div>
   <div style="overflow:auto;max-height:560px;"><table class="tp-tbl"><thead><tr><th>Player</th><th>Position</th><th>Squad status</th><th>Minutes</th><th>Group</th><th>Strides</th><th>Est. HSR (m)</th><th>Est. TD (m)</th><th>Actual HSR (m)</th><th>Actual TD (m)</th><th>HSR/stride</th></tr></thead><tbody id="tupBody">
     ${rows.map(r=>tupRowHtml(r)).join('')}</tbody></table></div>
-  <div class="tp-card"><h4>Post-session GPS (STATSports Sonra)</h4><div class="hint" style="margin:0 0 8px;">Type the actual top-up HSR and total distance per player in the table above, or import a Sonra CSV (columns: player name, HSR, total distance).</div>
-    <input type="file" accept=".csv" onchange="tupImportCsv(event)"> <div id="tupCalib"></div></div>
+  <div class="tp-card"><h4>Post-session GPS (STATSports Sonra)</h4><div class="hint" style="margin:0 0 8px;">Read straight from the training GPS sheet — no separate upload. Sync the sheet, and the top-up session for this match date fills the Actual HSR / TD columns. Typing a number over it keeps your value.</div>
+    ${tupSheetStatusHtml(m)}<div id="tupCalib"></div></div>
   <div class="tp-card"><h4>Match GPS and data checks</h4>
     <div class="hint" style="margin:0 0 8px;">Enter by hand, fill from the match GPS above, or import a CSV with the match-report columns (Athlete, Mins, TD (m), HSR (m), Ave m/min, Top Speed (kph), Sprint Dist (m), #Accelerations, #Decelerations). Ave m/min is always TD ÷ minutes played. Amber rows are left out of the positional averages until you tick "Data checked". Max speed is each player's best top speed in the dashboard from other matches; type over it to edit.</div>
     <input type="file" accept=".csv" onchange="tupImportMatchCsv(event)">
@@ -8165,7 +8200,7 @@ function tupRefreshSummary(){
 }
 function tupMeta(k,v){ const m=tupMatch(); m[k]=v; tupSave(); if (k==='date'||k==='opponent'||k==='ha') { /* keep header select label fresh */ const sel=document.querySelector('#tupRoot select.axis-select'); if (sel) sel.innerHTML = TUP.matches.map(x=>`<option value="${x.id}" ${x.id===TUP.cur?'selected':''}>${x.date} ${tupEsc(x.opponent||'(no opponent)')}</option>`).join(''); } }
 function tupSetPlayer(id,k,v){ const m=tupMatch(); const p = m.players[id] || (m.players[id]={}); if (k==='min') p.min = (v===''?null:+v); else if (k==='status'){ p.status=v; if (v==='Unused' && (p.min==null)) p.min=0; } else p[k]=v; tupSave(); tupRefreshSummary(); tupRenderCalib(); }
-function tupSetActual(id,k,v){ const m=tupMatch(); const a = m.actual[id] || (m.actual[id]={}); a[k] = (v===''?null:+v); tupSave(); tupFillRow(id); tupRenderCalib(); }
+function tupSetActual(id,k,v){ const m=tupMatch(); const a = m.actual[id] || (m.actual[id]={}); a[k] = (v===''?null:+v); a.src='manual'; tupSave(); tupFillRow(id); tupRenderCalib(); }
 function tupSetVal(k,v){ TUP.set[k] = +v; tupSave(); tupRefreshSummary(); tupRenderCalib(); }
 function tupSetMod(p,v){ TUP.set.mods[p] = +v; tupSave(); tupRefreshSummary(); }
 function tupResetSettings(){ if (!confirm('Reset all top-up settings to the defaults?')) return; TUP.set = JSON.parse(JSON.stringify(TUP_DEFAULTS)); tupSave(); renderTupPlan(); }
