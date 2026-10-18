@@ -434,7 +434,7 @@
       <span id="saveAllStatus" style="flex:1;text-align:right;white-space:nowrap;">Following the sheet</span>
     </div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-18 23:40</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-19 11:20</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -3324,6 +3324,10 @@ function drawGpsTraining(){
   else if (acwr.zone==='undertrained') html += `<div class="hint" style="padding:8px 4px;">Acute load is running notably below the chronic average — may indicate reduced training exposure recently (illness, rest, reduced minutes).</div>`;
 
   html += `<div class="pq-heading" style="margin-top:18px;">Session Trend</div><canvas id="gpsTrainingChart" height="90"></canvas>`;
+  const pdrDates = [...new Set((a.trainingGps||[]).map(e=>e.date))].sort().reverse();
+  html += `<div class="pq-heading" style="margin-top:18px;">Drill-by-drill report (print for the player)</div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:6px;"><select id="pdrDate" class="axis-select">${pdrDates.map(d=>`<option value="${d}">${d}</option>`).join('')}</select>
+    <button class="btn-sm" onclick="openPlayerDrillReport('${a.id}', document.getElementById('pdrDate').value)">🖨 Print drill-by-drill report</button></div>`;
   html += `<div class="pq-heading" style="margin-top:18px;">Recent Sessions</div>
     <div class="squad-table-scroll"><table><thead><tr><th>Date</th><th>Session</th><th>Duration</th><th>Distance</th><th>Dist/min</th><th>HSR</th><th>HSR/min</th><th>Sprint Dist</th><th>Accel/Decel</th><th>Max Vel</th></tr></thead><tbody>
     ${[...sessions].reverse().slice(0,12).map(s=>`<tr>
@@ -3986,6 +3990,58 @@ function daySquadBreakdown(players, dateStr){
     });
   });
   return { playerTotals, drillTotals, rehabByPlayer };
+}
+// ---- Individual drill-by-drill report: same layout as the squad daily training report, one athlete ----
+function openPlayerDrillReport(aid, dateStr){
+  const a = athleteMap[aid]; if (!a || !dateStr){ alert('Pick a session date first.'); return; }
+  reportKind = 'playerdrill';
+  mpSetLandscape(false);
+  document.getElementById('rptTrainingControls').style.display = 'none';
+  document.getElementById('reportContent').innerHTML = buildPlayerDrillReportHtml(a, dateStr);
+  document.getElementById('overlayReport').classList.add('show');
+}
+function buildPlayerDrillReportHtml(a, dateStr){
+  const mates = Object.values(athleteMap).filter(p=>p.gender===a.gender);
+  const mine = daySquadBreakdown([a], dateStr);
+  const hdr = (sub)=>`<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">${tupEsc(a.name)}</div><div class="rpt-sub">${sub}</div></div>${ROAR_LOGO_SVG}</div>`;
+  if (!mine.playerTotals.length) return hdr(`Brisbane Roar · ${dateStr}`) + `<p style="padding:20px 4px;color:var(--text-muted);">No training GPS for ${tupEsc(a.name)} on ${dateStr}.</p>`;
+  const t = mine.playerTotals[0]; t.workRate = t.duration ? t.distance/t.duration : null;
+  // squad average for the same day (same exclusions as the squad report: No GPS / Rehab players are left out)
+  const sq = daySquadBreakdown(mates, dateStr), st = participationStatus(mates, dateStr, sq.playerTotals), stBy = {}; st.forEach(x=>stBy[x.id]=x.label);
+  const el = sq.playerTotals.filter(x=>stBy[x.id]!=='No GPS' && stBy[x.id]!=='Rehab'), n = el.length||1;
+  const sum = k => el.reduce((s,x)=>s+(x[k]||0),0)/n;
+  const sqa = { duration:sum('duration'), distance:sum('distance'), hsr:sum('hsr'), sprint:sum('sprint'), accel:sum('accel'), decel:sum('decel') };
+  sqa.workRate = sqa.duration ? sqa.distance/sqa.duration : null;
+  const sqVel = el.map(x=>x.maxVel).filter(v=>v!=null); sqa.maxVel = sqVel.length ? sqVel.reduce((s,v)=>s+v,0)/sqVel.length : null;
+  const rowsToday = (a.trainingGps||[]).filter(e=>e.date===dateStr);
+  const labelRow = rowsToday.find(e=>e.session_label && !sessionTitleIsJustDate(e.session_label));
+  const meta = SESSION_META[dateStr] || {};
+  const sessLabel = meta.sessionLabel || (labelRow ? labelRow.session_label : '');
+  const kpi = (icon,label,val,sq2)=>`<div class="kpi-card">${icon}<div class="kpi-card-label">${label}</div><div class="kpi-card-value">${val}</div><div class="kpi-card-sub">Squad average ${sq2}</div></div>`;
+  let html = hdr(`DATE: ${dateStr}${sessLabel?'&nbsp;&nbsp;SESSION: '+tupEsc(sessLabel):''}`) + `
+  <div class="rpt-conditions"><span>☀ Conditions: <b>${tupEsc(meta.conditions||'—')}</b></span><span>🌡 Temperature: <b>${meta.temperature?tupEsc(meta.temperature)+'°':'—'}</b></span><span>⏱ Duration: <b>${fmt(t.duration)}min</b></span></div>
+  <div class="kpi-cards">
+    ${kpi(KPI_ICONS.distance,'Total Distance (m)',fmt(t.distance),fmt(sqa.distance))}
+    ${kpi(KPI_ICONS.workRate,'Work Rate (m/min)',fmt(t.workRate),fmt(sqa.workRate))}
+    ${kpi(KPI_ICONS.hid,'HID (m)',fmt(t.hsr),fmt(sqa.hsr))}
+    ${kpi(KPI_ICONS.sprint,'SD (m)',fmt(t.sprint),fmt(sqa.sprint))}
+  </div>
+  <div class="rpt-section-title">Session summary</div>
+  <table class="rpt-table"><thead><tr><th></th><th>Training Time (min)</th><th>Total Distance (m)</th><th>Work Rate (m/min)</th><th>HID (&gt;19.8kph)</th><th>SD (&gt;25.2kph)</th><th>Speed (kph)</th><th>Acc (&gt;4m/s)</th><th>Dec (&gt;4m/s)</th></tr></thead><tbody>
+    <tr><td class="lbl">${tupEsc(a.name)}</td><td>${fmt(t.duration)}</td><td>${fmt(t.distance)}</td><td>${fmt(t.workRate)}</td><td>${fmt(t.hsr)}</td><td>${fmt(t.sprint)}</td><td>${t.maxVel!=null?fmt(t.maxVel):'—'}</td><td>${fmt(t.accel)}</td><td>${fmt(t.decel)}</td></tr>
+    <tr class="mdr-avg-row"><td class="lbl">Squad average</td><td>${fmt(sqa.duration)}</td><td>${fmt(sqa.distance)}</td><td>${fmt(sqa.workRate)}</td><td>${fmt(sqa.hsr)}</td><td>${fmt(sqa.sprint)}</td><td>${sqa.maxVel!=null?fmt(sqa.maxVel):'—'}</td><td>${fmt(sqa.accel)}</td><td>${fmt(sqa.decel)}</td></tr></tbody></table>`;
+  const drillRow = (label, d)=>{
+    const dist = d.distance, hsr = d.hsr, ad = d.accelDecel, dur = d.duration;
+    return `<tr><td class="lbl">${tupEsc(label)}</td><td>${fmt(dur)} min</td><td>${fmt(dist)} m</td><td>${fmt(hsr)} m</td><td>${fmt(ad)}</td><td>${dur?fmt(dist/dur):'—'} m/min</td><td>${dur?fmt(hsr/dur):'—'} m/min</td><td>${dur?fmt(ad/dur):'—'}</td></tr>`;
+  };
+  const head = `<thead><tr><th>Drill</th><th>Duration</th><th>Distance</th><th>HSR</th><th>Accel/Decel</th><th>Dist/min</th><th>HSR/min</th><th>Accel/Decel per min</th></tr></thead>`;
+  const labels = Object.keys(mine.drillTotals).sort((x,y)=>(mine.drillTotals[x].startSec==null?Infinity:mine.drillTotals[x].startSec)-(mine.drillTotals[y].startSec==null?Infinity:mine.drillTotals[y].startSec));
+  html += `<div class="chart-block"><div class="rpt-section-title">Drill-by-Drill</div>` + (labels.length
+    ? `<table class="rpt-table">${head}<tbody>${labels.map(l=>drillRow(l, mine.drillTotals[l])).join('')}</tbody></table>`
+    : `<p style="color:var(--text-muted);font-size:12px;">No drill-level rows for this session, only the whole-session total above.</p>`) + `</div>`;
+  const rh = mine.rehabByPlayer[a.name];
+  if (rh) html += `<div class="chart-block"><div class="rpt-section-title">Individual program</div><table class="rpt-table">${head}<tbody>${Object.keys(rh).map(l=>drillRow(l, rh[l])).join('')}</tbody></table></div>`;
+  return html;
 }
 function findReferenceSession(a, todayDate, label){
   if (!label) return null;
@@ -7894,15 +7950,15 @@ function openRecoveryReport(which){
 const TUP_DEFAULTS = { hsrFixed:80, hsrStride:50, tdFixed:1060, tdStride:140, halfStrides:3, fullStrides:6, doneMin:60, halfMin:30, mods:{CB:-2,FB:0,CM:0,W:1,FW:1}, boxCycle:60,
   prepTd:300, retHsr:10, retTd:260, retReps:2, boxHsr:20, boxTd:80, boxReps:3, strHsr:50, strTd:140,
   retGo:48, retRest:48, strGo:12, strRest:36, speedPct:90, speedBoxes:2, mmHigh:140, mmLow:85, mmLowMin:45, durDiff:5, maxOver:2,
-  avgN:4, shortDays:4, useOwn:false, nsReturns:3, nsBoxes:4, nsStrides:8, nsWarmTd:600, ssgSets:4, ssgMin:3, ssgRest:2, ssgMinPlayers:4, fsbASsg:3, fsbABox:0, fsbAStr:3, fsbBSsg:4, fsbBBox:2, fsbBStr:4, fsbUpRet:2, fsbUpStr:2, fsbModCB:-1, fsbModFB:0, fsbModCM:0, fsbModW:1, fsbModFW:1, fsbHours:48,
+  avgN:4, shortDays:4, useOwn:false, nsReturns:3, nsBoxes:4, nsStrides:8, nsWarmTd:600, ssgSets:4, ssgMin:3, ssgRest:2, ssgMinPlayers:4, fsbASsg:3, fsbABox:0, fsbAStr:3, fsbBSsg:4, fsbBBox:2, fsbBStr:4, fsbUpRet:2, fsbUpStr:2, fsbModCB:-1, fsbModFB:0, fsbModCM:0, fsbModW:1, fsbModFW:1, fsbHours:48, useMods:false, fsbUseMods:false, s1Owner:'Intern', s2Owner:'Assistant coach', contact:'', kit:'Cones, bibs, GPS vests, phone with the timer (or stopwatch), printed card',
   targets:{CB:{hsr:370,spr:95},FB:{hsr:550,spr:140},CM:{hsr:590,spr:150},W:{hsr:610,spr:190},FW:{hsr:570,spr:190}} };
-const TUP = { matches:[], cur:'', set:JSON.parse(JSON.stringify(TUP_DEFAULTS)), loaded:false, view:'match' };
+const TUP = { matches:[], cur:'', set:JSON.parse(JSON.stringify(TUP_DEFAULTS)), loaded:false, view:'run' };
 const TUP_POS = ['CB','FB','CM','W','FW'];
 const TUP_SESSION = [
   { clock:'0–2', drill:'Prep', layout:'Jog, dynamic mobility, 2 build-ups', target:'–', rest:'–', reps:'All' },
   { clock:'2–5', drill:'Pitch returns', layout:'Goal line to goal line and back (~210 m)', target:'48 s', rest:'48 s walk', reps:'2 (all)' },
   { clock:'5–8', drill:'Box sprints', layout:'Across the width of the penalty box (~40 m)', target:'Max effort', rest:'Walk back + 60 s', reps:'3 (all)' },
-  { clock:'8–14', drill:'Box-to-box strides', layout:'Walk in box, stride box edge to box edge (~70 m), walk in far box', target:'12 s', rest:'36 s walk', reps:'Per player stride count' },
+  { clock:'8–14', drill:'Box-to-box strides', layout:'Walk in box, stride box edge to box edge (~70 m), walk in far box', target:'12 s', rest:'36 s walk', reps:'By group: Half stops early, Full goes on' },
   { clock:'14–15', drill:'Buffer', layout:'GPS off', target:'–', rest:'–', reps:'–' }
 ];
 function tupEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
@@ -7948,7 +8004,7 @@ function tupGroup(pos, min, status){
 function tupStrides(pos, group){
   if (group!=='Half' && group!=='Full') return 0;
   const base = group==='Half' ? TUP.set.halfStrides : TUP.set.fullStrides;
-  return Math.max(1, base + (+TUP.set.mods[pos]||0));
+  return Math.max(1, base + (TUP.set.useMods ? (+TUP.set.mods[pos]||0) : 0));
 }
 function tupEst(strides){
   if (!strides) return { hsr:null, td:null };
@@ -8004,6 +8060,100 @@ function tupSheetStatusHtml(m){
     : (names.length ? `<span style="color:#b26a00"><b>No “top up” session found</b> in the GPS sheet for ${m.date}. Pick the right one from the list, or check the session was uploaded.</span>` : `<span style="color:#b26a00"><b>No training GPS in the sheet for ${m.date} yet.</b> Upload the Sonra export to the sheet, then sync.</span>`);
   return `<div style="margin-bottom:8px;">${msg}</div><div class="tp-bar">${sel}<button class="btn-sm" onclick="tupPullNow(true)">↻ Re-pull from GPS sheet</button></div>`;
 }
+// ---- Run Sheet (runner view), SOP and overdue alert ----
+function tupRunMin(id,v){ const m=tupMatch(); const p=m.players[id]||(m.players[id]={}); p.min=(v===''?null:+v); if (p.status==='Non-squad' && v!=='') p.status=''; if (v==='0') p.status='Unused'; else if (p.status==='Unused') p.status=''; tupSave(); tupRunRefresh(); }
+function tupRunQuick(id,kind){
+  const m=tupMatch(); const p=m.players[id]||(m.players[id]={});
+  if (kind==='ns'){ p.status='Non-squad'; p.min=null; } else if (kind==='unused'){ p.status='Unused'; p.min=0; } else { p.status=''; p.min=90; }
+  tupSave(); const inp=document.getElementById('rmin_'+id); if (inp) inp.value = p.min==null?'':p.min; tupRunRefresh();
+}
+function tupRunMissed(id,on){ const m=tupMatch(); const p=m.players[id]||(m.players[id]={}); p.s1 = on?'Skipped':'Done'; tupSave(); }
+function tupRunComplete(){ const m=tupMatch(); m.s1Status='Done'; m.s1Date=toLocalDateStr(new Date()); tupSave(); renderTupPlan(); }
+function tupRunNotNeeded(){ const m=tupMatch(); m.s1Status='Skipped'; tupSave(); renderTupPlan(); }
+function tupRunRefresh(){
+  const m=tupMatch(), rows=tupRoster(m);
+  rows.forEach(r=>{ const el=document.getElementById('rgrp_'+r.id); if (el) el.innerHTML = r.status==='Non-squad' ? '<span class="tp-badge tp-NonSquad">Non-squad</span>' : `<span class="tp-badge tp-${(r.group||'none')}">${r.group||'—'}</span>`; });
+  const el=document.getElementById('runGroups'); if (el) el.innerHTML = tupRunGroupsHtml(rows);
+}
+function tupRunGroupsHtml(rows){
+  const g = k => rows.filter(r=>r.group===k).map(r=>tupEsc(r.name.split(' ')[0]+' '+(r.name.split(' ')[1]||'').charAt(0))).join(', ') || '—';
+  const c = k => rows.filter(r=>r.group===k).length, S = TUP.set;
+  return `<div style="display:grid;gap:8px;">
+    <div><span class="tp-badge tp-Full">FULL ${c('Full')}</span> <span style="font-size:12px;">${g('Full')}</span><div class="hint" style="margin:2px 0 0;">${S.fullStrides} strides</div></div>
+    <div><span class="tp-badge tp-Half">HALF ${c('Half')}</span> <span style="font-size:12px;">${g('Half')}</span><div class="hint" style="margin:2px 0 0;">${S.halfStrides} strides</div></div>
+    <div><span class="tp-badge tp-Done">DONE ${c('Done')}</span> <span style="font-size:12px;">${g('Done')}</span><div class="hint" style="margin:2px 0 0;">cool-down only</div></div>
+    ${c('Non-Squad')?`<div><span class="tp-badge tp-NonSquad">NON-SQUAD ${c('Non-Squad')}</span> <span style="font-size:12px;">${g('Non-Squad')}</span><div class="hint" style="margin:2px 0 0;">separate session (Non-Squad tab)</div></div>`:''}
+    ${rows.filter(r=>!r.group).length?`<div style="color:#b26a00;font-size:12px;"><b>Minutes still needed:</b> ${rows.filter(r=>!r.group).map(r=>tupEsc(r.name)).join(', ')}</div>`:''}</div>`;
+}
+function tupRunView(host){
+  const m=tupMatch(), rows=tupRoster(m), S=TUP.set;
+  const hs = rows.filter(r=>r.group==='Half'||r.group==='Full');
+  const st = m.s1Status||'Planned';
+  host.innerHTML = `<style>.tp-set{display:inline-flex;flex-direction:column;font-size:11px;color:var(--text-secondary);gap:2px;margin-right:10px;} .tp-set input,.tp-in{border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:14px;background:var(--surface,#fff);}
+    .tp-card{border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin:0 0 12px;} .tp-card h4{margin:0 0 8px;font-size:14px;} .tp-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;margin-bottom:10px;}
+    .tp-badge{display:inline-block;padding:2px 9px;border-radius:10px;font-weight:700;font-size:11.5px;color:#fff;} .tp-Full{background:#d9534f}.tp-Half{background:#f0a020}.tp-Done{background:#3f9b5a}.tp-NonSquad{background:#6b5aa6}.tp-none{background:#9ca3af}
+    .rn-row{display:grid;grid-template-columns:1fr 70px auto auto;gap:6px;align-items:center;padding:4px 0;border-bottom:1px solid var(--border);} .rn-q{border:1px solid var(--border);background:var(--surface,#fff);border-radius:6px;padding:5px 8px;font-size:12px;cursor:pointer;}
+    .rn-big{font-size:15px;font-weight:800;padding:12px 18px;border-radius:10px;border:none;background:#F26522;color:#fff;cursor:pointer;margin:0 8px 8px 0;} .rn-big.alt{background:#1f3a5f;} .rn-big.go{background:#3f9b5a;}</style>
+    <div class="tp-card"><h4>The match</h4><div class="tp-bar">
+      <select class="tp-in" onchange="TUP.cur=this.value;tupSave();renderTupPlan()">${TUP.matches.map(x=>`<option value="${x.id}" ${x.id===TUP.cur?'selected':''}>${x.date} ${tupEsc(x.opponent||'(no opponent)')}</option>`).join('')}</select>
+      <button class="rn-q" onclick="tupNewMatch()">+ New match</button></div>
+      <div class="tp-bar"><label class="tp-set">Date<input type="date" value="${m.date}" onchange="tupMeta('date',this.value)"></label><label class="tp-set">Opponent<input type="text" value="${tupEsc(m.opponent)}" style="width:150px" onchange="tupMeta('opponent',this.value)"></label>
+      <label class="tp-set">Days to next match<input type="number" min="0" value="${m.nextDays==null?'':m.nextDays}" style="width:70px" onchange="tupMeta('nextDays',this.value===''?null:+this.value)"></label></div></div>
+    <div class="tp-card"><h4>Step 1 · Minutes played</h4>
+      <div class="tp-bar"><button class="rn-q" onclick="tupFillFromGps();tupSetView('run')">⬇ Fill from match GPS</button><span class="hint" style="margin:0;">Quick buttons: <b>90</b> = played the full match · <b>Unused</b> = on the bench, didn't play · <b>Not in squad</b> = wasn't selected.</span></div>
+      ${rows.map(r=>`<div class="rn-row"><span><b>${tupEsc(r.name)}</b> <span id="rgrp_${r.id}">${r.status==='Non-squad'?'<span class="tp-badge tp-NonSquad">Non-squad</span>':`<span class="tp-badge tp-${r.group||'none'}">${r.group||'—'}</span>`}</span></span>
+        <input class="tp-in" id="rmin_${r.id}" type="number" min="0" max="130" style="width:70px" value="${r.min==null?'':r.min}" onchange="tupRunMin('${r.id}',this.value)">
+        <span><button class="rn-q" onclick="tupRunQuick('${r.id}','full')">90</button> <button class="rn-q" onclick="tupRunQuick('${r.id}','unused')">Unused</button></span><button class="rn-q" onclick="tupRunQuick('${r.id}','ns')">Not in squad</button></div>`).join('')}</div>
+    <div class="tp-card"><h4>Step 2 · Who runs what</h4><div id="runGroups">${tupRunGroupsHtml(rows)}</div>
+      <div style="margin-top:10px;"><button class="rn-big" onclick="openTupBench()">🖨 Open the card</button><button class="rn-big alt" onclick="openTupTimer()">⏱ Start the timer</button></div></div>
+    <div class="tp-card"><h4>Step 3 · Afterwards</h4>
+      ${hs.length?`<div class="hint" style="margin:0 0 6px;">Tick anyone who <b>missed</b> the top-up (didn't run it, or stopped early). Leave everyone else.</div>${hs.map(r=>`<label style="display:block;padding:3px 0;font-size:14px;"><input type="checkbox" ${(m.players[r.id]||{}).s1==='Skipped'?'checked':''} onchange="tupRunMissed('${r.id}',this.checked)"> ${tupEsc(r.name)} <span class="tp-badge tp-${r.group}">${r.group}</span></label>`).join('')}`:'<div class="hint">Enter minutes above first.</div>'}
+      <div style="margin-top:10px;"><button class="rn-big go" onclick="tupRunComplete()">✓ Top-up complete</button><button class="rn-q" onclick="tupRunNotNeeded()">Not run (pitch unavailable / not needed)</button> <span style="font-size:12px;margin-left:6px;">Status: <b>${st}</b></span></div></div>
+    <div class="tp-card"><h4>Step 4 · The next session</h4><div class="hint" style="margin:0 0 8px;">GPS needs no entry: it is read from the GPS sheet once it is synced. The next card is made for you from the minutes and the ticks above.</div>
+      <button class="rn-big alt" onclick="openTupFsb()">🖨 First Session Back card</button>${rows.some(r=>r.status==='Non-squad')?'<button class="rn-big alt" onclick="openTupNs()">🖨 Non-Squad card</button>':''}<button class="rn-big alt" onclick="openTupSop()">🖨 One-page SOP</button></div>`;
+}
+function tupSopHtml(){
+  const S = TUP.set, e = tupEsc;
+  return `<style>.sp{font-family:Inter,system-ui,sans-serif;color:#111;font-size:12px;} .sp h1{font-size:20px;margin:0;text-transform:uppercase;letter-spacing:.03em;} .sp-head{display:flex;align-items:center;justify-content:space-between;border-bottom:3px solid #111;padding-bottom:6px;margin-bottom:8px;} .sp-head .rpt-logo{height:46px;width:auto;}
+    .sp table{width:100%;border-collapse:collapse;margin-bottom:8px;} .sp th{background:#111;color:#fff;padding:4px 6px;text-align:left;font-size:10.5px;} .sp td{border:1px solid #9ca3af;padding:4px 6px;vertical-align:top;font-size:11.5px;} .sp h2{font-size:13px;margin:8px 0 3px;text-transform:uppercase;} .sp ul{margin:2px 0 6px 18px;padding:0;} .sp li{margin:1px 0;}</style>
+  <div class="sp"><div class="sp-head">${ROAR_LOGO_SVG}<div style="text-align:center;flex:1;"><h1>Top-up SOP</h1><span>Brisbane Roar Women · every match, same every time</span></div>${ROAR_LOGO_SVG}</div>
+  <table><thead><tr><th>When</th><th>What</th><th>Who</th></tr></thead><tbody>
+    <tr><td><b>Match day, before the whistle</b></td><td>Open the dashboard → Top-Up Plan → <b>Run Sheet</b>. Pick the match. Print the card or keep it on your phone.</td><td>${e(S.s1Owner)}</td></tr>
+    <tr><td><b>Match day, final whistle</b></td><td>Step 1: enter minutes played (or "Fill from match GPS"). Quick buttons: 90 / Unused / Not in squad.</td><td>${e(S.s1Owner)}</td></tr>
+    <tr><td><b>Straight after (max ${15} min)</b></td><td>Step 2: run the card on the pitch. ${S.useMods?'Strides by the number next to each name.':`Half group walks off after stride ${S.halfStrides}, Full group after stride ${S.fullStrides}.`} Use the timer for the beeps. Done group: cool-down only.</td><td>${e(S.s1Owner)}</td></tr>
+    <tr><td><b>Right after the session</b></td><td>Step 3: tick anyone who missed it, then press <b>Top-up complete</b>. The GPS needs no entry; it reads from the GPS sheet after the sync.</td><td>${e(S.s1Owner)}</td></tr>
+    <tr><td><b>Non-selected players</b></td><td>Run the Non-Squad card on match day (or MD+1): about 40 min. Mark it Done on the Non-Squad tab.</td><td>${e(S.s1Owner)}</td></tr>
+    <tr><td><b>First session of the week</b></td><td>Open the <b>First Session Back</b> card (it builds itself from the minutes and ticks). Block A and Block B run while starters do the extended recovery warm-up, then join the team.</td><td>${e(S.s2Owner)}</td></tr></tbody></table>
+  <h2>Kit</h2><div>${e(S.kit)}</div>
+  <h2>If something goes wrong</h2><ul>
+    <li><b>Pitch or time not available after the match:</b> tick "Not run". The player is automatically upgraded at First Session Back.</li>
+    <li><b>A player has an injury niggle or is unsure:</b> she does not run. Physio decides. Tick her as missed.</li>
+    <li><b>Fewer than 4 non-squad players:</b> run the Non-Squad card without the small-sided game.</li>
+    <li><b>Short turnaround (${S.shortDays} days or fewer to the next match):</b> the First Session Back card halves the SSG and drops the strides automatically.</li>
+    <li><b>Someone misses a rep:</b> still go on the next beep. Don't catch up.</li></ul>
+  <h2>Who to message</h2><div>${S.contact?e(S.contact):'(add a name and number in Settings)'}</div>
+  <div style="font-size:9.8px;color:#4b5563;margin-top:8px;">Group rules: ${S.doneMin}+ min = Done · ${S.halfMin}–${S.doneMin-1} min = Half · under ${S.halfMin} min or unused = Full. Goalkeepers: keeper coach, not in the running session.</div></div>`;
+}
+function openTupSop(){
+  reportKind = 'tupsop'; mpSetLandscape(false);
+  document.getElementById('rptTrainingControls').style.display = 'none';
+  document.getElementById('reportContent').innerHTML = tupSopHtml();
+  document.getElementById('overlayReport').classList.add('show');
+}
+function tupOverdueList(){
+  const today = toLocalDateStr(new Date()), cutoff = (()=>{ const d=new Date(); d.setDate(d.getDate()-14); return toLocalDateStr(d); })();
+  const dates = new Set(); Object.values(athleteMap).forEach(a=>(a.gameGps||[]).forEach(g=>dates.add(g.date))); TUP.matches.forEach(m=>{ if (m.players && Object.keys(m.players).length) dates.add(m.date); });
+  return [...dates].filter(d=>d<today && d>=cutoff).sort().filter(d=>{ const m = TUP.matches.find(x=>x.date===d); return !m || !(m.s1Status==='Done' || m.s1Status==='Skipped'); });
+}
+function tupOverdueBanner(){
+  const od = tupOverdueList(); if (!od.length) return '';
+  return `<div style="background:#fdecea;border:1px solid #d9534f;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:12.5px;"><b>Top-up not logged:</b> ${od.map(d=>{ const g=Object.values(athleteMap).flatMap(a=>a.gameGps||[]).find(x=>x.date===d); return d+(g&&g.opponent?' vs '+tupEsc(g.opponent):''); }).join(' · ')}. Press <b>Top-up complete</b> (or <b>Not run</b>) on the Run Sheet to clear this.</div>`;
+}
+async function tupBadge(){
+  try{ await tupLoad(); const n = tupOverdueList().length; const el = document.querySelector('.team-tab[data-t="tupplan"]'); if (!el) return;
+    el.querySelectorAll('.tup-dot').forEach(x=>x.remove()); if (n){ const d=document.createElement('span'); d.className='tup-dot'; d.textContent=' ●'; d.style.color='#d9534f'; d.title='A top-up has not been logged'; el.appendChild(d); } }catch(e){}
+}
+setTimeout(tupBadge, 6000);
 // ---- First Session Back (Stage 2) ----
 function tupDaysBetween(a,b){ if(!a||!b) return null; return Math.round((new Date(b+'T00:00:00')-new Date(a+'T00:00:00'))/86400000); }
 function tupFsbDate(m){ if (m.fsbDate) return m.fsbDate; const d=new Date(m.date+'T00:00:00'); d.setDate(d.getDate()+2); return toLocalDateStr(d); }
@@ -8034,7 +8184,7 @@ function tupFsbPlan(m){
     o.block = 'Block '+block + (extraRet||extraStr ? ' + extras' : '');
     o.ssg = A ? S.fsbASsg : S.fsbBSsg; o.box = A ? S.fsbABox : S.fsbBBox;
     const baseStr = A ? S.fsbAStr : S.fsbBStr;
-    o.str = Math.max(0, baseStr + (+S['fsbMod'+r.pos]||0)) + extraStr; o.ret = extraRet;
+    o.str = Math.max(0, baseStr + (S.fsbUseMods ? (+S['fsbMod'+r.pos]||0) : 0)) + extraStr; o.ret = extraRet;
     if (short){ o.ssg = Math.ceil(o.ssg/2); o.str = 0; }
     o.hsr = S.boxHsr*o.box + S.strHsr*o.str + S.retHsr*o.ret;
     return o;
@@ -8075,7 +8225,7 @@ function tupFsbHtml(){
   const A = by(o=>o.block==='Block A'), B = by(o=>/^Block B/.test(o.block)), St = by(o=>o.block==='Normal session'), NS = by(o=>o.block==='Non-Squad session'), J = by(o=>o.block==='Join the team');
   const ssg = pl.ssg, ssgSetsA = pl.short?Math.ceil(S.fsbASsg/2):S.fsbASsg, ssgSetsB = pl.short?Math.ceil(S.fsbBSsg/2):S.fsbBSsg;
   const list = (arr, fn)=> arr.length ? arr.map(o=>`<div class="fb-p"><span>${tupEsc(o.name)}</span><b>${fn(o)}</b></div>`).join('') : '<div class="fb-none">none</div>';
-  const det = o => [o.ret?o.ret+' returns':'', o.str?o.str+' strides':'', o.upgraded?'UPGRADED':''].filter(Boolean).join(' · ') || '—';
+  const det = o => o.upgraded ? ('UPGRADED'+(o.ret?' +'+o.ret+' returns':'')+(o.group==='Full'&&TUP.set.fsbUpStr&&!pl.short?' +'+TUP.set.fsbUpStr+' strides':'')) : (TUP.set.fsbUseMods&&o.str?o.str+' strides':'');
   const pit = (svg,t,l)=>`<div class="tb-pit"><div class="tb-pt">${t}</div>${svg}<div class="tb-pl">${l}</div></div>`;
   const dayName = d=>new Date(d+'T00:00:00').toLocaleDateString('en-AU',{weekday:'short',day:'numeric',month:'short'});
   return `<style>
@@ -8101,7 +8251,7 @@ function tupFsbHtml(){
       <tr><td><b>Box sprints</b></td><td>${S.fsbABox?S.fsbABox:'—'}</td><td>${S.fsbBBox?S.fsbBBox:'—'}</td></tr>
       <tr><td><b>Box-to-box strides</b> (${S.strGo} s)</td><td>${pl.short?'dropped':S.fsbAStr}</td><td>${pl.short?'dropped':S.fsbBStr}</td></tr>
       <tr><td><b>Est. extra HSR</b></td><td>~${Math.round(S.boxHsr*S.fsbABox+(pl.short?0:S.strHsr*S.fsbAStr))} m</td><td>~${Math.round(S.boxHsr*S.fsbBBox+(pl.short?0:S.strHsr*S.fsbBStr))} m</td></tr></tbody></table>
-    <div class="fb-ban" style="font-weight:600;">Stride rule here: CB −1, W and FW +1, minimum 0. Upgraded = no match-day top-up: Half does Block B; Full does Block B + ${S.fsbUpRet} pitch returns + ${S.fsbUpStr} extra strides.</div>
+    <div class="fb-ban" style="font-weight:600;">${S.fsbUseMods?'Stride rule here: CB −1, W and FW +1, minimum 0. ':'Everyone in a block does the same. '}Upgraded = no match-day top-up: Half does Block B; Full does Block B + ${S.fsbUpRet} pitch returns + ${S.fsbUpStr} extra strides.</div>
     <div class="tb-pits">${pit(tupSsgSvg(pl.ssgPlayers),'Small-sided game',ssg?`${ssg.fmt} + GKs · ${ssg.dims} · ${S.ssgMin} min on / ${S.ssgRest} min off`:'Needs at least 4 players')}${pit(tupPitchSvg('strides'),'Box-to-box strides',`Walk – stride – walk · ~70 m · ${S.strGo} s · rest ${S.strRest} s`)}</div>
     <div class="tb-foot"><b>Gym:</b> Half and Full groups take normal lower-body loading. Starters get the reduced version${pl.within?' (first session is within '+S.fsbHours+' h of the match)':' if within '+S.fsbHours+' h of the match'}. Goalkeepers: keeper coach.</div></div>`;
 }
@@ -8121,7 +8271,7 @@ function tupSsgSize(n){
 function tupNsPlayers(m){
   const S = TUP.set;
   return tupRoster(m).filter(r=>r.status==='Non-squad').map(r=>{
-    const strides = Math.max(1, S.nsStrides + (+S.mods[r.pos]||0));
+    const strides = Math.max(1, S.nsStrides + (S.useMods ? (+S.mods[r.pos]||0) : 0));
     const hsr = S.retHsr*S.nsReturns + S.boxHsr*S.nsBoxes + S.strHsr*strides;
     const td = S.nsWarmTd + S.retTd*S.nsReturns + S.boxTd*S.nsBoxes + S.strTd*strides;
     return Object.assign({}, r, { nsStrides:strides, nsHsr:hsr, nsTd:td });
@@ -8133,7 +8283,7 @@ function tupNsSession(n){
     { block:'Warm-up', content:'RAMP, accel-themed: marches → broad jump & stick → bound & stick → submax accels', amt:`10 min (~${S.nsWarmTd} m TD)` },
     { block:'Pitch returns', content:`${S.retGo} s, rest ${S.retRest} s`, amt:`${S.nsReturns} reps` },
     { block:'Box sprints', content:`Max effort, walk back + ${S.boxCycle} s`, amt:`${S.nsBoxes} reps` },
-    { block:'Box-to-box strides', content:`${S.strGo} s, rest ${S.strRest} s`, amt:`${S.nsStrides} reps (CB ${S.mods.CB}, W/FW +${S.mods.W})` }
+    { block:'Box-to-box strides', content:`${S.strGo} s, rest ${S.strRest} s`, amt:S.useMods ? `${S.nsStrides} reps (CB ${S.mods.CB}, W/FW +${S.mods.W})` : `${S.nsStrides} reps` }
   ];
   if (useSsg) rows.push({ block:'SSG', content:`${ssg.fmt} + GKs, ${ssg.dims}, max intensity`, amt:`${S.ssgSets} × ${S.ssgMin} min, ${S.ssgRest} min rest` });
   else rows.push({ block:'SSG', content: n? 'Not enough players for an SSG today' : '—', amt:'—' });
@@ -8290,6 +8440,8 @@ function tupImportMatchCsv(ev){
   }catch(e){ alert('Could not read that CSV.'); } };
   rd.readAsText(f);
 }
+function tupSetFlag(k,on){ TUP.set[k]=!!on; tupSave(); }
+function tupSetText(k,v){ TUP.set[k]=v; tupSave(); }
 function tupSetView(v){ TUP.view = v; renderTupPlan(); }
 function tupSetTarget(pos,k,v){ TUP.set.targets[pos][k] = +v; tupSave(); }
 function tupSetDerived(k,v){ tupSetVal(k,v); tupDerive(); }
@@ -8305,7 +8457,13 @@ function tupSettingsView(){
   const der = (k,l)=>num(k,l,70,'tupSetDerived');
   return `<div class="tp-card"><h4>Group cut-offs and strides</h4>
     ${num('doneMin','Done at (min ≥)')}${num('halfMin','Half at (min ≥)')}${num('halfStrides','Half strides')}${num('fullStrides','Full strides')}<br><br>
+    <label style="font-size:12px;"><input type="checkbox" ${S.useMods?'checked':''} onchange="tupSetFlag('useMods',this.checked)"> Use position stride modifiers (coach option; the simple version leaves this off)</label><br>
     <span style="font-size:11px;color:var(--text-secondary);">Stride modifiers:</span> ${TUP_POS.map(p=>`<label class="tp-set">${p}<input type="number" value="${S.mods[p]}" style="width:55px" onchange="tupSetMod('${p}',this.value)"></label>`).join('')}</div>
+  <div class="tp-card"><h4>SOP details (printed on the one-page SOP)</h4>
+    <label class="tp-set">Stage 1 run by<input class="tp-in" type="text" style="width:180px" value="${tupEsc(S.s1Owner)}" onchange="tupSetText('s1Owner',this.value)"></label>
+    <label class="tp-set">First Session Back run by<input class="tp-in" type="text" style="width:180px" value="${tupEsc(S.s2Owner)}" onchange="tupSetText('s2Owner',this.value)"></label>
+    <label class="tp-set">Who to message<input class="tp-in" type="text" style="width:220px" value="${tupEsc(S.contact)}" placeholder="name + number" onchange="tupSetText('contact',this.value)"></label><br><br>
+    <label class="tp-set" style="width:100%">Kit list<input class="tp-in" type="text" style="width:100%;max-width:560px" value="${tupEsc(S.kit)}" onchange="tupSetText('kit',this.value)"></label></div>
   <div class="tp-card"><h4>Drill times</h4>${num('retGo','Pitch return (s)')}${num('retRest','Return rest (s)')}${num('strGo','Stride (s)')}${num('strRest','Stride rest (s)')}${num('boxCycle','Box sprint cycle (s)')}
     <div class="hint" style="margin:6px 0 0;">The session timer reads these.</div></div>
   <div class="tp-card"><h4>Per-rep estimates (HSR m / TD m incl. walk recovery)</h4>
@@ -8317,6 +8475,7 @@ function tupSettingsView(){
   <div class="tp-card"><h4>First Session Back blocks</h4>
     ${num('fsbASsg','Block A: SSG sets')}${num('fsbABox','Block A: box sprints')}${num('fsbAStr','Block A: strides')}${num('fsbBSsg','Block B: SSG sets')}${num('fsbBBox','Block B: box sprints')}${num('fsbBStr','Block B: strides')}<br><br>
     ${num('fsbUpRet','Upgrade (Full): extra pitch returns')}${num('fsbUpStr','Upgrade (Full): extra strides')}${num('fsbHours','"Within" window for starters (hours)')}<br><br>
+    <label style="font-size:12px;"><input type="checkbox" ${S.fsbUseMods?'checked':''} onchange="tupSetFlag('fsbUseMods',this.checked)"> Use position modifiers in First Session Back (off = every player in a block does the same)</label><br>
     <span style="font-size:11px;color:var(--text-secondary);">Stride modifiers here (minimum 0):</span> ${TUP_POS.map(p=>`<label class="tp-set">${p}<input type="number" value="${S['fsbMod'+p]}" style="width:55px" onchange="tupSetVal('fsbMod${p}',this.value)"></label>`).join('')}</div>
   <div class="tp-card"><h4>Checks</h4>
     ${num('speedPct','Speed check (% of max)')}${num('speedBoxes','Extra box sprints')}${num('mmHigh','m/min too high >')}${num('mmLow','m/min too low <')}${num('mmLowMin','…only if mins ≥')}${num('durDiff','GPS duration diff (min)')}${num('maxOver','Top speed over max by (km/h)')}</div>
@@ -8331,15 +8490,17 @@ async function renderTupPlan(){
   const root = document.getElementById('tupRoot'); if (!root) return;
   await tupLoad();
   const V = TUP.view||'match';
-  const tabs = [['match','Match Day'],['nonsquad','Non-Squad'],['fsb','First Session Back'],['settings','Settings']];
+  const tabs = [['run','Run Sheet'],['match','Match Day (coach)'],['nonsquad','Non-Squad'],['fsb','First Session Back'],['settings','Settings']];
   root.innerHTML = `<style>.tp-nav{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;} .tp-nav button{border:1px solid var(--border);background:var(--surface,#fff);border-radius:16px;padding:6px 14px;font-size:12.5px;font-weight:600;cursor:pointer;} .tp-nav button.on{background:#F26522;color:#fff;border-color:#F26522;}
     .tp-NonSquad{background:#6b5aa6}</style>
-    <div class="tp-nav">${tabs.map(t=>`<button class="${V===t[0]?'on':''}" onclick="tupSetView('${t[0]}')">${t[1]}</button>`).join('')}</div><div id="tupView"></div>`;
+    ${tupOverdueBanner()}<div class="tp-nav">${tabs.map(t=>`<button class="${V===t[0]?'on':''}" onclick="tupSetView('${t[0]}')">${t[1]}</button>`).join('')}</div><div id="tupView"></div>`;
   const host = document.getElementById('tupView');
   if (V==='settings'){ host.innerHTML = `<style>.tp-set{display:inline-flex;flex-direction:column;font-size:11px;color:var(--text-secondary);gap:2px;margin-right:10px;} .tp-set input,.tp-in{border:1px solid var(--border);border-radius:6px;padding:5px 7px;font-size:12.5px;background:var(--surface,#fff);} .tp-card{border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin:0 0 12px;} .tp-card h4{margin:0 0 8px;font-size:13.5px;} .tp-tbl{border-collapse:collapse;width:100%;font-size:12.5px;} .tp-tbl th{background:var(--surface-2,#f3f4f6);padding:7px 8px;text-align:left;font-size:11px;} .tp-tbl td{padding:4px 8px;border-bottom:1px solid var(--border);}</style>` + tupSettingsView(); return; }
+  if (V==='run'){ tupRunView(host); return; }
   if (V==='nonsquad'){ tupNsView(host); return; }
   if (V==='fsb'){ tupFsbView(host); return; }
   await renderTupMatchDay();
+  tupBadge();
 }
 async function renderTupMatchDay(){
   const root = document.getElementById('tupView'); if (!root) return;
@@ -8496,7 +8657,7 @@ function tupBenchHtml(){
   const grp = g => rows.filter(r=>r.group===g).sort((a,b)=>b.strides-a.strides||a.name.localeCompare(b.name));
   const col = { Full:'#d9534f', Half:'#f0a020', Done:'#3f9b5a', GK:'#1f3a5f' };
   const blk = (g, title, sub)=>{ const l = grp(g); return `<div class="tb-grp" style="border-color:${col[g]};"><div class="tb-gh" style="background:${col[g]};">${title} <span>${l.length}</span></div><div class="tb-gs">${sub}</div>
-    <div class="tb-gl">${l.length ? l.map(r=>`<div class="tb-p"><span>${tupEsc(r.name)}</span>${r.strides?`<b>${r.strides}</b>`:`<i>${r.min!=null?r.min+"'":''}</i>`}</div>`).join('') : '<div class="tb-none">none</div>'}</div></div>`; };
+    <div class="tb-gl">${l.length ? l.map(r=>`<div class="tb-p"><span>${tupEsc(r.name)}</span>${(r.strides && TUP.set.useMods)?`<b>${r.strides}</b>`:`<i>${r.min!=null?r.min+"'":''}</i>`}</div>`).join('') : '<div class="tb-none">none</div>'}</div></div>`; };
   const none = rows.filter(r=>!r.group);
   const S = TUP.set;
   const pitch = (k,t,l)=>`<div class="tb-pit"><div class="tb-pt">${t}</div>${tupPitchSvg(k)}<div class="tb-pl">${l}</div></div>`;
@@ -8513,10 +8674,10 @@ function tupBenchHtml(){
     <div class="tb-head">${ROAR_LOGO_SVG}<div class="tb-title"><b>Post-match top-up</b><span>${m.date} · ${m.ha==='Away'?'Away':'Home'} ${m.opponent?'vs '+tupEsc(m.opponent):''} · max 15 min</span></div>${ROAR_LOGO_SVG}</div>
     ${none.length?`<div class="tb-nn">Minutes not entered for: ${none.map(r=>tupEsc(r.name)).join(', ')}</div>`:''}
     <div class="tb-groups">${blk('Full','FULL',`Played ${'0–'+(S.halfMin-1)} min or didn't play`)}${blk('Half','HALF',`Played ${S.halfMin}–${S.doneMin-1} min`)}${blk('Done','DONE',`Played ${S.doneMin}+ min. Cool-down only, no top-up`)}</div>
-    <div style="font-size:12px;color:#374151;margin:-2px 0 8px;font-weight:600;">The number next to each name = how many <u>strides</u> she runs in the last drill (box-to-box). Finish your strides, then you are done.</div>
+    <div style="font-size:12px;color:#374151;margin:-2px 0 8px;font-weight:600;">${S.useMods?'The number next to each name = how many <u>strides</u> she runs in the last drill (box-to-box). Finish your strides, then you are done.':`In the last drill (box-to-box strides): <b>HALF</b> walks off after stride ${S.halfStrides}. <b>FULL</b> walks off after stride ${S.fullStrides}. Everyone starts together on the beep.`}</div>
     <table class="tb-tbl"><thead><tr><th>Clock</th><th>Drill</th><th>Layout</th><th>Target</th><th>Rest</th><th>Reps</th></tr></thead><tbody>${TUP_SESSION.map(s=>`<tr><td><b>${s.clock}</b></td><td><b>${s.drill}</b></td><td>${s.layout}</td><td>${s.target}</td><td>${s.rest}</td><td>${s.reps}</td></tr>`).join('')}</tbody></table>
-    <div class="tb-pits">${pitch('returns','Pitch returns','1 pitch return · 48 s · rest 48 s')}${pitch('sprints','Box sprints','Across the box · max effort · walk back + 60 s')}${pitch('strides','Box-to-box strides','Walk – stride – walk · 12 s · rest 36 s')}<div class="tb-key"><b>How to read it</b><br>White dashed = jog / walk · Yellow = fast run<br><b>Everyone:</b> prep, 2 pitch returns, 3 box sprints.<br><b>Then strides:</b> each player does her own stride count and leaves when finished.<br><b>Clock:</b> 0–15 min, GPS off for the last minute.</div></div>
-    <div class="tb-foot">Everyone does the first 3 drills. Only the strides change from player to player.</div></div>`;
+    <div class="tb-pits">${pitch('returns','Pitch returns','1 pitch return · 48 s · rest 48 s')}${pitch('sprints','Box sprints','Across the box · max effort · walk back + 60 s')}${pitch('strides','Box-to-box strides','Walk – stride – walk · 12 s · rest 36 s')}<div class="tb-key"><b>How to read it</b><br>White dashed = jog / walk · Yellow = fast run<br><b>Everyone:</b> prep, 2 pitch returns, 3 box sprints.<br><b>Then strides:</b> ${S.useMods?'each player does her own stride count and leaves when finished.':`Half walks off after stride ${S.halfStrides}, Full after stride ${S.fullStrides}.`}<br><b>Clock:</b> 0–15 min, GPS off for the last minute.</div></div>
+    <div class="tb-foot">Everyone does the first 3 drills. Only the strides change by group.</div></div>`;
 }
 function openTupBench(){
   reportKind = 'tupbench'; mpSetLandscape(false);
