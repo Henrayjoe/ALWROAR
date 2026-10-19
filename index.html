@@ -434,7 +434,7 @@
       <span id="saveAllStatus" style="flex:1;text-align:right;white-space:nowrap;">Following the sheet</span>
     </div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-19 12:05</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-19 20:30</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -8121,7 +8121,7 @@ function tupRunView(host){
       ${hs.length?`<div class="hint" style="margin:0 0 6px;">Tick anyone who <b>missed</b> the top-up (didn't run it, or stopped early). Leave everyone else.</div>${hs.map(r=>`<label style="display:block;padding:3px 0;font-size:14px;"><input type="checkbox" ${(m.players[r.id]||{}).s1==='Skipped'?'checked':''} onchange="tupRunMissed('${r.id}',this.checked)"> ${tupEsc(r.name)} <span class="tp-badge tp-${r.group}">${r.group}</span></label>`).join('')}`:'<div class="hint">Enter minutes above first.</div>'}
       <div style="margin-top:10px;"><button class="rn-big go" onclick="tupRunComplete()">✓ Top-up complete</button><button class="rn-q" onclick="tupRunNotNeeded()">Not run (pitch unavailable / not needed)</button> <span style="font-size:12px;margin-left:6px;">Status: <b>${st}</b></span></div></div>
     <div class="tp-card"><h4>Step 4 · The next session</h4><div class="hint" style="margin:0 0 8px;">GPS needs no entry: it is read from the GPS sheet once it is synced. The next card is made for you from the minutes and the ticks above.</div>
-      <button class="rn-big alt" onclick="openTupFsb()">🖨 First Session Back card</button>${rows.some(r=>r.status==='Non-squad')?'<button class="rn-big alt" onclick="openTupNs()">🖨 Non-Squad card</button>':''}<button class="rn-big alt" onclick="openTupSop()">🖨 One-page SOP</button></div>`;
+      <button class="rn-big alt" onclick="openTupFsb()">🖨 First Session Back card</button>${rows.some(r=>r.status==='Non-squad')?'<button class="rn-big alt" onclick="openTupNs()">🖨 Non-Squad card</button>':''}<button class="rn-big alt" onclick="openTupSop()">🖨 One-page SOP</button><button class="rn-big alt" onclick="openTupAway()">🖨 Away-game card (generic)</button></div>`;
 }
 function tupSopHtml(){
   const S = TUP.set, e = tupEsc;
@@ -8149,6 +8149,40 @@ function openTupSop(){
   reportKind = 'tupsop'; mpSetLandscape(false);
   document.getElementById('rptTrainingControls').style.display = 'none';
   document.getElementById('reportContent').innerHTML = tupSopHtml();
+  document.getElementById('overlayReport').classList.add('show');
+}
+function tupAwayHtml(){
+  const S = TUP.set;
+  const css = `<style>.aw{font-family:Inter,system-ui,sans-serif;color:#111;font-size:13px;} .aw-head{display:flex;align-items:center;justify-content:space-between;border-bottom:3px solid #111;padding-bottom:6px;margin-bottom:10px;} .aw-head .rpt-logo{height:46px;width:auto;} .aw h1{font-size:20px;margin:0;text-transform:uppercase;letter-spacing:.03em;}
+    .aw h2{font-size:15px;margin:12px 0 4px;background:#111;color:#fff;padding:4px 8px;text-transform:uppercase;} .aw table{width:100%;border-collapse:collapse;margin:4px 0 6px;} .aw th{background:#e5e7eb;border:1px solid #6b7280;padding:5px 7px;text-align:left;font-size:12px;} .aw td{border:1px solid #6b7280;padding:6px 7px;vertical-align:top;font-size:13px;} .aw .big{font-size:17px;font-weight:800;} .aw ul{margin:3px 0 4px 18px;padding:0;} .aw li{margin:2px 0;} .aw .names{border-bottom:1px solid #6b7280;height:20px;margin:3px 0;} .aw .note{font-size:11px;color:#4b5563;margin-top:6px;}</style>`;
+  const A = {ssg:S.fsbASsg, str:S.fsbAStr}, B = {ssg:S.fsbBSsg, box:S.fsbBBox, str:S.fsbBStr};
+  return css + `<div class="aw"><div class="aw-head">${ROAR_LOGO_SVG}<div style="text-align:center;flex:1;"><h1>Away Game – Top-Up Card</h1><span>Brisbane Roar Women · match day + first session back</span></div>${ROAR_LOGO_SVG}</div>
+  <h2>1 · Match day top-up (straight after the final whistle)</h2>
+  <table><thead><tr><th style="width:26%">Minutes played</th><th style="width:14%">Group</th><th>What they do</th></tr></thead><tbody>
+    <tr><td class="big">60 min or more</td><td><b>DONE</b></td><td>Nothing extra. Cool-down, food, recovery.</td></tr>
+    <tr><td class="big">Under 60 min<br><span style="font-weight:400;font-size:11.5px;">(30–59 min)</span></td><td><b>HALF</b></td><td>Warm-up, ${S.retReps} pitch returns, ${S.boxReps} box sprints, then <span class="big">${S.halfStrides} strides</span>.</td></tr>
+    <tr><td class="big">Under 30 min<br><span style="font-weight:400;font-size:11.5px;">(incl. unused sub)</span></td><td><b>FULL</b></td><td>Warm-up, ${S.retReps} pitch returns, ${S.boxReps} box sprints, then <span class="big">${S.fullStrides} strides</span>.</td></tr></tbody></table>
+  <ul><li><b>Warm-up (about 2 min):</b> jog, dynamic mobility, 2 build-ups.</li>
+    <li><b>Pitch return:</b> goal line to goal line and back (about 210 m), ${S.retGo} s, then ${S.retRest} s walk.</li>
+    <li><b>Box sprint:</b> across the width of the penalty box (about 40 m), max effort, walk back plus 60 s.</li>
+    <li><b>Stride:</b> box edge to box edge (about 70 m) in ${S.strGo} s, then walk back ${S.strRest} s.</li>
+    <li>Whole session about 15 min. Goalkeepers do not take part. Anyone with a niggle or unsure: she does not run, tell the physio.</li></ul>
+  <div><b>Players who did the top-up</b> (write names; tick if missed one):</div><div class="names"></div><div class="names"></div>
+  <h2>2 · First session back (first training after the game)</h2>
+  <table><thead><tr><th style="width:26%">Played</th><th style="width:14%">Group</th><th>What they do (before joining the team)</th></tr></thead><tbody>
+    <tr><td class="big">60 min or more</td><td><b>DONE</b></td><td>Normal training. Extended warm-up with the starters' recovery group.</td></tr>
+    <tr><td class="big">Under 60 min</td><td><b>HALF</b></td><td>Small-sided games: <b>${A.ssg} × ${S.ssgMin} min</b> (${S.ssgRest} min rest), then <b>${A.str} strides</b>. Then join the team.</td></tr>
+    <tr><td class="big">Under 30 min or unused</td><td><b>FULL</b></td><td>Small-sided games: <b>${B.ssg} × ${S.ssgMin} min</b> (${S.ssgRest} min rest), <b>${B.box} box sprints</b>, then <b>${B.str} strides</b>. Then join the team.</td></tr>
+    <tr><td class="big">Not in the squad</td><td><b>NON-SQUAD</b></td><td>Full non-squad session (about 40 min) on match day or the day after.</td></tr></tbody></table>
+  <ul><li><b>Missed the match-day top-up?</b> Move up one level: Half does the Full work, Full adds 2 pitch returns and 2 extra strides.</li>
+    <li><b>Next game ${S.shortDays} days or fewer away?</b> Halve the small-sided game sets and skip the strides.</li>
+    <li>Small-sided game sizes: 4 players a side 30×25 m, 3 a side 25×20 m, 2 a side 20×15 m.</li></ul>
+  <div class="note">Rules: sub 60 min = Half, sub 30 min or unused = Full. Same card every away game. Questions: ${S.contact?tupEsc(S.contact):'Henri'}.</div></div>`;
+}
+function openTupAway(){
+  reportKind = 'tupaway'; mpSetLandscape(false);
+  document.getElementById('rptTrainingControls').style.display = 'none';
+  document.getElementById('reportContent').innerHTML = tupAwayHtml();
   document.getElementById('overlayReport').classList.add('show');
 }
 function tupOverdueList(){
