@@ -434,7 +434,7 @@
       <span id="saveAllStatus" style="flex:1;text-align:right;white-space:nowrap;">Following the sheet</span>
     </div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-20 14:20</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-20 17:05</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -3575,7 +3575,7 @@ function renderTeam(){
           <span class="ref-note">Fixed squad-wide trend on the four tests best suited to catching a developing issue early — same squad mean/median/SD method as Team Trends, just a curated view for a quick weekly check. Only counts sessions tagged "Weekly Screening" in the Results sheet's notes column, so other testing (preseason batteries, return-to-play re-tests, etc.) doesn't get mixed in.</span>
         </div>
         <div id="screeningGrid" class="chart-grid"></div>
-        <div class="chart-note"><span>▪ Solid line = squad mean · shaded band = ±1 SD · dashed line = median</span><span>▪ Per test date${genderFilterVal!=='all'?' ('+(genderFilterVal==='W'?'Women':'Men')+' only)':''}</span></div>
+        <div class="chart-note"><span>▪ Solid line = squad mean · shaded band = ±1 SD · dashed line = median</span><span>▪ ◆ Pre-season = each player's own pre-season average (sessions tagged "Pre-Season Screening")</span><span>▪ Per test date${genderFilterVal!=='all'?' ('+(genderFilterVal==='W'?'Women':'Men')+' only)':''}</span></div>
       </div></div>
       <div class="team-tc tc" data-t="cmjmonitor"><div class="charts-body">
         <div class="quad-ctrl-row">
@@ -4924,11 +4924,11 @@ function drawTeamTrendChart(){
     });
     const canvas = document.getElementById('ttc_'+key);
     const ctx = canvas.getContext('2d');
-    teamTrendCharts.push(new Chart(ctx, { type:'line', data:{ labels:dates, datasets:[
+    teamTrendCharts.push(new Chart(ctx, { type:'line', data:{ labels:xLabels, datasets:[
       { label:'−1 SD', data:perDate.map(d=>d.sdLo), borderColor:'transparent', pointRadius:0, fill:false },
       { label:'+1 SD', data:perDate.map(d=>d.sdHi), borderColor:'transparent', backgroundColor:'rgba(242,101,34,0.14)', pointRadius:0, fill:'-1' },
       { label:'Median', data:perDate.map(d=>d.median), borderColor:'#94a3b8', borderDash:[5,4], pointRadius:2, borderWidth:1.5 },
-      { label:'Squad mean', data:perDate.map(d=>d.mean), borderColor:'#f26522', backgroundColor:'#f26522', tension:0.25, spanGaps:true, pointRadius:3, borderWidth:2.5 },
+      { label:'Squad mean', data:perDate.map(d=>d.mean), borderColor:'#f26522', backgroundColor:'#f26522', tension:0.25, spanGaps:true, pointRadius:xLabels.map((_,i)=>hasPre&&i===0?6:3), pointStyle:xLabels.map((_,i)=>hasPre&&i===0?'rectRot':'circle'), pointBackgroundColor:xLabels.map((_,i)=>hasPre&&i===0?'#111827':'#f26522'), borderWidth:2.5, segment:{ borderDash:c=>(hasPre&&c.p0DataIndex===0)?[4,4]:undefined } },
     ] }, options:{responsive:true, plugins:{legend:{position:'bottom', labels:{filter:l=>l.text!=='−1 SD' && l.text!=='+1 SD', boxWidth:10, font:{size:10}}}, tooltip:{callbacks:{afterBody:ctx=>{ const d=perDate[ctx[0].dataIndex]; return `n=${d.n}`; }}}}, scales:{ x:{title:{display:true, text:'Test date', font:{size:10}}}, y:{beginAtZero:false, title:{display:true, text:m.unit?`${m.label} (${m.unit})`:m.label, font:{size:10}}} }} }));
 
     const statsEl = document.getElementById('tts_'+key);
@@ -5110,11 +5110,19 @@ function drawScreeningCharts(){
   const dateSet = new Set();
   players.forEach(a=>a.sessions.filter(isWeeklyScreeningSession).forEach(s=>dateSet.add(s.test_date)));
   const dates = [...dateSet].sort((a,b)=>new Date(a)-new Date(b));
+  const PRE = 'Pre-season';
+  const hasPre = players.some(a=>a.sessions.some(isPreseasonCmjSession));
+  const xLabels = hasPre ? [PRE, ...dates] : dates;
   SCREENING_METRICS.forEach(sm=>{
     const m = metricByKey(sm.key);
-    const perDate = dates.map(dt=>{
+    const perDate = xLabels.map(dt=>{
       const vals = [];
       players.forEach(a=>{
+        if (dt===PRE){   // each player's own pre-season average (sessions tagged Pre-Season Screening)
+          const pv = a.sessions.filter(isPreseasonCmjSession).map(s=>repVal(m,s)).filter(v=>v!=null);
+          if (pv.length) vals.push(pv.reduce((x,y)=>x+y,0)/pv.length);
+          return;
+        }
         const s = a.sessions.find(s=>s.test_date===dt && isWeeklyScreeningSession(s));
         if (s){ const v = repVal(m,s); if (v!=null) vals.push(v); }
       });
