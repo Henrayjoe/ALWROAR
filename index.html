@@ -434,7 +434,7 @@
       <span id="saveAllStatus" style="flex:1;text-align:right;white-space:nowrap;">Following the sheet</span>
     </div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-20 10:50</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-20 14:20</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -3571,7 +3571,7 @@ function renderTeam(){
       </div></div>
       <div class="team-tc tc" data-t="screening"><div class="charts-body">
         <div class="quad-ctrl-row">
-          <span class="control-label">Weekly Screening</span>
+          <span class="control-label">Weekly Screening</span><button class="btn-sm no-print" onclick="openTeamTabReport('screening','Weekly Screening',false)">🖨 Print</button>
           <span class="ref-note">Fixed squad-wide trend on the four tests best suited to catching a developing issue early — same squad mean/median/SD method as Team Trends, just a curated view for a quick weekly check. Only counts sessions tagged "Weekly Screening" in the Results sheet's notes column, so other testing (preseason batteries, return-to-play re-tests, etc.) doesn't get mixed in.</span>
         </div>
         <div id="screeningGrid" class="chart-grid"></div>
@@ -3579,7 +3579,7 @@ function renderTeam(){
       </div></div>
       <div class="team-tc tc" data-t="cmjmonitor"><div class="charts-body">
         <div class="quad-ctrl-row">
-          <span class="control-label">CMJ Squad Trends</span>
+          <span class="control-label">CMJ Squad Trends</span><button class="btn-sm no-print" onclick="openTeamTabReport('cmjmonitor','CMJ Monitoring',true)">🖨 Print</button>
           <span class="ref-note">Squad mean per test date, shaded band = ±1 SD, dashed line = median. "This week" line under each chart shows the mean's move since the last test and how many players are individually flagged for that specific metric right now.</span>
         </div>
         <div id="cmjSquadTrendGrid" class="chart-grid"></div>
@@ -5075,6 +5075,22 @@ const SCREENING_METRICS = [
   { key:'hipAnkle_addPeak', title:'Adductor Squeeze — Hip Add (ankle) Peak Force' },
   { key:'dsi', title:'Readiness Proxy (DSI = CMJ force ÷ IMTP force)' },
 ];
+function openTeamTabReport(key, title, landscape){
+  const src = document.querySelector('.team-tc[data-t="'+key+'"] .charts-body'); if (!src){ alert('Open the tab first.'); return; }
+  const clone = src.cloneNode(true);
+  const oc = src.querySelectorAll('canvas'), cc = clone.querySelectorAll('canvas');
+  cc.forEach((c,i)=>{ const o = oc[i]; let url = ''; try{ url = o.toDataURL('image/png'); }catch(e){}
+    if (!o || !o.width || url.length<200){ c.remove(); return; }
+    const img = document.createElement('img'); img.src = url; img.style.cssText = 'width:100%;height:auto;display:block;'; c.replaceWith(img); });
+  clone.querySelectorAll('button, select, input, .no-print').forEach(x=>x.remove());
+  clone.querySelectorAll('.chart-wrap').forEach(x=>x.classList.add('chart-block'));
+  const gen = new Date().toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'});
+  const sub = genderFilterVal==='all' ? 'Whole squad' : (genderFilterVal==='W'?'Women':'Men');
+  reportKind = 'teamtab_'+key; mpSetLandscape(!!landscape);
+  document.getElementById('rptTrainingControls').style.display = 'none';
+  document.getElementById('reportContent').innerHTML = `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">${title}</div><div class="rpt-sub">Brisbane Roar · ${sub} · ${gen}</div></div>${ROAR_LOGO_SVG}</div>` + clone.innerHTML;
+  document.getElementById('overlayReport').classList.add('show');
+}
 let screeningCharts=[];
 // Only rows tagged in the sheet's notes column count as a weekly screening
 // session -- keeps this separate from other testing (preseason batteries,
