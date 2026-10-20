@@ -434,7 +434,7 @@
       <span id="saveAllStatus" style="flex:1;text-align:right;white-space:nowrap;">Following the sheet</span>
     </div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-19 20:30</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-20 10:50</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -3299,6 +3299,53 @@ function aggregateTrainingSessions(a){
   Object.values(byKey).forEach(s=>{ s.max_velocity_kmh = rawMaxVel(a.trainingGps, e=>e.date===s.date && (e.session_label||'')===(s.session_label||'')); });
   return Object.values(byKey).sort((x,y)=>new Date(x.date)-new Date(y.date));
 }
+function pldDualSvg(labels, a, b){
+  const w=980, h=250, m={l:58,r:52,t:14,b:34};
+  const nice = mx => { if (!(mx>0)) return 1; const st = Math.pow(10, Math.floor(Math.log10(mx))); return Math.ceil(mx/st*2)/2*st; };
+  const yA = nice(Math.max(0,...a.values.filter(v=>v!=null))), yB = nice(Math.max(0,...b.values.filter(v=>v!=null)));
+  const n = labels.length, X = i => m.l + (n<=1 ? (w-m.l-m.r)/2 : (w-m.l-m.r)*i/(n-1)), YA = v => m.t + (h-m.t-m.b)*(1-v/yA), YB = v => m.t + (h-m.t-m.b)*(1-v/yB);
+  let g = '';
+  for (let i=0;i<=4;i++){ const y = m.t + (h-m.t-m.b)*(1-i/4);
+    g += `<line x1="${m.l}" x2="${w-m.r}" y1="${y}" y2="${y}" stroke="#e5e7eb"/><text x="${m.l-6}" y="${y+3.5}" font-size="10" text-anchor="end" fill="${a.color}">${Math.round(yA*i/4).toLocaleString()}</text><text x="${w-m.r+6}" y="${y+3.5}" font-size="10" fill="${b.color}">${Math.round(yB*i/4).toLocaleString()}</text>`; }
+  const step = Math.max(1, Math.ceil(n/14));
+  labels.forEach((l,i)=>{ if (i%step===0 || i===n-1) g += `<text x="${X(i)}" y="${h-m.b+14}" font-size="10" text-anchor="middle" fill="#6b7280">${l.slice(5)}</text>`; });
+  [[a,YA],[b,YB]].forEach(([sr,Y])=>{
+    let d='', pen=false; sr.values.forEach((v,i)=>{ if (v==null){ pen=false; return; } d += `${pen?'L':'M'}${X(i).toFixed(1)},${Y(v).toFixed(1)} `; pen=true; });
+    g += `<path d="${d}" fill="none" stroke="${sr.color}" stroke-width="2.2"/>`;
+    sr.values.forEach((v,i)=>{ if (v!=null) g += `<circle cx="${X(i).toFixed(1)}" cy="${Y(v).toFixed(1)}" r="3" fill="${sr.color}"/>`; });
+  });
+  g += `<text x="${m.l}" y="9" font-size="10" fill="${a.color}" font-weight="700">${a.name}</text><text x="${w-m.r}" y="9" font-size="10" text-anchor="end" fill="${b.color}" font-weight="700">${b.name}</text>`;
+  return `<svg viewBox="0 0 ${w} ${h}" width="100%" style="display:block;">${g}</svg>`;
+}
+function openPlayerLoadReport(aid, n){
+  const a = athleteMap[aid]; if (!a || !(a.trainingGps||[]).length){ alert('No training GPS for this player yet.'); return; }
+  reportKind = 'playerload'; mpSetLandscape(false);
+  document.getElementById('rptTrainingControls').style.display = 'none';
+  document.getElementById('reportContent').innerHTML = buildPlayerLoadReportHtml(a, +n||12);
+  document.getElementById('overlayReport').classList.add('show');
+}
+function buildPlayerLoadReportHtml(a, n){
+  let sessions = aggregateTrainingSessions(a); if (n>0) sessions = sessions.slice(-n);
+  const today = sessions.length ? sessions[sessions.length-1].date : toLocalDateStr(new Date());
+  const acwr = computeACWR(a, today), latest = sessions[sessions.length-1], pctBest = maxVelPctOfBest(a, latest.max_velocity_kmh);
+  const kpi = (l,v,sub,col)=>`<div class="kpi-card"><div class="kpi-card-label">${l}</div><div class="kpi-card-value" ${col?`style="color:${col}"`:''}>${v}</div><div class="kpi-card-sub">${sub||''}</div></div>`;
+  const labels = sessions.map(x=>x.date);
+  const avg = f => { const v = sessions.map(f).filter(x=>x!=null&&isFinite(x)); return v.length ? v.reduce((p,c)=>p+c,0)/v.length : null; };
+  return `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">${tupEsc(a.name)}</div><div class="rpt-sub">Training load · Brisbane Roar · last ${sessions.length} sessions to ${today}</div></div>${ROAR_LOGO_SVG}</div>
+    <div class="kpi-cards">
+      ${kpi('ACWR (7d:28d)', acwr.acwr!=null?fmt(acwr.acwr):'—', acwr.zone?ACWR_ZONE_LABEL[acwr.zone]:'', acwr.zone?ACWR_ZONE_COLOR[acwr.zone]:'')}
+      ${kpi('Acute load (7d avg)', fmt(acwr.acute)+' m/day', '')}
+      ${kpi('Chronic load (28d avg)', fmt(acwr.chronic)+' m/day', '')}
+      ${kpi('Max velocity (latest)', pctBest!=null?fmt(pctBest)+'%':'—', pctBest!=null?'of best ('+fmt(personalBestMaxVel(a))+' km/h)':'')}
+    </div>
+    <div class="chart-block"><div class="rpt-section-title">Session Trend</div>
+      ${pldDualSvg(labels, {name:'Total distance (m)', color:'#f26522', values:sessions.map(x=>x.total_distance_m)}, {name:'HSR (m)', color:'#3d6fb0', values:sessions.map(x=>x.hsr_distance_m)})}</div>
+    <div class="chart-block"><div class="rpt-section-title">Sessions</div>
+    <table class="rpt-table"><thead><tr><th>Date</th><th>Session</th><th>Duration</th><th>Distance</th><th>Dist/min</th><th>HSR</th><th>HSR/min</th><th>Sprint</th><th>Accel/Decel</th><th>Max Vel</th></tr></thead><tbody>
+    ${[...sessions].reverse().map(x=>`<tr><td>${x.date}</td><td>${tupEsc(x.session_label||'—')}</td><td>${fmt(x.duration_min)} min</td><td>${fmt(x.total_distance_m)} m</td><td>${fmt(gpsDistPerMin(x))}</td><td>${fmt(x.hsr_distance_m)} m</td><td>${fmt(gpsHsrPerMin(x))}</td><td>${fmt(x.sprint_distance_m)} m</td><td>${fmt(x.accel_decel_count)}</td><td>${x.max_velocity_kmh!=null?fmt(x.max_velocity_kmh)+' km/h':'—'}</td></tr>`).join('')}
+    <tr class="mdr-avg-row"><td colspan="2"><b>Average</b></td><td>${fmt(avg(x=>x.duration_min))} min</td><td>${fmt(avg(x=>x.total_distance_m))} m</td><td>${fmt(avg(gpsDistPerMin))}</td><td>${fmt(avg(x=>x.hsr_distance_m))} m</td><td>${fmt(avg(gpsHsrPerMin))}</td><td>${fmt(avg(x=>x.sprint_distance_m))} m</td><td>${fmt(avg(x=>x.accel_decel_count))}</td><td></td></tr>
+    </tbody></table></div>`;
+}
 let gpsTrainingChartInstance = null;
 function drawGpsTraining(){
   const a = athleteMap[selectedId]; if (!a) return;
@@ -3323,7 +3370,7 @@ function drawGpsTraining(){
   if (acwr.zone==='high-risk') html += `<div class="hint" style="color:#c8483d;font-weight:600;padding:8px 4px;">⚠ Acute load is running well above the chronic average — a recognised injury-risk pattern (Gabbett et al.). Worth a conversation before adding more load this week.</div>`;
   else if (acwr.zone==='undertrained') html += `<div class="hint" style="padding:8px 4px;">Acute load is running notably below the chronic average — may indicate reduced training exposure recently (illness, rest, reduced minutes).</div>`;
 
-  html += `<div class="pq-heading" style="margin-top:18px;">Session Trend</div><canvas id="gpsTrainingChart" height="90"></canvas>`;
+  html += `<div class="pq-heading" style="margin-top:18px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">Session Trend <select id="pldN" class="axis-select"><option value="8">Last 8 sessions</option><option value="12" selected>Last 12 sessions</option><option value="20">Last 20 sessions</option><option value="0">All sessions</option></select> <button class="btn-sm" onclick="openPlayerLoadReport('${a.id}', document.getElementById('pldN').value)">🖨 Print load report</button></div><canvas id="gpsTrainingChart" height="90"></canvas>`;
   const pdrDates = [...new Set((a.trainingGps||[]).map(e=>e.date))].sort().reverse();
   html += `<div class="pq-heading" style="margin-top:18px;">Drill-by-drill report (print for the player)</div>
     <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:6px;"><select id="pdrDate" class="axis-select">${pdrDates.map(d=>`<option value="${d}">${d}</option>`).join('')}</select>
