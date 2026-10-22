@@ -325,6 +325,15 @@
   .rpt-table td { text-align:right; padding:5px 9px; border-bottom:1px solid #f1f2f4; }
   .rpt-table tbody tr:nth-child(odd) { background:#fdf1ea; }
   .rpt-table .lbl { font-weight:600; }
+  /* Fixed-layout numeric report tables: every column the same width (first column wider), no wrapping, uniform row height, always inside the page */
+  .rpt-table.rpt-grid { table-layout:fixed; width:100%; }
+  .rpt-table.rpt-grid td { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; height:24px; font-variant-numeric:tabular-nums; }
+  .rpt-table.rpt-grid th { white-space:normal; overflow-wrap:anywhere; line-height:1.15; vertical-align:bottom; padding-left:4px; padding-right:4px; }
+  .rpt-table.rpt-grid td { padding-left:4px; padding-right:4px; }
+  .rpt-table.rpt-grid td:first-child, .rpt-table.rpt-grid th:first-child { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .rpt-table.rpt-grid th { font-size:9px; letter-spacing:0; }
+  .rpt-table.rpt-grid td { line-height:1.2; vertical-align:middle; } .rpt-table.rpt-grid td span { font-size:.8em !important; line-height:1; } .rpt-table.rpt-grid tbody tr { height:22px; }
+  .rpt-table.rpt-grid td select { line-height:1.2; }
   /* Match Day Report: each value sits in its own inset, rounded bar with a white gutter either side, so neighbouring columns can never run together (the old version painted the fill across the whole cell). Bar height and font size come from CSS variables set per report from the player count, so a full squad still fits one landscape page. Declared with !important where the generic print table rules would otherwise shrink them. */
   .mdr-table { table-layout:fixed; }
   .mdr-table th { text-align:center; font-size:10px !important; letter-spacing:.02em; padding:8px 4px !important; white-space:normal; border-bottom:none; }
@@ -382,6 +391,7 @@
     .rpt-table { font-size:11px; }
     .rpt-table th { font-size:9.5px; padding:5px 6px; white-space:normal; }
     .rpt-table td { padding:4px 6px; }
+    .rpt-table.rpt-grid td { padding:3px 3px; height:21px; } .rpt-table.rpt-grid th { padding:4px 3px; font-size:8.5px; }
     .rpt-table th:first-child, .rpt-table td:first-child { white-space:nowrap; }
     .rpt-section-title { font-size:12px; margin:16px 0 7px; page-break-after:avoid; break-after:avoid-page; }
     .rpt-section-title + table, .rpt-section-title + .drill-bar-legend, .rpt-section-title + .kpi-cards { page-break-before:avoid; break-before:avoid-page; }
@@ -435,7 +445,7 @@
       <span id="saveAllStatus" style="flex:1;text-align:right;white-space:nowrap;">Following the sheet</span>
     </div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-22 21:40</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-22 22:10</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -3870,6 +3880,33 @@ function flagOutliersMulti(rows, keys){
   });
   return result;
 }
+// Makes every wide numeric table in a report fixed-layout: equal column widths (name column wider), no wrapping,
+// uniform row height, so nothing overflows the page and cells line up. Text-heavy tables are left alone.
+function rptGridify(root){
+  if (!root) return;
+  root.querySelectorAll('table.rpt-table').forEach(t=>{
+    if (t.dataset.grid || t.classList.contains('mdr-table') || t.closest('.pdr')) return;   // .pdr tables hide/show columns, so they keep their own layout
+    if (!t.tHead || t.tHead.rows.length!==1) return;
+    const ths = [...t.tHead.rows[0].cells], n = ths.length;
+    if (n<5 || ths.some(x=>x.colSpan>1)) return;
+    if (/notes|cue|exercise|capacity|availability|metric/i.test(ths.map(x=>x.textContent).join('|'))) return;
+    t.dataset.grid = '1'; t.classList.add('rpt-grid');
+    const hasMid = /^\s*(status|pos|group)\s*$/i.test(ths[1].textContent);
+    const first = n>=12 ? 17 : 20, mid = hasMid ? 7 : null;
+    const rest = (100 - first - (hasMid?mid:0)) / (n - 1 - (hasMid?1:0));
+    const cg = document.createElement('colgroup'), widths = [];
+    ths.forEach((_,i)=>{ const w = (i===0?first:(i===1&&hasMid?mid:rest)); widths.push(w); const c = document.createElement('col'); c.style.width = w.toFixed(2)+'%'; cg.appendChild(c); });
+    t.insertBefore(cg, t.firstChild);
+    // font size from the longest value in each column so nothing is cut off (page text width is about 700px)
+    const maxLen = ths.map(()=>1);
+    [...t.tBodies].forEach(tb=>[...tb.rows].forEach(r=>{ if (r.cells.length!==n) return; [...r.cells].forEach((c,i)=>{ const sel = c.querySelector('select'); const txt = sel ? sel.options[sel.selectedIndex].text : c.textContent.trim(); maxLen[i] = Math.max(maxLen[i], txt.length + 0.5); }); }));
+    let fs = 12;
+    widths.forEach((w,i)=>{ if (i===0) return; const px = 700*w/100 - 8; fs = Math.min(fs, px/(0.56*maxLen[i])); });
+    if (maxLen[0]) fs = Math.min(fs, (700*first/100 - 8)/(0.56*maxLen[0]));
+    t.style.fontSize = Math.max(8, Math.floor(fs*2)/2) + 'px';
+  });
+}
+(function(){ const rc = document.getElementById('reportContent'); if (rc && window.MutationObserver) new MutationObserver(()=>rptGridify(rc)).observe(rc,{childList:true,subtree:true}); })();
 function flagBg(flag){ return flag==='high' ? 'rgba(200,72,61,0.08)' : flag==='low' ? 'rgba(61,111,176,0.08)' : 'transparent'; }
 function flagTag(flag){ return flag ? ` <span title="${flag==='high'?'Top 10% today':'Bottom 10% today'}" style="font-size:11px;font-weight:800;color:${flag==='high'?'#c8483d':'#3d6fb0'}">${flag==='high'?'▲':'▼'}</span>` : ''; }
 // Renders a "Average X + Y by drill" breakdown, matching the men's GPS
@@ -4549,6 +4586,7 @@ function renderReportContent(){
 // the outer wrapper's height is set explicitly to the post-scale size --
 // that's what actually convinces the paginator it fits on one page.
 function printReport(){
+  try{ rptGridify(document.getElementById('reportContent')); }catch(e){}
   const outer = document.getElementById('reportFitOuter');
   const inner = document.getElementById('reportContent');
   inner.style.transform = '';
