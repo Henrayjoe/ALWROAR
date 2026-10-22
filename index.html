@@ -427,6 +427,7 @@
       <button data-g="W">Women</button>
       <button data-g="M">Men</button>
     </div>
+    <div style="padding:4px 12px 8px;font-size:11px;color:#6b7280;display:flex;align-items:center;gap:6px;"><span>GPS squad</span><select id="gpsViewSel" class="axis-select" style="flex:1;" onchange="setGpsView(this.value)"><option value="outfield">Outfield (default)</option><option value="keepers">Goalkeepers</option></select></div>
     <div class="alist" id="alist"><div style="padding:16px;font-size:12px;color:#7a8290;text-align:center">No players yet — add one, or import from a Google Sheet in Settings.</div></div>
     <div class="settings-bar"><span id="sheetStatus">No sheet imported</span><button class="btn-sm" onclick="showConfig()">⚙ Settings</button></div>
     <div class="settings-bar" style="flex-wrap:wrap;">
@@ -434,7 +435,7 @@
       <span id="saveAllStatus" style="flex:1;text-align:right;white-space:nowrap;">Following the sheet</span>
     </div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-20 17:05</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-22 21:15</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -581,7 +582,7 @@ const METRICS = [
   {key:'speed_20m', label:'Sprint — 20 m', unit:'s', lb:true, group:'Speed & Aerobic', paired:false},
   {key:'speed_30m', label:'Sprint — 30 m', unit:'s', lb:true, noNorm:true, group:'Speed & Aerobic', paired:false},
   {key:'speed_40m', label:'Sprint — 40 m', unit:'s', lb:true, noNorm:true, group:'Speed & Aerobic', paired:false},
-  {key:'speed_maxVel', label:'Max Velocity (flying sprint)', unit:'m/s', lb:false, group:'Speed & Aerobic', paired:false},
+  {key:'speed_maxVel', label:'Max Velocity (GPS PB)', unit:'m/s', lb:false, group:'Speed & Aerobic', paired:false},
   {key:'aerobic_result', label:'Aerobic Capacity (MAS)', unit:'km/h', lb:false, group:'Speed & Aerobic', paired:false, derived:true},
   {key:'vo2max_result', label:'Est. VO₂max (from MAS)', unit:'ml/kg/min', lb:false, group:'Speed & Aerobic', paired:false, derived:true},
   {key:'sts_reps', label:'Single Leg Sit-to-Stand', unit:'reps', lb:false, noNorm:true, group:'Capacity', paired:true, stsThreshold:true},
@@ -1300,10 +1301,46 @@ function mergeGameGpsFromSheet(rows){
 }
 function gpsDistPerMin(e){ return (e.total_distance_m!=null && e.duration_min) ? e.total_distance_m/e.duration_min : null; }
 function gpsHsrPerMin(e){ return (e.hsr_distance_m!=null && e.duration_min) ? e.hsr_distance_m/e.duration_min : null; }
+// ---- Goalkeeper vs outfield GPS ----
+// Keepers are kept out of every squad-wide GPS average, total and report by default. The "GPS squad" dropdown in the
+// sidebar switches the team GPS views and reports to show keepers only. A keeper is anyone whose position says GK,
+// anyone in the Minutes Plan "Goalkeeper" group, or anyone ticked as a keeper in Manage Players (a.isGK).
+let GPS_VIEW = 'outfield';
+function isKeeper(a){
+  if (!a) return false;
+  if (a.isGK===true) return true;
+  if (a.isGK===false) return false;
+  try{ if (a.position && tupPosCode(a.position)==='GK') return true; }catch(e){}
+  try{ if (mpPlayerGroup(a.id)==='Goalkeeper' || mpFindDefaultGroup(a.name)==='Goalkeeper') return true; }catch(e){}
+  return false;
+}
+function gpsPlayers(){ return Object.values(athleteMap).filter(a=>(genderFilterVal==='all'||a.gender===genderFilterVal) && ((GPS_VIEW==='keepers')===isKeeper(a))); }
+function gpsViewTag(){ return GPS_VIEW==='keepers' ? ' · GOALKEEPERS ONLY' : ''; }
+function setGpsView(v){ GPS_VIEW = v==='keepers' ? 'keepers' : 'outfield'; try{ renderSidebar(); }catch(e){} if (mode==='team') renderMain(); try{ refreshReportModalIfOpen(); }catch(e){} }
 function personalBestMaxVel(a){
-  const all = [...(a.trainingGps||[]), ...(a.gameGps||[])];
-  const vals = all.map(e=>e.max_velocity_kmh).filter(v=>v!=null);
-  return vals.length ? Math.max(...vals) : null;
+  // Highest whole-session top speed across training + match GPS (same Full-Session-row rule as everywhere else).
+  return rawMaxVel([...(a.trainingGps||[]), ...(a.gameGps||[])]);
+}
+// Max velocity for athlete profiles, quadrants, radar and scoring now comes from the GPS data (personal best
+// top speed), not the Results sheet. Each test session carries the PB as it stood on that date (so trends
+// still move), and the newest session carries the all-time PB. An athlete with no GPS top speed at all keeps
+// her Results-sheet value so nobody goes blank. Idempotent: safe to run on every render.
+const GPS_MAXVEL_FALLBACK_TO_RESULTS = true;
+function applyGpsMaxVel(){
+  Object.values(athleteMap).forEach(a=>{
+    const ss = a.sessions||[]; if (!ss.length) return;
+    ss.forEach(s=>{ if (!('_resMaxVel' in s)) s._resMaxVel = (s.speed_maxVel==null ? null : s.speed_maxVel); });
+    const rows = [...(a.trainingGps||[]), ...(a.gameGps||[])].filter(e=>e.max_velocity_kmh!=null);
+    const dates = [...new Set(rows.map(e=>e.date))].sort();
+    if (!dates.length){ ss.forEach(s=>{ s.speed_maxVel = GPS_MAXVEL_FALLBACK_TO_RESULTS ? s._resMaxVel : null; }); return; }
+    const newest = ss.reduce((m,x)=> (!m || String(x.test_date).slice(0,10) > String(m.test_date).slice(0,10)) ? x : m, null);
+    const overall = rawMaxVel(rows);
+    ss.forEach(s=>{
+      if (s===newest){ s.speed_maxVel = +(overall/3.6).toFixed(2); return; }
+      const d = String(s.test_date).slice(0,10), v = rawMaxVel(rows, e=>e.date<=d);
+      s.speed_maxVel = v==null ? null : +(v/3.6).toFixed(2);
+    });
+  });
 }
 function maxVelPctOfBest(a, maxVel){
   const best = personalBestMaxVel(a);
@@ -2663,7 +2700,7 @@ function parseCSV(text){
 function refreshReportModalIfOpen(){
   const overlay = document.getElementById('overlayReport');
   if (!overlay || !overlay.classList.contains('show')) return;
-  const players = Object.values(athleteMap).filter(a=>genderFilterVal==='all'||a.gender===genderFilterVal);
+  const players = gpsPlayers();
   const dates = trainingSessionDates(players);
   const sel = document.getElementById('reportDate');
   const prevValue = sel.value;
@@ -2787,6 +2824,7 @@ function switchTeamTab(t){
 // ============================================================
 function renderMain(){
   if (!Object.keys(athleteMap).length) return;
+  try{ applyGpsMaxVel(); }catch(e){ console.warn('applyGpsMaxVel', e); }
   if (mode==='team') renderTeam(); else renderIndividual();
 }
 
@@ -4055,7 +4093,7 @@ function pdrApplyHide(){
   el.textContent = hidden.map(k=>`.pdr .m-${k}{display:none !important}`).join('\n');
 }
 function buildPlayerDrillReportHtml(a, dateStr){
-  const mates = Object.values(athleteMap).filter(p=>p.gender===a.gender);
+  const mates = Object.values(athleteMap).filter(p=>p.gender===a.gender && isKeeper(p)===isKeeper(a));
   const mine = daySquadBreakdown([a], dateStr);
   const hdr = (sub)=>`<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">${tupEsc(a.name)}</div><div class="rpt-sub">${sub}</div></div>${ROAR_LOGO_SVG}</div>`;
   if (!mine.playerTotals.length) return hdr(`Brisbane Roar · ${dateStr}`) + `<p style="padding:20px 4px;color:var(--text-muted);">No training GPS for ${tupEsc(a.name)} on ${dateStr}.</p>`;
@@ -4130,7 +4168,7 @@ function topPerformerName(playerTotals, field){
   return best ? best.name : '—';
 }
 function buildDailyReportHtml(dateStr, customTitle){
-  const players = Object.values(athleteMap).filter(a=>genderFilterVal==='all'||a.gender===genderFilterVal);
+  const players = gpsPlayers();
   const { playerTotals, drillTotals, rehabByPlayer } = daySquadBreakdown(players, dateStr);
   // Heart rate and red zone % are both monitor-dependent -- if nobody had
   // a monitor on for this session, showing a column full of dashes is
@@ -4168,7 +4206,7 @@ function buildDailyReportHtml(dateStr, customTitle){
   // as no label at all and fall back to the coach's own manual entry.
   const sheetLabelUsable = primaryLabel && !/^\d{4}-\d{2}-\d{2}/.test(primaryLabel) && !/^\d{1,2}\/\d{1,2}\/\d{2,4}/.test(primaryLabel);
   const displaySessionLabel = meta.sessionLabel || (sheetLabelUsable ? primaryLabel : '');
-  let html = `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">${customTitle || 'ALW Brisbane Roar 2026/2027'}</div><div class="rpt-sub">DATE: ${dateStr}&nbsp;&nbsp;<span class="no-print">SESSION: <input type="text" placeholder="e.g. MD+3" value="${meta.sessionLabel||''}" style="width:90px;" onchange="setSessionMeta('${dateStr}','sessionLabel',this.value)"></span><span class="print-only" style="display:none;">SESSION: ${displaySessionLabel||'—'}</span></div></div>${ROAR_LOGO_SVG}</div>
+  let html = `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">${customTitle || 'ALW Brisbane Roar 2026/2027'}</div><div class="rpt-sub">DATE: ${dateStr}${gpsViewTag()}&nbsp;&nbsp;<span class="no-print">SESSION: <input type="text" placeholder="e.g. MD+3" value="${meta.sessionLabel||''}" style="width:90px;" onchange="setSessionMeta('${dateStr}','sessionLabel',this.value)"></span><span class="print-only" style="display:none;">SESSION: ${displaySessionLabel||'—'}</span></div></div>${ROAR_LOGO_SVG}</div>
   <div class="rpt-conditions">
     <span class="no-print">☀ Conditions: <input type="text" placeholder="e.g. Overcast" value="${meta.conditions||''}" onchange="setSessionMeta('${dateStr}','conditions',this.value)"></span>
     <span class="print-only" style="display:none;">☀ Conditions: <b>${meta.conditions||'—'}</b></span>
@@ -4304,7 +4342,7 @@ function weeklyReportSummary(players, mondayStr){
   return { weekDates, allDates, dayAverages, dayTotal };
 }
 function buildWeeklyReportHtml(mondayStr, customTitle){
-  const players = Object.values(athleteMap).filter(a=>genderFilterVal==='all'||a.gender===genderFilterVal);
+  const players = gpsPlayers();
   const weekStart = new Date(mondayStr+'T00:00:00');
   const weekDates = [];
   for (let i=0;i<=6;i++){ const d=new Date(weekStart); d.setDate(d.getDate()+i); weekDates.push(toLocalDateStr(d)); }
@@ -4318,7 +4356,7 @@ function buildWeeklyReportHtml(mondayStr, customTitle){
   // the same whether you're looking at it here or in that day's own report.
   const { dayAverages, dayTotal } = weeklyReportSummary(players, mondayStr);
 
-  let html = `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">${customTitle || 'ALW Brisbane Roar 2026/2027'}</div><div class="rpt-sub">${weekNum?'WEEK '+weekNum+': ':''}${mondayStr} to ${sundayStr}&nbsp;&nbsp;SESSIONS: ${allDates.length}</div></div>${ROAR_LOGO_SVG}</div>
+  let html = `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">${customTitle || 'ALW Brisbane Roar 2026/2027'}</div><div class="rpt-sub">${weekNum?'WEEK '+weekNum+': ':''}${mondayStr} to ${sundayStr}${gpsViewTag()}&nbsp;&nbsp;SESSIONS: ${allDates.length}</div></div>${ROAR_LOGO_SVG}</div>
   <div class="kpi-cards">
     <div class="kpi-card">${KPI_ICONS.distance}<div class="kpi-card-label">Total Distance (m)</div><div class="kpi-card-value">${fmt(dayTotal.distance)}</div><div class="kpi-card-sub">Weekly Total</div></div>
     <div class="kpi-card">${KPI_ICONS.hid}<div class="kpi-card-label">HSR (HIR) (m)</div><div class="kpi-card-value">${fmt(dayTotal.hsr)}</div><div class="kpi-card-sub">Weekly Total</div></div>
@@ -4382,7 +4420,7 @@ function computeCalendarWeeks(players){
   return weeks;
 }
 function populateReportDateSelect(){
-  const players = Object.values(athleteMap).filter(a=>genderFilterVal==='all'||a.gender===genderFilterVal);
+  const players = gpsPlayers();
   const sel = document.getElementById('reportDate');
   const prevValue = sel.value;
   if (reportMode==='day'){
@@ -4613,7 +4651,7 @@ function drawTeamMasView(){
 }
 function drawTeamGpsTraining(){
   const el = document.getElementById('teamGpsTrainingBody'); if (!el) return;
-  const players = Object.values(athleteMap).filter(a=>genderFilterVal==='all'||a.gender===genderFilterVal);
+  const players = gpsPlayers();
   const md = matchDemandReference(players);
   const sessionDates = trainingSessionDates(players);
   const today = sessionDates.length ? sessionDates[sessionDates.length-1] : toLocalDateStr(new Date());
@@ -4799,7 +4837,7 @@ function drawTeamGpsTraining(){
 let teamGpsMatchChartInstance = null;
 function drawTeamGpsMatch(){
   const el = document.getElementById('teamGpsMatchBody'); if (!el) return;
-  const players = Object.values(athleteMap).filter(a=>genderFilterVal==='all'||a.gender===genderFilterVal);
+  const players = gpsPlayers();
   const byMatch = {};
   players.forEach(a=>(a.gameGps||[]).forEach(g=>{
     const key = g.date+'|'+(g.round||g.opponent||'');
@@ -6094,11 +6132,13 @@ function openManagePlayers(){
         <div class="ri-name">${p.name}</div>
         <div class="ri-meta">${p.position||''}${p.age?' · '+p.age+'y':''} · ${p.gender} · ${p.sessions.length} session${p.sessions.length===1?'':'s'}</div>
       </div>
+      <label style="font-size:11.5px;display:flex;align-items:center;gap:4px;cursor:pointer;" title="Goalkeepers are kept out of squad GPS averages"><input type="checkbox" ${isKeeper(p)?'checked':''} onchange="toggleKeeper('${p.id}',this.checked)"> GK</label>
       <button class="btn-sm" onclick="document.getElementById('overlayPlayers').classList.remove('show'); openAddPlayer('${p.id}')">Edit</button>
       <button class="btn-sm" style="color:#dc2626;" onclick="removePlayer('${p.id}')">Remove</button>
     </div>`).join('') : '<p class="hint">No players yet.</p>';
   document.getElementById('overlayPlayers').classList.add('show');
 }
+function toggleKeeper(id, on){ const a = athleteMap[id]; if (!a) return; a.isGK = !!on; persistData(); if (mode==='team') renderMain(); }
 function removePlayer(id){
   if (!confirm('Remove this player and all their sessions? This cannot be undone.')) return;
   delete nameIndex[normalizeName(athleteMap[id]?.name)];
@@ -6590,7 +6630,7 @@ function wcPersist(){ storageSet('roar-weekcompare', JSON.stringify({ excluded:[
 // so it always shows everyone). Team session dates are always worked out
 // from the full squad, so session counts read the same on both.
 function wcCompute(exclude){
-  const players = Object.values(athleteMap).filter(a=>genderFilterVal==='all'||a.gender===genderFilterVal);
+  const players = gpsPlayers();
   const weeks = computeCalendarWeeks(players);
   if (!weeks.length) return null;
   const mondays = weeks.map(w=>w.monday);
@@ -6880,7 +6920,7 @@ function setGcPeriod(v){ gcPeriod = v; renderGpsCoverage(); }
 function setGcGapsOnly(v){ gcGapsOnly = v; renderGpsCoverage(); }
 function renderGpsCoverage(){
   const root = document.getElementById('gpsCoverageRoot'); if (!root) return;
-  const players = Object.values(athleteMap).filter(a=>genderFilterVal==='all'||a.gender===genderFilterVal).sort((a,b)=>a.name.localeCompare(b.name));
+  const players = gpsPlayers().sort((a,b)=>a.name.localeCompare(b.name));
   const allDates = trainingSessionDates(players);
   if (!allDates.length){
     root.innerHTML = `<div class="quad-ctrl-row"><span class="control-label">GPS Coverage</span></div><p class="hint" style="padding:12px 4px;">No training GPS data yet.</p>`;
@@ -7199,7 +7239,7 @@ async function openMatchDayReport(dateStr){
   document.getElementById('overlayReport').classList.add('show');
 }
 function buildMatchDayReportHtml(dateStr){
-  const players = Object.values(athleteMap).filter(a=>genderFilterVal==='all'||a.gender===genderFilterVal);
+  const players = gpsPlayers();
   const rows = players.map(a=>{
     const g = (a.gameGps||[]).find(x=>x.date===dateStr);
     if (!g) return null;
@@ -7212,7 +7252,7 @@ function buildMatchDayReportHtml(dateStr){
   }).filter(Boolean).sort((a,b)=>(b.total_distance_m||0)-(a.total_distance_m||0));
   const meta = rows[0] || {};
   if (!rows.length){
-    return `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">Match Day Report</div><div class="rpt-sub">Brisbane Roar · ${dateStr}</div></div>${ROAR_LOGO_SVG}</div>
+    return `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">Match Day Report</div><div class="rpt-sub">Brisbane Roar · ${dateStr}${gpsViewTag()}</div></div>${ROAR_LOGO_SVG}</div>
       <p style="padding:20px 4px;color:var(--text-muted);">No match GPS data for ${dateStr}.</p>`;
   }
   const cols = MDR_COLS.filter(c=>rows.some(r=>r[c.key]!=null));
@@ -7225,7 +7265,7 @@ function buildMatchDayReportHtml(dateStr){
     return `<td class="mdr-c"><div class="mdr-bar" style="background:${c.color}1f;"><div class="mdr-fill" style="width:${pct}%;background:${c.color}7a;"></div><span class="mdr-v">${c.fmt(val)}</span></div></td>`;
   };
   const colW = (76/cols.length).toFixed(2);
-  return `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">Match Day Report</div><div class="rpt-sub">Brisbane Roar${meta.opponent?' vs '+meta.opponent:''} · ${dateStr}${meta.round?' · Round '+meta.round:''}</div></div>${ROAR_LOGO_SVG}</div>
+  return `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">Match Day Report</div><div class="rpt-sub">Brisbane Roar${meta.opponent?' vs '+meta.opponent:''}${gpsViewTag()} · ${dateStr}${meta.round?' · Round '+meta.round:''}</div></div>${ROAR_LOGO_SVG}</div>
     ${minsToggleHtml()}
     <table class="rpt-table mdr-table" style="--mdr-pad:${sz.pad}px;--mdr-bar-h:${sz.barH}px;--mdr-font:${sz.font}px;">
     <colgroup><col style="width:17%"><col style="width:7%">${cols.map(()=>`<col style="width:${colW}%">`).join('')}</colgroup>
@@ -7267,7 +7307,7 @@ function buildPlayerMatchReportHtml(a, sel){
     return `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">${a.name} — Match Report</div><div class="rpt-sub">Brisbane Roar</div></div>${ROAR_LOGO_SVG}</div><p style="padding:20px 4px;color:var(--text-muted);">No match GPS data yet.</p>`;
   }
   const dates = new Set(games.map(g=>g.date));
-  const mates = Object.values(athleteMap).filter(p=>p.gender===a.gender);
+  const mates = Object.values(athleteMap).filter(p=>p.gender===a.gender && isKeeper(p)===isKeeper(a));
   const teamRows = [];
   mates.forEach(p=>(p.gameGps||[]).forEach(g=>{ if (dates.has(g.date)) teamRows.push(pmrRowFor(g,p.id)); }));
   const mine = games.map(g=>({ ...pmrRowFor(g,a.id), g, date:g.date, opponent:g.opponent, round:g.round }));
@@ -7381,7 +7421,7 @@ function tuMatchDates(){
   return [...set].sort().reverse();
 }
 function tuCompute(dateStr){
-  const players = Object.values(athleteMap).filter(a=>genderFilterVal==='all'||a.gender===genderFilterVal);
+  const players = Object.values(athleteMap).filter(a=>(genderFilterVal==='all'||a.gender===genderFilterVal) && !isKeeper(a));
   const order = Object.keys(TOPUPS.targets);
   const rows = [];
   players.forEach(a=>{
@@ -7666,7 +7706,7 @@ function openLoadReport(){
   document.getElementById('overlayReport').classList.add('show');
 }
 function buildLoadReportHtml(){
-  const players = Object.values(athleteMap).filter(a=>genderFilterVal==='all'||a.gender===genderFilterVal);
+  const players = gpsPlayers();
   const metric = teamAcwrMetric, info = ACWR_METRIC_INFO[metric];
   const res = teamAcwrTimeSeries(players, metric);
   const weekly = teamWeeklyLoads(players, metric);
@@ -7675,7 +7715,7 @@ function buildLoadReportHtml(){
   const latest = res.series.length ? res.series[res.series.length-1] : (res.provisional.length ? res.provisional[res.provisional.length-1] : null);
   const lastWk = [...weekly].reverse().find(w=>!w.partial) || weekly[weekly.length-1];
   const kpi = (l,v,sub,col)=>`<div class="kpi-card"><div class="kpi-card-label">${l}</div><div class="kpi-card-value" ${col?`style="color:${col}"`:''}>${v}</div><div class="kpi-card-sub">${sub||''}</div></div>`;
-  let html = `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">Load Monitoring — ACWR</div><div class="rpt-sub">Brisbane Roar · ${info.label} · to ${today}</div></div>${ROAR_LOGO_SVG}</div>
+  let html = `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">Load Monitoring — ACWR</div><div class="rpt-sub">Brisbane Roar${gpsViewTag()} · ${info.label} · to ${today}</div></div>${ROAR_LOGO_SVG}</div>
     <div class="kpi-cards">
       ${kpi('Squad ACWR (7d:28d)', latest?latest.acwr.toFixed(2):'—', latest?ACWR_ZONE_LABEL[latest.zone]+(res.series.length?'':' · provisional'):'Not enough history', latest?ACWR_ZONE_COLOR[latest.zone]:'')}
       ${kpi('Weekly ACWR', lastWk&&lastWk.acwr!=null?lastWk.acwr.toFixed(2):'—', lastWk&&lastWk.zone?ACWR_ZONE_LABEL[lastWk.zone]:'Needs 4 weeks', lastWk&&lastWk.zone?ACWR_ZONE_COLOR[lastWk.zone]:'')}
@@ -7722,7 +7762,7 @@ function gsToggleExcl(id,on){ if(on) GS_EXCL.add(id); else GS_EXCL.delete(id); g
 function gsClearExcl(){ GS_EXCL.clear(); gsSaveExcl(); if(typeof drawTeamGpsTraining==='function') drawTeamGpsTraining(); }
 function fmt0(n){ if(n==null||isNaN(n)) return '—'; return Math.round(n).toLocaleString(); }
 function buildGpsSummaryReportHtml(nWeeks, endMonday){
-  const players = Object.values(athleteMap).filter(a=>(genderFilterVal==='all'||a.gender===genderFilterVal) && !GS_EXCL.has(a.id));
+  const players = gpsPlayers().filter(a=>!GS_EXCL.has(a.id));
   const all = teamWeeklyLoads(players, 'total_distance_m');
   if (!all.length) return `<div class="hint" style="padding:20px 4px;">No training GPS data yet.</div>`;
   let endIdx = all.findIndex(w=>w.monday===endMonday); if (endIdx<0) endIdx = all.length-1;
@@ -7738,7 +7778,7 @@ function buildGpsSummaryReportHtml(nWeeks, endMonday){
   const kpi = (l,v,sub)=>`<div class="kpi-card"><div class="kpi-card-label">${l}</div><div class="kpi-card-value">${v}</div><div class="kpi-card-sub">${sub}</div></div>`;
   const sub = `Avg per complete week (${complete.length})`;
   const first = weeks[0], last = weeks[weeks.length-1];
-  let html = `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">GPS Summary — Weeks ${first.n}–${last.n}</div><div class="rpt-sub">Brisbane Roar · ${first.monday} to ${last.sunday} · ${weeks.length} week${weeks.length===1?'':'s'}</div></div>${ROAR_LOGO_SVG}</div>
+  let html = `<div class="rpt-header-dual">${ROAR_LOGO_SVG}<div class="rpt-header-main"><div class="rpt-club">GPS Summary — Weeks ${first.n}–${last.n}</div><div class="rpt-sub">Brisbane Roar${gpsViewTag()} · ${first.monday} to ${last.sunday} · ${weeks.length} week${weeks.length===1?'':'s'}</div></div>${ROAR_LOGO_SVG}</div>
     <div class="kpi-cards">
       ${kpi('Total Distance (m)', avgOf('distance')!=null?fmt0(avgOf('distance')):'—', sub)}
       ${kpi('HSR (m)', avgOf('hsr')!=null?fmt0(avgOf('hsr')):'—', sub)}
@@ -8192,7 +8232,7 @@ function tupRunView(host){
       ${hs.length?`<div class="hint" style="margin:0 0 6px;">Tick anyone who <b>missed</b> the top-up (didn't run it, or stopped early). Leave everyone else.</div>${hs.map(r=>`<label style="display:block;padding:3px 0;font-size:14px;"><input type="checkbox" ${(m.players[r.id]||{}).s1==='Skipped'?'checked':''} onchange="tupRunMissed('${r.id}',this.checked)"> ${tupEsc(r.name)} <span class="tp-badge tp-${r.group}">${r.group}</span></label>`).join('')}`:'<div class="hint">Enter minutes above first.</div>'}
       <div style="margin-top:10px;"><button class="rn-big go" onclick="tupRunComplete()">✓ Top-up complete</button><button class="rn-q" onclick="tupRunNotNeeded()">Not run (pitch unavailable / not needed)</button> <span style="font-size:12px;margin-left:6px;">Status: <b>${st}</b></span></div></div>
     <div class="tp-card"><h4>Step 4 · The next session</h4><div class="hint" style="margin:0 0 8px;">GPS needs no entry: it is read from the GPS sheet once it is synced. The next card is made for you from the minutes and the ticks above.</div>
-      <button class="rn-big alt" onclick="openTupFsb()">🖨 First Session Back card</button>${rows.some(r=>r.status==='Non-squad')?'<button class="rn-big alt" onclick="openTupNs()">🖨 Non-Squad card</button>':''}<button class="rn-big alt" onclick="openTupSop()">🖨 One-page SOP</button><button class="rn-big alt" onclick="openTupAway()">🖨 Away-game card (generic)</button></div>`;
+      <button class="rn-big alt" onclick="openTupFsb()">🖨 First Session Back card</button>${rows.some(r=>r.status==='Non-squad')?'<button class="rn-big alt" onclick="openTupNs()">🖨 Non-Squad card</button>':''}<button class="rn-big alt" onclick="openTupSop()">🖨 One-page SOP</button><button class="rn-big alt" onclick="openTupAway()">🖨 Away-game card (generic)</button><button class="rn-big alt" onclick="openTupFsbGeneric()">🖨 First Session Back card (generic)</button></div>`;
 }
 function tupSopHtml(){
   const S = TUP.set, e = tupEsc;
@@ -8370,6 +8410,35 @@ function tupFsbHtml(){
     <div class="fb-ban" style="font-weight:600;">${S.fsbUseMods?'Stride rule here: CB −1, W and FW +1, minimum 0. ':'Everyone in a block does the same. '}Upgraded = no match-day top-up: Half does Block B; Full does Block B + ${S.fsbUpRet} pitch returns + ${S.fsbUpStr} extra strides.</div>
     <div class="tb-pits">${pit(tupSsgSvg(pl.ssgPlayers),'Small-sided game',ssg?`${ssg.fmt} + GKs · ${ssg.dims} · ${S.ssgMin} min on / ${S.ssgRest} min off`:'Needs at least 4 players')}${pit(tupPitchSvg('strides'),'Box-to-box strides',`Walk – stride – walk · ~70 m · ${S.strGo} s · rest ${S.strRest} s`)}</div>
     <div class="tb-foot"><b>Gym:</b> Half and Full groups take normal lower-body loading. Starters get the reduced version${pl.within?' (first session is within '+S.fsbHours+' h of the match)':' if within '+S.fsbHours+' h of the match'}. Goalkeepers: keeper coach.</div></div>`;
+}
+function tupFsbGenericHtml(){
+  const S = TUP.set, e = tupEsc;
+  const pit = (svg,t,l)=>`<div class="tb-pit"><div class="tb-pt">${t}</div>${svg}<div class="tb-pl">${l}</div></div>`;
+  const nm = n=>Array.from({length:n},()=>'<div class="fg-nm"></div>').join('');
+  return `<style>
+    .tb{font-family:Inter,system-ui,sans-serif;color:#111;font-size:12px;} .tb-head{display:flex;align-items:center;justify-content:space-between;border-bottom:3px solid #111;padding-bottom:6px;margin-bottom:8px;} .tb-head .rpt-logo{height:46px;width:auto;}
+    .tb-title{text-align:center;flex:1;} .tb-title b{display:block;font-size:20px;text-transform:uppercase;letter-spacing:.03em;} .tb-title span{font-size:12.5px;color:#374151;}
+    .tb-tbl{width:100%;border-collapse:collapse;font-size:11.5px;margin-bottom:8px;} .tb-tbl th{background:#111;color:#fff;padding:4px 6px;text-align:left;font-size:10.5px;} .tb-tbl td{border:1px solid #9ca3af;padding:4px 6px;vertical-align:top;}
+    .fg-g{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;} .fg-b{border:2px solid #111;border-radius:8px;overflow:hidden;} .fg-h{background:#111;color:#fff;font-weight:800;padding:3px 8px;font-size:12.5px;} .fg-l{padding:2px 8px 6px;} .fg-nm{border-bottom:1px solid #6b7280;height:19px;}
+    .tb-pits{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;} .tb-pit{border:1px solid #9ca3af;border-radius:8px;padding:5px;} .tb-pt{font-weight:800;font-size:11.5px;margin-bottom:2px;} .tb-pl{font-size:10.5px;color:#374151;margin-top:3px;}
+    .fb-ban{border:2px solid #111;border-radius:8px;padding:6px 10px;margin:0 0 8px;font-size:12px;} .tb-foot{font-size:9.8px;color:#4b5563;margin-top:6px;}
+  </style><div class="tb">
+    <div class="tb-head">${ROAR_LOGO_SVG}<div class="tb-title"><b>First session back</b><span>Brisbane Roar Women · first training after the match · generic card</span></div>${ROAR_LOGO_SVG}</div>
+    <table class="tb-tbl"><thead><tr><th style="width:21%">Played</th><th style="width:12%">Group</th><th>Do this before joining the team</th></tr></thead><tbody>
+      <tr><td><b>60 min or more</b></td><td><b>DONE</b></td><td>Normal session. Extended recovery warm-up (bike, mobility) while the blocks run.</td></tr>
+      <tr><td><b>Under 60 min</b><br>(${S.halfMin}–${S.doneMin-1})</td><td><b>BLOCK A</b><br>Half</td><td>Small-sided game <b>${S.fsbASsg} × ${S.ssgMin} min</b> (${S.ssgRest} min rest), then <b>${S.fsbAStr} strides</b>.${S.fsbABox?' Plus '+S.fsbABox+' box sprints.':''}</td></tr>
+      <tr><td><b>Under 30 min</b><br>or unused sub</td><td><b>BLOCK B</b><br>Full</td><td>Small-sided game <b>${S.fsbBSsg} × ${S.ssgMin} min</b> (${S.ssgRest} min rest), <b>${S.fsbBBox} box sprints</b>, then <b>${S.fsbBStr} strides</b>.</td></tr>
+      <tr><td><b>Not in the squad</b></td><td><b>NON-SQUAD</b></td><td>Full non-squad session (about 40 min) if not already run. If it was run, join the team.</td></tr></tbody></table>
+    <div class="fg-g"><div class="fg-b"><div class="fg-h">BLOCK A · write names</div><div class="fg-l">${nm(5)}</div></div><div class="fg-b"><div class="fg-h">BLOCK B · write names</div><div class="fg-l">${nm(5)}</div></div></div>
+    <div class="fb-ban"><b>Missed the match-day top-up?</b> Move up one level: Half does Block B; Full does Block B + ${S.fsbUpRet} pitch returns + ${S.fsbUpStr} extra strides.<br><b>Next game ${S.shortDays} days or fewer away?</b> Halve the small-sided game sets and skip the strides.<br><b>Niggle or unsure?</b> She does not run. Tell the physio.</div>
+    <div class="tb-pits">${pit(tupSsgSvg(8),'Small-sided game','4v4 + GKs · 30×25 m · 3 a side: 25×20 m · 2 a side: 20×15 m')}${pit(tupPitchSvg('sprints'),'Box sprints','Across the penalty box · ~40 m · max effort · walk back + 60 s')}${pit(tupPitchSvg('strides'),'Box-to-box strides',`Walk, stride, walk · ~70 m · ${S.strGo} s · rest ${S.strRest} s`)}</div>
+    <div class="tb-foot">Group rules: sub 60 min = Half, sub 30 min or unused = Full. Goalkeepers: keeper coach. Questions: ${S.contact?e(S.contact):'Henri'}.</div></div>`;
+}
+function openTupFsbGeneric(){
+  reportKind = 'tupfsbgen'; mpSetLandscape(false);
+  document.getElementById('rptTrainingControls').style.display = 'none';
+  document.getElementById('reportContent').innerHTML = tupFsbGenericHtml();
+  document.getElementById('overlayReport').classList.add('show');
 }
 function openTupFsb(){
   reportKind = 'tupfsb'; mpSetLandscape(false);
