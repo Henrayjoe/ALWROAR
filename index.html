@@ -445,7 +445,7 @@
       <span id="saveAllStatus" style="flex:1;text-align:right;white-space:nowrap;">Following the sheet</span>
     </div>
     <div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:6px 4px 10px;">
-      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-23 13:55</span>
+      <span style="font-size:9.5px;color:#a3a9b4;letter-spacing:.02em;">Build 2026-10-23 14:50</span>
       <button class="btn-sm" title="If the page seems out of date, this forces a fresh reload instead of using a cached copy." onclick="forceRefreshLatest()" style="font-size:9.5px;padding:2px 7px;">↻ Refresh to Latest</button>
     </div>
   </aside>
@@ -8115,7 +8115,7 @@ function openRecoveryReport(which){
 const TUP_DEFAULTS = { hsrFixed:80, hsrStride:50, tdFixed:1060, tdStride:140, halfStrides:3, fullStrides:6, doneMin:60, halfMin:30, mods:{CB:-2,FB:0,CM:0,W:1,FW:1}, boxCycle:60,
   prepTd:300, retHsr:10, retTd:260, retReps:2, boxHsr:20, boxTd:80, boxReps:3, strHsr:50, strTd:140,
   retGo:48, retRest:48, strGo:12, strRest:36, speedPct:90, speedBoxes:2, mmHigh:140, mmLow:85, mmLowMin:45, durDiff:5, maxOver:2,
-  avgN:4, shortDays:4, useOwn:false, nsReturns:3, nsBoxes:4, nsStrides:8, nsWarmTd:600, nsFartSets:3, nsFartMin:4, nsFartOn:15, nsFartOff:45, nsFartRest:2, nsFartTdRep:170, nsFartHsrRep:10, ssgSets:4, ssgMin:3, ssgRest:2, ssgMinPlayers:4, fsbASsg:3, fsbABox:0, fsbAStr:3, fsbBSsg:4, fsbBBox:2, fsbBStr:4, fsbUpRet:2, fsbUpStr:2, fsbModCB:-1, fsbModFB:0, fsbModCM:0, fsbModW:1, fsbModFW:1, fsbHours:48, useMods:false, fsbUseMods:false, s1Owner:'Intern', s2Owner:'Assistant coach', contact:'', kit:'Cones, bibs, GPS vests, phone with the timer (or stopwatch), printed card',
+  avgN:4, shortDays:4, useOwn:false, nsReturns:3, nsBoxes:4, nsStrides:8, nsWarmTd:600, nsFartSets:2, nsFartLaps:4, nsFartRest:2, pitchL:105, pitchW:68, boxD:16.5, fartSprintHsr:15, fartSprintSd:10, retSd:0, boxSd:6, strSd:5, ssgSets:4, ssgMin:3, ssgRest:2, ssgMinPlayers:4, fsbASsg:3, fsbABox:0, fsbAStr:3, fsbBSsg:4, fsbBBox:2, fsbBStr:4, fsbUpRet:2, fsbUpStr:2, fsbModCB:-1, fsbModFB:0, fsbModCM:0, fsbModW:1, fsbModFW:1, fsbHours:48, useMods:false, fsbUseMods:false, s1Owner:'Intern', s2Owner:'Assistant coach', contact:'', kit:'Cones, bibs, GPS vests, phone with the timer (or stopwatch), printed card',
   targets:{CB:{hsr:370,spr:95},FB:{hsr:550,spr:140},CM:{hsr:590,spr:150},W:{hsr:610,spr:190},FW:{hsr:570,spr:190}} };
 const TUP = { matches:[], cur:'', set:JSON.parse(JSON.stringify(TUP_DEFAULTS)), loaded:false, view:'run' };
 const TUP_POS = ['CB','FB','CM','W','FW'];
@@ -8496,37 +8496,59 @@ function tupSsgSize(n){
   if (n >= 4) return { per:2, fmt:'2v2', dims:'20 × 15 m', w:20, h:15 };
   return null;
 }
-// Fartlek reps in the whole block: (fast + float) cycles that fit in each set, times the sets.
-function tupFartReps(){ const S = TUP.set, cyc = Math.max(1, S.nsFartOn + S.nsFartOff); return Math.floor(S.nsFartMin*60/cyc) * S.nsFartSets; }
+// Fartlek: one lap of the pitch, run by landmarks (no timing). From the halfway line on the touchline:
+// SPRINT halfway line → far 18-yard line · WALK 18-yard line → corner · JOG far goal line + touchline back to halfway · RUN the rest of the lap.
+// TD per lap is just the pitch perimeter. HSR / sprint per lap are estimates from the sprint leg (HSR = 19.8–25.2 km/h, sprint = above 25.2 km/h).
+function tupFart(){
+  const S = TUP.set, L = S.pitchL, W = S.pitchW, B = S.boxD;
+  const legs = { sprint: L/2 - B, walk: B, jog: W + L/2, run: L + W }, lap = 2*L + 2*W, perSet = S.nsFartLaps, laps = S.nsFartLaps * S.nsFartSets;
+  return { legs, lap, perSet, laps, td1:lap, hsr1:S.fartSprintHsr, sd1:S.fartSprintSd, td:lap*laps, hsr:S.fartSprintHsr*laps, sd:S.fartSprintSd*laps };
+}
+// Estimated session load for one player, by block (strides = her stride count).
+function tupNsEst(strides){
+  const S = TUP.set, f = tupFart();
+  const rows = [
+    { block:'Warm-up', td:S.nsWarmTd, hsr:0, sd:0 },
+    { block:`Pitch returns × ${S.nsReturns}`, td:S.retTd*S.nsReturns, hsr:S.retHsr*S.nsReturns, sd:S.retSd*S.nsReturns },
+    { block:`Box sprints × ${S.nsBoxes}`, td:S.boxTd*S.nsBoxes, hsr:S.boxHsr*S.nsBoxes, sd:S.boxSd*S.nsBoxes },
+    { block:`Strides × ${strides}`, td:S.strTd*strides, hsr:S.strHsr*strides, sd:S.strSd*strides },
+    { block:`Fartlek × ${f.laps} laps`, td:f.td, hsr:f.hsr, sd:f.sd }
+  ];
+  const tot = rows.reduce((a,r)=>({td:a.td+r.td,hsr:a.hsr+r.hsr,sd:a.sd+r.sd}),{td:0,hsr:0,sd:0});
+  return { rows, tot };
+}
 function tupNsPlayers(m){
   const S = TUP.set;
   return tupRoster(m).filter(r=>r.status==='Non-squad').map(r=>{
     const strides = Math.max(1, S.nsStrides + (S.useMods ? (+S.mods[r.pos]||0) : 0));
-    const fr = tupFartReps();
-    const hsr = S.retHsr*S.nsReturns + S.boxHsr*S.nsBoxes + S.strHsr*strides + S.nsFartHsrRep*fr;
-    const td = S.nsWarmTd + S.retTd*S.nsReturns + S.boxTd*S.nsBoxes + S.strTd*strides + S.nsFartTdRep*fr;
-    return Object.assign({}, r, { nsStrides:strides, nsHsr:hsr, nsTd:td });
+    const e = tupNsEst(strides).tot;
+    return Object.assign({}, r, { nsStrides:strides, nsHsr:e.hsr, nsTd:e.td, nsSd:e.sd });
   });
 }
 function tupNsSession(n){
-  const S = TUP.set, cyc = Math.floor(S.nsFartMin*60/Math.max(1,S.nsFartOn+S.nsFartOff));
+  const S = TUP.set, f = tupFart();
   const rows = [
     { block:'Warm-up', content:'RAMP, accel-themed: marches → broad jump & stick → bound & stick → submax accels', amt:`10 min (~${S.nsWarmTd} m TD)` },
     { block:'Pitch returns', content:`${S.retGo} s, rest ${S.retRest} s`, amt:`${S.nsReturns} reps` },
     { block:'Box sprints', content:`Max effort, walk back + ${S.boxCycle} s`, amt:`${S.nsBoxes} reps` },
     { block:'Box-to-box strides', content:`${S.strGo} s, rest ${S.strRest} s`, amt:S.useMods ? `${S.nsStrides} reps (CB ${S.mods.CB}, W/FW +${S.mods.W})` : `${S.nsStrides} reps` },
-    { block:'Fartlek', content:`Round the pitch edge, never stop. ${S.nsFartOn} s FAST (strong, not flat out), then ${S.nsFartOff} s FLOAT (easy jog). Timer or whistle every ${S.nsFartOn} s / ${S.nsFartOff} s.`, amt:`${S.nsFartSets} × ${S.nsFartMin} min (${cyc} fast runs a set), ${S.nsFartRest} min walk rest` },
+    { block:'Fartlek', content:`Lap of the pitch, never stop: SPRINT ${Math.round(f.legs.sprint)} m → WALK ${Math.round(f.legs.walk)} m → JOG ${Math.round(f.legs.jog)} m → RUN ${Math.round(f.legs.run)} m. Starts at the halfway line (see diagram 4).`, amt:`${S.nsFartSets} × ${S.nsFartLaps} laps (${Math.round(f.lap)} m a lap), ${S.nsFartRest} min walk rest between sets` },
     { block:'Gym', content:'Hinge-dominant or lower-body strength day', amt:'—' }
   ];
   return { rows };
 }
 function tupFartlekSvg(){
-  const id = ++TUP_SVG_N, P = tupPitchBase(id), {X,Y,W,H,ox,oy} = P; let g = P.g;
+  const S = TUP.set, id = ++TUP_SVG_N, P = tupPitchBase(id), {X,Y,W,H,ox,oy} = P; let g = P.g;
   const T = 'style="paint-order:stroke;stroke:#1b5e34;stroke-width:3.5px;stroke-linejoin:round;"';
-  const x0=6,x1=99,y0=6,y1=62;
-  g += tupArrow(X(x0),Y(y1),X(x1),Y(y1),id,null,'9 6') + tupArrow(X(x1+0.01),Y(y1),X(x1),Y(y0),id,null,'2 7') + tupArrow(X(x1),Y(y0),X(x0),Y(y0),id,null,'9 6') + tupArrow(X(x0),Y(y0),X(x0),Y(y1),id,null,'2 7');
-  g += `<line x1="${X(22)}" y1="${Y(y1)}" x2="${X(38)}" y2="${Y(y1)}" stroke="#ff9f40" stroke-width="7" stroke-linecap="round"/><line x1="${X(76)}" y1="${Y(y0)}" x2="${X(60)}" y2="${Y(y0)}" stroke="#ff9f40" stroke-width="7" stroke-linecap="round"/>`;
-  g += `<text ${T} x="${X(52.5)}" y="${Y(30)}" font-size="17" font-weight="800" fill="#fff" text-anchor="middle">keep moving round the edge</text><text ${T} x="${X(52.5)}" y="${Y(38)}" font-size="15" font-weight="700" fill="#fff" text-anchor="middle">orange = FAST burst · rest = FLOAT jog</text>`;
+  const x0=5,x1=100,y0=5,y1=63, hx=52.5, bx=105-S.boxD;
+  const seg = (xa,ya,xb,yb,col,dash,w)=>`<line x1="${X(xa)}" y1="${Y(ya)}" x2="${X(xb)}" y2="${Y(yb)}" stroke="${col}" stroke-width="${w}" stroke-dasharray="${dash}" stroke-linecap="round" marker-end="url(#ah${id})"/>`;
+  g += seg(hx,y1,bx,y1,'#ff9f40','none',7);                       // sprint
+  g += seg(bx,y1,x1,y1,'#fff','2 7',3.5);                         // walk
+  g += seg(x1,y1,x1,y0,'#fff','9 6',3.5) + seg(x1,y0,hx,y0,'#fff','9 6',3.5);   // jog
+  g += seg(hx,y0,x0,y0,'#fff','none',3.5) + seg(x0,y0,x0,y1,'#fff','none',3.5) + seg(x0,y1,hx,y1,'#fff','none',3.5); // run
+  g += `<text ${T} x="${X((hx+bx)/2)}" y="${Y(y1)-10}" font-size="14" font-weight="800" fill="#fff" text-anchor="middle">SPRINT ${Math.round(S.pitchL/2-S.boxD)} m</text><text ${T} x="${X((bx+x1)/2+2)}" y="${Y(y1)-10}" font-size="13" font-weight="700" fill="#fff" text-anchor="middle">WALK</text>
+    <text ${T} x="${X(x1)-8}" y="${Y(34)}" font-size="14" font-weight="800" fill="#fff" text-anchor="end">JOG</text><text ${T} x="${X(30)}" y="${Y(y0)+22}" font-size="14" font-weight="800" fill="#fff" text-anchor="middle">RUN (strong, 80–85%)</text>
+    <text ${T} x="${X(52.5)}" y="${Y(34)}" font-size="15" font-weight="800" fill="#fff" text-anchor="middle">start at the halfway line</text>`;
   return `<svg viewBox="0 0 ${W+2*ox} ${H+2*oy}" width="100%" style="display:block;max-width:100%;">${g}</svg>`;
 }
 function tupSsgSvg(n){
@@ -8552,16 +8574,17 @@ function tupNsHtml(){
     .tb-title{text-align:center;flex:1;} .tb-title b{display:block;font-size:20px;text-transform:uppercase;letter-spacing:.03em;} .tb-title span{font-size:12.5px;color:#374151;}
     .tb-tbl{width:100%;border-collapse:collapse;font-size:11px;margin-bottom:8px;} .tb-tbl th{background:#111;color:#fff;padding:4px 6px;text-align:left;font-size:10.5px;} .tb-tbl td{border:1px solid #9ca3af;padding:3px 6px;}
     .tb-pl2{display:flex;flex-wrap:wrap;gap:4px 10px;border:2px solid #111;border-radius:8px;padding:6px 8px;margin-bottom:8px;} .tb-pl2 span{font-size:12px;} .tb-pl2 b{margin-left:3px;}
-    .tb-pits{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;} .tb-pit{border:1px solid #9ca3af;border-radius:8px;padding:5px;} .tb-pt{font-weight:800;font-size:11.5px;margin-bottom:2px;} .tb-pl{font-size:10.5px;color:#374151;margin-top:3px;}
+    .tb-pits{display:grid;grid-template-columns:repeat(2,1fr);gap:6px;} .tb-pit{border:1px solid #9ca3af;border-radius:8px;padding:4px;break-inside:avoid;} .tb-pit svg{width:70% !important;margin:0 auto;} .tb-pt{font-weight:800;font-size:11.5px;margin-bottom:2px;} .tb-pl{font-size:10.5px;color:#374151;margin-top:3px;}
     .tb-cue{border:2px solid #111;border-radius:8px;padding:6px 10px;margin:8px 0;font-size:12px;font-weight:600;} .tb-foot{font-size:9.8px;color:#4b5563;margin-top:6px;}
     @media(max-width:640px){.tb-pits{grid-template-columns:1fr;}}
   </style><div class="tb">
     <div class="tb-head">${ROAR_LOGO_SVG}<div class="tb-title"><b>Non-squad session</b><span>${m.date} · ${m.ha==='Away'?'Away':'Home'} ${m.opponent?'vs '+tupEsc(m.opponent):''} · ~45 min</span></div>${ROAR_LOGO_SVG}</div>
     <div class="tb-pl2"><b style="margin:0 6px 0 0;">Players (${n}) — strides in brackets:</b>${n?pl.map(r=>`<span>${tupEsc(r.name)} <b>(${r.nsStrides})</b></span>`).join(''):'<span>none marked Non-squad</span>'}</div>
     <table class="tb-tbl"><thead><tr><th>Block</th><th>Content</th><th>Reps / time</th></tr></thead><tbody>${ses.rows.map(r=>`<tr><td><b>${r.block}</b></td><td>${r.content}</td><td>${r.amt}</td></tr>`).join('')}</tbody></table>
-    <div class="tb-cue">Make the ${S.retGo} s and the ${S.strGo} s. If you miss one, still go on the next beep. Fartlek: everyone starts and stops together on the timer.</div>
-    <div class="tb-pits">${pit(tupPitchSvg('returns'),'1. Pitch returns',`Goal line → goal line and back · ~210 m · ${S.retGo} s · rest ${S.retRest} s`)}${pit(tupPitchSvg('sprints'),'2. Box sprints',`Across the box · ~40 m · max effort · walk back + ${S.boxCycle} s`)}${pit(tupPitchSvg('strides'),'3. Box-to-box strides',`Walk – stride – walk · ~70 m · ${S.strGo} s · rest ${S.strRest} s`)}${pit(tupFartlekSvg(),'4. Fartlek',`${S.nsFartOn} s FAST / ${S.nsFartOff} s FLOAT · ${S.nsFartSets} × ${S.nsFartMin} min · ${S.nsFartRest} min walk between sets`)}</div>
-    <div class="tb-foot">Fartlek works with any number of players, no goals or teams needed. FAST = a strong, controlled run (about 80–85%, not flat out). FLOAT = easy jog, never walk inside a set. Dashed lines = run, dotted = walk.</div></div>`;
+    ${(()=>{ const e = tupNsEst(S.nsStrides); return `<table class="tb-tbl" style="margin-bottom:6px;"><thead><tr><th>Estimated load per player</th><th>TD (m)</th><th>HSR (m)</th><th>Sprint (m)</th></tr></thead><tbody>${e.rows.map(r=>`<tr><td>${r.block}</td><td>${Math.round(r.td)}</td><td>${Math.round(r.hsr)}</td><td>${Math.round(r.sd)}</td></tr>`).join('')}<tr style="font-weight:800;background:#f3f4f6;"><td>Session total (estimate)</td><td>~${Math.round(e.tot.td)}</td><td>~${Math.round(e.tot.hsr)}</td><td>~${Math.round(e.tot.sd)}</td></tr></tbody></table>`; })()}
+    <div class="tb-cue">Make the ${S.retGo} s and the ${S.strGo} s. If you miss one, still go on the next beep.</div>
+    <div class="tb-pits">${pit(tupPitchSvg('returns'),'1. Pitch returns',`Goal line → goal line and back · ~210 m · ${S.retGo} s · rest ${S.retRest} s`)}${pit(tupPitchSvg('sprints'),'2. Box sprints',`Across the box · ~40 m · max effort · walk back + ${S.boxCycle} s`)}${pit(tupPitchSvg('strides'),'3. Box-to-box strides',`Walk – stride – walk · ~70 m · ${S.strGo} s · rest ${S.strRest} s`)}${pit(tupFartlekSvg(),'4. Fartlek',`Sprint ${Math.round(tupFart().legs.sprint)} m · walk ${Math.round(tupFart().legs.walk)} m · jog ${Math.round(tupFart().legs.jog)} m · run ${Math.round(tupFart().legs.run)} m · ${S.nsFartSets} × ${S.nsFartLaps} laps · ${S.nsFartRest} min walk between sets`)}</div>
+    <div class="tb-foot">Pitch ${S.pitchL} × ${S.pitchW} m. Go together, no timing needed. Estimates are approximate (HSR 19.8–25.2 km/h, sprint above 25.2 km/h).</div></div>`;
 }
 function openTupNs(){
   reportKind = 'tupns'; mpSetLandscape(false);
@@ -8572,14 +8595,14 @@ function openTupNs(){
 function tupNsSet(k,v){ const m=tupMatch(); m[k]=v; tupSave(); renderTupPlan(); }
 function tupNsView(host){
   const m = tupMatch(), pl = tupNsPlayers(m).sort((a,b)=>a.name.localeCompare(b.name)), n = pl.length, ses = tupNsSession(n), S = TUP.set;
-  const cm = { hsr:S.retHsr*S.nsReturns+S.boxHsr*S.nsBoxes+S.strHsr*S.nsStrides+S.nsFartHsrRep*tupFartReps(), td:S.nsWarmTd+S.retTd*S.nsReturns+S.boxTd*S.nsBoxes+S.strTd*S.nsStrides+S.nsFartTdRep*tupFartReps() };
+  const cm = tupNsEst(S.nsStrides).tot;
   host.innerHTML = `<style>.tp-set{display:inline-flex;flex-direction:column;font-size:11px;color:var(--text-secondary);gap:2px;margin-right:10px;} .tp-set input,.tp-in{border:1px solid var(--border);border-radius:6px;padding:5px 7px;font-size:12.5px;background:var(--surface,#fff);}
     .tp-tbl{border-collapse:collapse;width:100%;font-size:12.5px;} .tp-tbl th{background:var(--surface-2,#f3f4f6);padding:7px 8px;text-align:left;font-size:11px;} .tp-tbl td{padding:4px 8px;border-bottom:1px solid var(--border);} .tp-card{border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin:0 0 12px;} .tp-card h4{margin:0 0 8px;font-size:13.5px;} .tp-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px;}</style>
     <div class="tp-bar"><b style="font-size:14px;">Non-Squad session</b><span style="font-size:12px;color:var(--text-secondary);">for the match ${m.date}${m.opponent?' vs '+tupEsc(m.opponent):''} (change the match on the Match Day tab)</span></div>
     <div class="tp-card"><h4>Who is in it (${n})</h4>
-      ${n ? `<table class="tp-tbl"><thead><tr><th>Player</th><th>Pos</th><th>Strides</th><th>Est. HSR (m)</th><th>Est. TD (m)</th></tr></thead><tbody>${pl.map(r=>`<tr><td><b>${tupEsc(r.name)}</b></td><td>${r.pos}</td><td>${r.nsStrides}</td><td>${Math.round(r.nsHsr)}</td><td>${Math.round(r.nsTd)}</td></tr>`).join('')}</tbody></table>`
+      ${n ? `<table class="tp-tbl"><thead><tr><th>Player</th><th>Pos</th><th>Strides</th><th>Est. TD (m)</th><th>Est. HSR (m)</th><th>Est. Sprint (m)</th></tr></thead><tbody>${pl.map(r=>`<tr><td><b>${tupEsc(r.name)}</b></td><td>${r.pos}</td><td>${r.nsStrides}</td><td>${Math.round(r.nsTd)}</td><td>${Math.round(r.nsHsr)}</td><td>${Math.round(r.nsSd)}</td></tr>`).join('')}</tbody></table>`
         : `<div class="hint" style="margin:0;">Nobody yet. On the Match Day tab set <b>Squad status = Non-squad</b> for each player who wasn't selected, and they appear here.</div>`}
-      <div class="hint" style="margin:8px 0 0;">Estimates for the whole session including the fartlek (${tupFartReps()} fast runs). A CM comes to ≈ ${Math.round(cm.hsr)} m HSR / ${(cm.td/1000).toFixed(1)} km TD. The fartlek is mostly volume (TD), with only a little HSR.</div></div>
+      <div class="hint" style="margin:8px 0 0;">Estimates for the whole session including the fartlek (${tupFart().laps} laps). A CM comes to ≈ ${(cm.td/1000).toFixed(1)} km TD / ${Math.round(cm.hsr)} m HSR / ${Math.round(cm.sd)} m sprint. The sprint and HSR figures are estimates, so replace the per-rep numbers in Settings once you have real GPS.</div></div>
     <div class="tp-card"><h4>Session</h4><table class="tp-tbl"><thead><tr><th>Block</th><th>Content</th><th>Reps / time</th></tr></thead><tbody>${ses.rows.map(r=>`<tr><td><b>${r.block}</b></td><td>${r.content}</td><td>${r.amt}</td></tr>`).join('')}</tbody></table>
       <div class="hint" style="margin:8px 0 0;">Run on match day at the training ground, or MD+1 if that isn't possible. Coached by an intern from the printed card.</div></div>
     <div class="tp-card"><h4>Was it run?</h4>
@@ -8709,8 +8732,8 @@ function tupSettingsView(){
     ${der('prepTd','Prep TD')}${der('retHsr','Return HSR')}${der('retTd','Return TD')}${der('retReps','Return reps')}${der('boxHsr','Box sprint HSR')}${der('boxTd','Box sprint TD')}${der('boxReps','Box sprint reps')}${der('strHsr','Stride HSR')}${der('strTd','Stride TD')}
     <div class="hint" style="margin:6px 0 0;">Fixed blocks now = <b>${Math.round(S.hsrFixed)} m HSR / ${Math.round(S.tdFixed)} m TD</b>, derived from the values above. Calibration "Apply" buttons overwrite the derived numbers directly until a per-rep value is edited again.</div></div>
   <div class="tp-card"><h4>Non-Squad session</h4>
-    ${num('nsWarmTd','Warm-up TD (m)')}${num('nsReturns','Pitch returns')}${num('nsBoxes','Box sprints')}${num('nsStrides','Strides (before position change)')}${num('nsFartSets','Fartlek sets')}${num('nsFartMin','Fartlek minutes per set')}${num('nsFartOn','Fast (s)')}${num('nsFartOff','Float (s)')}${num('nsFartRest','Rest between sets (min)')}${num('nsFartTdRep','TD per fast+float cycle (m)')}${num('nsFartHsrRep','HSR per fast run (m)')}
-    <div class="hint" style="margin:6px 0 0;">Non-squad players do a fartlek instead of an SSG. The two per-cycle numbers are estimates (about 70 m fast + 100 m float, with the fast run mostly under the HSR line). Replace them with your own once you have GPS from a real session.</div></div>
+    ${num('nsWarmTd','Warm-up TD (m)')}${num('nsReturns','Pitch returns')}${num('nsBoxes','Box sprints')}${num('nsStrides','Strides (before position change)')}${num('nsFartSets','Fartlek sets')}${num('nsFartLaps','Laps per set')}${num('nsFartRest','Rest between sets (min)')}${num('pitchL','Pitch length (m)')}${num('pitchW','Pitch width (m)')}${num('boxD','18-yard box depth (m)')}<br>${num('fartSprintHsr','HSR per sprint (m)')}${num('fartSprintSd','Sprint distance per sprint (m)')}${num('retSd','Sprint m per pitch return')}${num('boxSd','Sprint m per box sprint')}${num('strSd','Sprint m per stride')}
+    <div class="hint" style="margin:6px 0 0;">Non-squad players do a fartlek lap of the pitch (sprint → walk → jog → run), set by pitch landmarks, not seconds. Total distance is the pitch perimeter × laps. HSR and sprint per rep are estimates: the sprint leg is assumed to give about 15 m HSR and 10 m sprint distance, leaving from a run. Replace these with your own numbers once you have GPS from a real session.</div></div>
   <div class="tp-card"><h4>First Session Back blocks</h4>
     ${num('fsbASsg','Block A: SSG sets')}${num('fsbABox','Block A: box sprints')}${num('fsbAStr','Block A: strides')}${num('fsbBSsg','Block B: SSG sets')}${num('fsbBBox','Block B: box sprints')}${num('fsbBStr','Block B: strides')}${num('ssgMin','SSG minutes on')}${num('ssgRest','SSG rest (min)')}<br><br>
     ${num('fsbUpRet','Upgrade (Full): extra pitch returns')}${num('fsbUpStr','Upgrade (Full): extra strides')}${num('fsbHours','"Within" window for starters (hours)')}<br><br>
